@@ -37,10 +37,16 @@ If a path is a file, include it directly."
 (setq org-agenda-api-port
       (string-to-number (or (getenv "ORG_API_PORT") "2025")))
 
-;; Load custom elisp if specified
-(let ((custom-elisp (getenv "ORG_API_CUSTOM_ELISP")))
-  (when (and custom-elisp (file-exists-p custom-elisp))
-    (load custom-elisp)))
+;; Load custom elisp if specified (file path)
+(let ((custom-elisp-file (getenv "ORG_API_CUSTOM_ELISP")))
+  (when (and custom-elisp-file (file-exists-p custom-elisp-file))
+    (load custom-elisp-file)))
+
+;; Evaluate inline custom elisp if specified (for runtime configuration)
+;; Wrap content in progn to support multiple expressions
+(let ((custom-elisp-content (getenv "ORG_API_CUSTOM_ELISP_CONTENT")))
+  (when (and custom-elisp-content (not (string-empty-p custom-elisp-content)))
+    (eval (car (read-from-string (format "(progn %s)" custom-elisp-content))))))
 
 ;; Start the API server
 (org-agenda-api-start)
