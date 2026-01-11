@@ -1,0 +1,28 @@
+# Copy this file to terraform.tfvars and fill in your values
+
+project_id          = "your-gcp-project-id"
+service_name        = "org-agenda-api"
+git_sync_repository = "git@github.com:yourusername/org-files.git"
+git_ssh_private_key = <<-EOT
+-----BEGIN OPENSSH PRIVATE KEY-----
+your-private-key-here
+-----END OPENSSH PRIVATE KEY-----
+EOT
+
+# HTTP Basic Auth
+auth_user     = "admin"
+auth_password = "your-secure-password"
+
+# Optional overrides
+# region        = "us-central1"
+# cpu           = "1"
+# memory        = "512Mi"
+# min_instances = 0
+# max_instances = 1
+# git_sync_interval = 60
+
+# Custom elisp (optional)
+# custom_elisp = <<-EOT
+#   (setq org-agenda-api-capture-templates
+#     '(("todo" :name "Todo" :template ("t" "Todo" entry (file "/data/org/inbox.org") "* TODO %^{Title}\n%U\n%?"))))
+# EOT
