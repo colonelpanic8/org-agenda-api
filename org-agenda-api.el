@@ -243,6 +243,30 @@ Uses caching to avoid re-processing unchanged files."
               (org-agenda-api--get-scheduled-or-deadlined day filepath))
             org-agenda-files)))
 
+(defun org-agenda-api--run-agenda (span)
+  "Run org-agenda and return entries as a list of strings.
+SPAN should be `day' or `week'."
+  (let ((org-agenda-span span)
+        (org-agenda-use-time-grid t)
+        (org-agenda-start-on-weekday nil)
+        (org-agenda-window-setup 'current-window)
+        entries)
+    ;; Run the agenda
+    (save-window-excursion
+      (org-agenda-list nil nil (if (eq span 'day) 1 7))
+      (with-current-buffer "*Org Agenda*"
+        (goto-char (point-min))
+        ;; Skip the header lines (date header etc.)
+        (while (not (eobp))
+          (let* ((line (buffer-substring (line-beginning-position) (line-end-position)))
+                 (has-marker (get-text-property 0 'org-marker line)))
+            ;; Only include lines that have an org-marker (actual entries)
+            (when has-marker
+              (push (substring-no-properties line) entries)))
+          (forward-line 1)))
+      (kill-buffer "*Org Agenda*"))
+    (nreverse entries)))
+
 (defun org-agenda-api--build-capture-template (content)
   "Build a capture template for CONTENT."
   `("d" "Dynamic" entry (file ,org-agenda-api-inbox-file)
@@ -416,6 +440,20 @@ Returns an alist with status information."
   (insert (json-encode
            (mapcar #'org-agenda-api--item-to-json
                    (org-agenda-api--get-today-agenda))))
+  (org-agenda-api--track-request))
+
+(defservlet agenda application/json (path)
+  "Endpoint: Return org-agenda entries as JSON.
+Accepts optional query param 'span' (day or week, defaults to day)."
+  (let* ((query-string (cadr (split-string (or path "") "?")))
+         (params (when query-string (url-parse-query-string query-string)))
+         (span-param (cadr (assoc "span" params)))
+         (span (if (string= span-param "week") 'week 'day))
+         (entries (org-agenda-api--run-agenda span)))
+    (insert (json-encode
+             `(("span" . ,(symbol-name span))
+               ("date" . ,(format-time-string "%Y-%m-%d"))
+               ("entries" . ,(vconcat entries))))))
   (org-agenda-api--track-request))
 
 (defservlet create-todo application/json (_path _query headers)
