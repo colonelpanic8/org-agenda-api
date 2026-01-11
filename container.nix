@@ -5,10 +5,19 @@
   tag ? "latest",
   customElispFile ? null,
   extraPackages ? [],
+  numWorkers ? 3,
 }:
 
 let
-  # Nginx config that proxies to emacs
+  # Base port for emacs workers (worker 0 = 2025, worker 1 = 2026, etc.)
+  basePort = 2025;
+
+  # Generate upstream server list for nginx
+  upstreamServers = builtins.concatStringsSep "\n" (
+    builtins.genList (i: "      server 127.0.0.1:${toString (basePort + i)};") numWorkers
+  );
+
+  # Nginx config that proxies to emacs workers
   # Auth is configured dynamically via /tmp/nginx-auth.conf include
   nginxConf = pkgs.writeText "nginx.conf" ''
     # Run as nginx user
@@ -27,6 +36,10 @@ let
       uwsgi_temp_path /tmp/nginx_uwsgi;
       scgi_temp_path /tmp/nginx_scgi;
 
+      upstream emacs_workers {
+${upstreamServers}
+      }
+
       server {
         listen 80;
 
@@ -34,7 +47,7 @@ let
           # Include auth config (generated at startup)
           include /tmp/nginx-auth.conf;
 
-          proxy_pass http://127.0.0.1:2025;
+          proxy_pass http://emacs_workers;
           proxy_http_version 1.1;
           proxy_set_header Host $host;
           proxy_set_header X-Real-IP $remote_addr;
@@ -66,6 +79,15 @@ let
     then "ORG_API_CUSTOM_ELISP=${customElispFile}"
     else "";
 
+  # Wrapper script to launch emacs with correct port based on process number
+  emacsWorkerScript = pkgs.writeShellScript "emacs-worker" ''
+    WORKER_NUM="$1"
+    export ORG_API_PORT=$((${toString basePort} + WORKER_NUM))
+
+    echo "Worker $WORKER_NUM starting on port $ORG_API_PORT"
+    exec ${emacsWithPackages}/bin/emacs --fg-daemon=org-api-$WORKER_NUM --load ${orgAgendaApiEl} --load ${containerInitEl}
+  '';
+
   containerSupervisordConf = pkgs.writeText "supervisord.conf" ''
     [supervisord]
     nodaemon=true
@@ -84,10 +106,12 @@ let
     stdout_logfile_maxbytes=0
     stderr_logfile=/dev/stderr
     stderr_logfile_maxbytes=0
-    environment=GIT_SYNC_INTERVAL="%(ENV_GIT_SYNC_INTERVAL)s",GIT_SYNC_NEW_FILES="%(ENV_GIT_SYNC_NEW_FILES)s",GIT_SYNC_REMOTE="%(ENV_GIT_SYNC_REMOTE)s"
+    environment=PATH="${pkgs.git}/bin:${pkgs.openssh}/bin",GIT_SYNC_INTERVAL="%(ENV_GIT_SYNC_INTERVAL)s",GIT_SYNC_NEW_FILES="%(ENV_GIT_SYNC_NEW_FILES)s",GIT_SYNC_REMOTE="%(ENV_GIT_SYNC_REMOTE)s"
 
     [program:emacs]
-    command=${emacsWithPackages}/bin/emacs --fg-daemon=org-api --load ${orgAgendaApiEl} --load ${containerInitEl}
+    command=${emacsWorkerScript} %(process_num)d
+    process_name=%(program_name)s_%(process_num)02d
+    numprocs=${toString numWorkers}
     autostart=true
     autorestart=true
     startretries=3
@@ -96,7 +120,7 @@ let
     stdout_logfile_maxbytes=0
     stderr_logfile=/dev/stderr
     stderr_logfile_maxbytes=0
-    ${if customElispFile != null then "environment=${customElispEnv}" else ""}
+    environment=PATH="${pkgs.git}/bin:${pkgs.openssh}/bin"${if customElispFile != null then ",${customElispEnv}" else ""}
 
     [program:nginx]
     command=${pkgs.nginx}/bin/nginx -c ${nginxConf}
@@ -119,32 +143,32 @@ let
     set -e
 
     # Create necessary directories
-    mkdir -p /tmp/nginx_client_body /tmp/nginx_proxy /tmp/nginx_fastcgi /tmp/nginx_uwsgi /tmp/nginx_scgi
-    mkdir -p /data/org
-    mkdir -p /root/.ssh
+    ${pkgs.coreutils}/bin/mkdir -p /tmp/nginx_client_body /tmp/nginx_proxy /tmp/nginx_fastcgi /tmp/nginx_uwsgi /tmp/nginx_scgi
+    ${pkgs.coreutils}/bin/mkdir -p /data/org
+    ${pkgs.coreutils}/bin/mkdir -p /root/.ssh
 
     # Setup nginx authentication
     setup_nginx_auth() {
       if [ -n "$AUTH_HTPASSWD_FILE" ] && [ -f "$AUTH_HTPASSWD_FILE" ]; then
         # Use provided htpasswd file
-        echo "Using htpasswd file: $AUTH_HTPASSWD_FILE"
-        cat > /tmp/nginx-auth.conf << EOF
+        ${pkgs.coreutils}/bin/echo "Using htpasswd file: $AUTH_HTPASSWD_FILE"
+        ${pkgs.coreutils}/bin/cat > /tmp/nginx-auth.conf << EOF
     auth_basic "org-agenda-api";
     auth_basic_user_file $AUTH_HTPASSWD_FILE;
     EOF
       elif [ -n "$AUTH_USER" ] && [ -n "$AUTH_PASSWORD" ]; then
         # Generate htpasswd from env vars
-        echo "Generating htpasswd for user: $AUTH_USER"
+        ${pkgs.coreutils}/bin/echo "Generating htpasswd for user: $AUTH_USER"
         ${pkgs.apacheHttpd}/bin/htpasswd -cb /tmp/.htpasswd "$AUTH_USER" "$AUTH_PASSWORD"
-        chmod 644 /tmp/.htpasswd
-        cat > /tmp/nginx-auth.conf << EOF
+        ${pkgs.coreutils}/bin/chmod 644 /tmp/.htpasswd
+        ${pkgs.coreutils}/bin/cat > /tmp/nginx-auth.conf << EOF
     auth_basic "org-agenda-api";
     auth_basic_user_file /tmp/.htpasswd;
     EOF
       else
         # No auth configured
-        echo "Warning: No authentication configured. API is open."
-        echo "# No auth configured" > /tmp/nginx-auth.conf
+        ${pkgs.coreutils}/bin/echo "Warning: No authentication configured. API is open."
+        ${pkgs.coreutils}/bin/echo "# No auth configured" > /tmp/nginx-auth.conf
       fi
     }
 
@@ -153,23 +177,23 @@ let
     # Setup SSH configuration
     setup_ssh_key() {
       local key_path="$1"
-      cat > /root/.ssh/config << EOF
+      ${pkgs.coreutils}/bin/cat > /root/.ssh/config << EOF
     Host *
       StrictHostKeyChecking no
       UserKnownHostsFile /dev/null
       IdentityFile $key_path
     EOF
-      chmod 600 /root/.ssh/config
+      ${pkgs.coreutils}/bin/chmod 600 /root/.ssh/config
     }
 
     # If SSH key content is provided via env var, write it to a file
     if [ -n "$GIT_SSH_PRIVATE_KEY" ]; then
-      echo "$GIT_SSH_PRIVATE_KEY" > /root/.ssh/key
-      chmod 600 /root/.ssh/key
+      ${pkgs.coreutils}/bin/echo "$GIT_SSH_PRIVATE_KEY" > /root/.ssh/key
+      ${pkgs.coreutils}/bin/chmod 600 /root/.ssh/key
       setup_ssh_key /root/.ssh/key
     # If SSH key file is mounted at /secrets/ssh_key
     elif [ -f "/secrets/ssh_key" ]; then
-      chmod 600 /secrets/ssh_key 2>/dev/null || true
+      ${pkgs.coreutils}/bin/chmod 600 /secrets/ssh_key 2>/dev/null || true
       setup_ssh_key /secrets/ssh_key
     fi
 
@@ -181,11 +205,11 @@ let
 
     # If GIT_SYNC_REPOSITORY is set and /data/org is empty, clone the repo
     if [ -n "$GIT_SYNC_REPOSITORY" ] && [ ! -d "/data/org/.git" ]; then
-      echo "Cloning repository from $GIT_SYNC_REPOSITORY..."
+      ${pkgs.coreutils}/bin/echo "Cloning repository from $GIT_SYNC_REPOSITORY..."
       ${pkgs.git}/bin/git clone "$GIT_SYNC_REPOSITORY" /data/org
     fi
 
-    echo "Starting supervisord..."
+    ${pkgs.coreutils}/bin/echo "Starting supervisord..."
     exec ${pkgs.python3Packages.supervisor}/bin/supervisord -c ${containerSupervisordConf}
   '';
 
@@ -238,6 +262,10 @@ pkgs.dockerTools.buildImage {
       "ORG_AGENDA_FILES=/data/org"
       "ORG_INBOX_FILE=/data/org/inbox.org"
       "ORG_API_PORT=2025"
+      # Worker lifecycle - restart workers periodically for freshness
+      # Workers exit after completing a request when lifetime is reached
+      # Set to empty to disable, or override with your own value
+      "ORG_API_MAX_LIFETIME=900"
       # Git sync settings
       "GIT_SYNC_INTERVAL=60"
       "GIT_SYNC_NEW_FILES=true"

@@ -73,26 +73,129 @@ Each entry is a list of (KEY . PLIST) where PLIST contains:
   :type 'sexp
   :group 'org-agenda-api)
 
+(defcustom org-agenda-api-max-requests nil
+  "Maximum requests before worker exits for restart.
+Set to nil to disable (worker runs forever).
+When set, worker will exit gracefully after handling this many requests,
+allowing supervisord/process manager to restart it."
+  :type '(choice (const :tag "Disabled" nil)
+                 (integer :tag "Max requests"))
+  :group 'org-agenda-api)
+
+(defcustom org-agenda-api-max-lifetime nil
+  "Maximum lifetime in seconds before worker exits for restart.
+Set to nil to disable. When set, worker will exit after this many
+seconds, checked after each request completes."
+  :type '(choice (const :tag "Disabled" nil)
+                 (integer :tag "Max seconds"))
+  :group 'org-agenda-api)
+
+;;; Worker Lifecycle
+
+(defvar org-agenda-api--request-count 0
+  "Number of requests handled by this worker.")
+
+(defvar org-agenda-api--start-time nil
+  "Time when this worker started.")
+
+;;; Caching
+
+(defvar org-agenda-api--todos-cache nil
+  "Cached TODO items from last computation.")
+
+(defvar org-agenda-api--cache-mtime nil
+  "Maximum modification time of org files when cache was built.")
+
+(defun org-agenda-api--get-max-mtime ()
+  "Get the maximum modification time across all `org-agenda-files'."
+  (apply #'max
+         (mapcar (lambda (file)
+                   (if (file-exists-p file)
+                       (float-time (file-attribute-modification-time
+                                    (file-attributes file)))
+                     0))
+                 org-agenda-files)))
+
+(defun org-agenda-api--cache-valid-p ()
+  "Return t if the TODO cache is still valid."
+  (and org-agenda-api--todos-cache
+       org-agenda-api--cache-mtime
+       (<= (org-agenda-api--get-max-mtime)
+           org-agenda-api--cache-mtime)))
+
+(defun org-agenda-api--invalidate-cache ()
+  "Invalidate the TODO cache."
+  (setq org-agenda-api--todos-cache nil
+        org-agenda-api--cache-mtime nil))
+
+(defun org-agenda-api--check-worker-lifecycle ()
+  "Check if worker should exit based on max-requests or max-lifetime.
+Called after each request completes. Exits gracefully if limit reached."
+  (let ((should-exit nil)
+        (reason nil))
+    ;; Check request count
+    (when (and org-agenda-api-max-requests
+               (>= org-agenda-api--request-count org-agenda-api-max-requests))
+      (setq should-exit t
+            reason (format "max requests reached (%d)" org-agenda-api--request-count)))
+    ;; Check lifetime
+    (when (and org-agenda-api-max-lifetime
+               org-agenda-api--start-time
+               (>= (float-time (time-subtract (current-time) org-agenda-api--start-time))
+                   org-agenda-api-max-lifetime))
+      (setq should-exit t
+            reason (format "max lifetime reached (%ds)" org-agenda-api-max-lifetime)))
+    ;; Exit if needed
+    (when should-exit
+      (message "org-agenda-api: worker exiting (%s)" reason)
+      ;; Use a timer to exit after response is fully sent
+      (run-at-time 0.1 nil #'kill-emacs 0))))
+
+(defun org-agenda-api--track-request ()
+  "Increment request counter and check lifecycle.
+Call this at the end of each servlet."
+  (cl-incf org-agenda-api--request-count)
+  (org-agenda-api--check-worker-lifecycle))
+
 ;;; Internal Functions
 
 (defun org-agenda-api--get-todo-elements-from-filepath (filepath)
-  "Extract all TODO headline elements from FILEPATH."
-  (let ((todo-elements nil))
-    (with-current-buffer (find-file-noselect filepath)
-      (save-excursion
-        (goto-char (point-min))
-        (while (re-search-forward org-todo-regexp nil t)
-          (let* ((element (org-element-at-point))
-                 (type (org-element-type element)))
-            (when (eq type 'headline)
-              (let ((todo (org-element-property :todo-keyword element)))
-                (when todo
-                  (push element todo-elements))))))))
-    todo-elements))
+  "Extract all TODO headline elements from FILEPATH.
+Uses `org-map-entries' for efficient traversal instead of
+expensive `org-element-at-point' calls."
+  (with-current-buffer (find-file-noselect filepath)
+    (org-map-entries
+     (lambda ()
+       ;; We're at a headline with a TODO keyword
+       ;; Extract properties directly from org functions (much faster than org-element)
+       (let ((todo (org-get-todo-state))
+             (title (org-get-heading t t t t))  ; no-tags, no-todo, no-priority, no-comment
+             (tags (org-get-tags))
+             (level (org-current-level))
+             (scheduled (org-get-scheduled-time (point)))
+             (deadline (org-get-deadline-time (point))))
+         ;; Return an alist directly for JSON encoding (skip org-element overhead)
+         `(("todo" . ,todo)
+           ("title" . ,title)
+           ("tags" . ,(if tags (vconcat tags) nil))
+           ("level" . ,level)
+           ("scheduled" . ,(when scheduled
+                             (format-time-string "%Y-%m-%dT%H:%M:%SZ" scheduled)))
+           ("deadline" . ,(when deadline
+                            (format-time-string "%Y-%m-%dT%H:%M:%SZ" deadline))))))
+     "/!"  ; MATCH: "/!" matches all entries with any TODO keyword
+     'file)))
 
 (defun org-agenda-api--get-agenda-todos ()
-  "Get all TODO elements from `org-agenda-files'."
-  (mapcan #'org-agenda-api--get-todo-elements-from-filepath org-agenda-files))
+  "Get all TODO elements from `org-agenda-files'.
+Uses caching to avoid re-processing unchanged files."
+  (if (org-agenda-api--cache-valid-p)
+      org-agenda-api--todos-cache
+    ;; Rebuild cache
+    (setq org-agenda-api--cache-mtime (org-agenda-api--get-max-mtime)
+          org-agenda-api--todos-cache
+          (mapcan #'org-agenda-api--get-todo-elements-from-filepath org-agenda-files))
+    org-agenda-api--todos-cache))
 
 (defun org-agenda-api--element-to-json (element)
   "Convert org ELEMENT to an alist suitable for JSON encoding."
@@ -150,7 +253,8 @@ Each entry is a list of (KEY . PLIST) where PLIST contains:
   "Capture a new TODO with CONTENT."
   (let ((org-capture-templates
          (list (org-agenda-api--build-capture-template content))))
-    (org-capture nil "d")))
+    (org-capture nil "d"))
+  (org-agenda-api--invalidate-cache))
 
 ;;; Capture Template API Functions
 
@@ -295,6 +399,7 @@ Returns an alist with status information."
         (insert entry-text)
         (unless (string-suffix-p "\n" entry-text) (insert "\n"))
         (save-buffer))
+      (org-agenda-api--invalidate-cache)
       `(("status" . "created")
         ("template" . ,template-key)))))
 
@@ -302,15 +407,16 @@ Returns an alist with status information."
 
 (defservlet get-all-todos application/json ()
   "Endpoint: Return all TODO items from agenda files as JSON."
-  (insert (json-encode
-           (mapcar #'org-agenda-api--element-to-json
-                   (org-agenda-api--get-agenda-todos)))))
+  ;; Data is already in JSON-ready alist format from the optimized function
+  (insert (json-encode (org-agenda-api--get-agenda-todos)))
+  (org-agenda-api--track-request))
 
 (defservlet get-todays-agenda application/json ()
   "Endpoint: Return today's scheduled and deadlined items as JSON."
   (insert (json-encode
            (mapcar #'org-agenda-api--item-to-json
-                   (org-agenda-api--get-today-agenda)))))
+                   (org-agenda-api--get-today-agenda))))
+  (org-agenda-api--track-request))
 
 (defservlet create-todo application/json (_path _query headers)
   "Endpoint: Create a new TODO item from JSON body."
@@ -319,11 +425,13 @@ Returns an alist with status information."
          (title (gethash "title" json-data)))
     (org-agenda-api--capture title)
     (insert (json-encode `(("status" . "created")
-                           ("title" . ,title))))))
+                           ("title" . ,title)))))
+  (org-agenda-api--track-request))
 
 (defservlet templates application/json ()
   "Endpoint: Return registered capture templates and their prompts."
-  (insert (json-encode (org-agenda-api--get-all-templates-json))))
+  (insert (json-encode (org-agenda-api--get-all-templates-json)))
+  (org-agenda-api--track-request))
 
 (defservlet capture application/json (_path _query headers)
   "Endpoint: Capture using a registered template with provided values."
@@ -343,7 +451,8 @@ Returns an alist with status information."
      ;; Note: simple-httpd doesn't have great error handling, so we return 200 with error in body
      ;; A better approach would need custom error handling
      (insert (json-encode `(("status" . "error")
-                            ("message" . ,(error-message-string err))))))))
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
 
 (defservlet restart application/json ()
   "Endpoint: Restart the Emacs server.
@@ -355,11 +464,24 @@ Use this when Emacs gets into a bad state."
 
 ;;; Public API
 
+(defun org-agenda-api--warm-cache ()
+  "Pre-populate the TODO cache for faster first requests."
+  (message "org-agenda-api: Warming cache for %d files..." (length org-agenda-files))
+  (let ((start-time (current-time)))
+    (org-agenda-api--get-agenda-todos)
+    (message "org-agenda-api: Cache warmed in %.2fs (%d items)"
+             (float-time (time-subtract (current-time) start-time))
+             (length org-agenda-api--todos-cache))))
+
 ;;;###autoload
 (defun org-agenda-api-start ()
   "Start the org-agenda-api HTTP server."
   (interactive)
   (setq httpd-port org-agenda-api-port)
+  (setq org-agenda-api--start-time (current-time))
+  (setq org-agenda-api--request-count 0)
+  ;; Warm cache before starting server
+  (org-agenda-api--warm-cache)
   (httpd-start)
   (message "org-agenda-api: HTTP server started on port %d" org-agenda-api-port))
 

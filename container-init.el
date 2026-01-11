@@ -37,6 +37,15 @@ If a path is a file, include it directly."
 (setq org-agenda-api-port
       (string-to-number (or (getenv "ORG_API_PORT") "2025")))
 
+;; Configure worker lifecycle (for graceful restarts)
+;; Workers exit after N requests or N seconds, allowing supervisord to restart them
+(let ((max-requests (getenv "ORG_API_MAX_REQUESTS"))
+      (max-lifetime (getenv "ORG_API_MAX_LIFETIME")))
+  (when max-requests
+    (setq org-agenda-api-max-requests (string-to-number max-requests)))
+  (when max-lifetime
+    (setq org-agenda-api-max-lifetime (string-to-number max-lifetime))))
+
 ;; Load custom elisp if specified (file path)
 (let ((custom-elisp-file (getenv "ORG_API_CUSTOM_ELISP")))
   (when (and custom-elisp-file (file-exists-p custom-elisp-file))
