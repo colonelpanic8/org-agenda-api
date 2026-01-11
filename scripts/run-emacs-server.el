@@ -50,6 +50,36 @@
 (when test-inbox
   (setq org-agenda-api-inbox-file test-inbox))
 
+;; Configure test capture templates for API use
+;; These use org-capture template format with %^{Prompt} for interactive fields
+(setq org-agenda-api-capture-templates
+      `(("todo"
+         :name "Todo"
+         :template ("t" "Todo" entry (file ,test-inbox)
+                    "* TODO %^{Title}\n"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)))
+        ("scheduled-todo"
+         :name "Scheduled Todo"
+         :template ("s" "Scheduled" entry (file ,test-inbox)
+                    "* TODO %^{Title}\nSCHEDULED: %^{When}t\n"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)
+                   ("When" :type date :required t)))
+        ("tagged-todo"
+         :name "Tagged Todo"
+         :template ("g" "Tagged" entry (file ,test-inbox)
+                    "* TODO %^{Title} %^{Tags}g\n"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)
+                   ("Tags" :type tags :required nil)))
+        ("note"
+         :name "Note"
+         :template ("n" "Note" entry (file ,test-inbox)
+                    "* %^{Title}\n[%U]\n\n%?"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)))))
+
 ;; Start the server
 (org-agenda-api-start)
 

@@ -113,6 +113,14 @@ class APIClient:
         """POST /create-todo"""
         return self.post("/create-todo", json={"title": title})
 
+    def get_templates(self) -> requests.Response:
+        """GET /templates"""
+        return self.get("/templates")
+
+    def capture(self, template: str, values: dict) -> requests.Response:
+        """POST /capture"""
+        return self.post("/capture", json={"template": template, "values": values})
+
 
 def find_free_port() -> int:
     """Find a free port to use for testing."""
