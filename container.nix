@@ -176,6 +176,8 @@ let
     # Set git config for commits
     ${pkgs.git}/bin/git config --global user.email "''${GIT_USER_EMAIL:-org-agenda-api@localhost}"
     ${pkgs.git}/bin/git config --global user.name "''${GIT_USER_NAME:-org-agenda-api}"
+    # Mark /data/org as safe directory (needed when mounting from different user)
+    ${pkgs.git}/bin/git config --global --add safe.directory /data/org
 
     # If GIT_SYNC_REPOSITORY is set and /data/org is empty, clone the repo
     if [ -n "$GIT_SYNC_REPOSITORY" ] && [ ! -d "/data/org/.git" ]; then
