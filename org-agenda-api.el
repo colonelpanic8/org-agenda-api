@@ -345,6 +345,14 @@ Returns an alist with status information."
      (insert (json-encode `(("status" . "error")
                             ("message" . ,(error-message-string err))))))))
 
+(defservlet restart application/json ()
+  "Endpoint: Restart the Emacs server.
+This kills Emacs, allowing a supervisor (like supervisord) to restart it.
+Use this when Emacs gets into a bad state."
+  (insert (json-encode '(("status" . "restarting"))))
+  ;; Use run-at-time to allow the response to be sent before killing
+  (run-at-time 0.1 nil #'kill-emacs 0))
+
 ;;; Public API
 
 ;;;###autoload
