@@ -266,6 +266,8 @@ pkgs.dockerTools.buildImage {
       # Workers exit after completing a request when lifetime is reached
       # Set to empty to disable, or override with your own value
       "ORG_API_MAX_LIFETIME=900"
+      # Process manager - enables supervisorctl for restarting all workers
+      "ORG_API_SUPERVISOR=true"
       # Git sync settings
       "GIT_SYNC_INTERVAL=60"
       "GIT_SYNC_NEW_FILES=true"

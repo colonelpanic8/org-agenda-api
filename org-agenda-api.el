@@ -455,12 +455,20 @@ Returns an alist with status information."
   (org-agenda-api--track-request))
 
 (defservlet restart application/json ()
-  "Endpoint: Restart the Emacs server.
-This kills Emacs, allowing a supervisor (like supervisord) to restart it.
-Use this when Emacs gets into a bad state."
-  (insert (json-encode '(("status" . "restarting"))))
-  ;; Use run-at-time to allow the response to be sent before killing
-  (run-at-time 0.1 nil #'kill-emacs 0))
+  "Endpoint: Restart Emacs worker(s).
+When running under supervisord (ORG_API_SUPERVISOR=true), restarts all workers.
+Otherwise, just restarts this worker."
+  (let ((use-supervisor (getenv "ORG_API_SUPERVISOR")))
+    (insert (json-encode
+             `(("status" . ,(if use-supervisor
+                                "restarting all workers"
+                              "restarting")))))
+    ;; Use run-at-time to allow the response to be sent before restarting
+    (run-at-time 0.1 nil
+                 (lambda ()
+                   (if use-supervisor
+                       (call-process "supervisorctl" nil nil nil "restart" "emacs:*")
+                     (kill-emacs 0))))))
 
 ;;; Public API
 
