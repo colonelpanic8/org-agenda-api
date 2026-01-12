@@ -34,6 +34,10 @@
 ;;
 ;; Endpoints:
 ;;   GET /get-all-todos - Returns all TODO items from agenda files
+;;       ?refresh=true - Git pull repos containing agenda files first
+;;   GET /agenda - Returns org-agenda entries
+;;       ?span=day|week - Agenda span (default: day)
+;;       ?refresh=true - Git pull repos containing agenda files first
 ;;   GET /get-todays-agenda - Returns scheduled/deadlined items for today
 ;;   POST /create-todo - Create a new TODO item
 
@@ -127,6 +131,43 @@ seconds, checked after each request completes."
   "Invalidate the TODO cache."
   (setq org-agenda-api--todos-cache nil
         org-agenda-api--cache-mtime nil))
+
+;;; Git Refresh
+
+(defun org-agenda-api--get-git-repos-for-agenda-files ()
+  "Get unique git repository roots for all `org-agenda-files'."
+  (let ((repos nil))
+    (dolist (file org-agenda-files)
+      (when (file-exists-p file)
+        (let ((dir (file-name-directory (expand-file-name file))))
+          (when dir
+            (let ((git-root (locate-dominating-file dir ".git")))
+              (when git-root
+                (let ((normalized (expand-file-name git-root)))
+                  (unless (member normalized repos)
+                    (push normalized repos)))))))))
+    repos))
+
+(defun org-agenda-api--git-refresh-repo (repo-path)
+  "Run git pull in REPO-PATH. Returns alist with result."
+  (let ((default-directory repo-path))
+    (condition-case err
+        (let ((output (shell-command-to-string "git pull --ff-only 2>&1")))
+          `(("repo" . ,repo-path)
+            ("status" . "success")
+            ("output" . ,(string-trim output))))
+      (error
+       `(("repo" . ,repo-path)
+         ("status" . "error")
+         ("message" . ,(error-message-string err)))))))
+
+(defun org-agenda-api--git-refresh-all ()
+  "Refresh all git repos containing agenda files.
+Returns list of results for each repo."
+  (let ((repos (org-agenda-api--get-git-repos-for-agenda-files)))
+    (when repos
+      (org-agenda-api--invalidate-cache)
+      (mapcar #'org-agenda-api--git-refresh-repo repos))))
 
 (defun org-agenda-api--check-worker-lifecycle ()
   "Check if worker should exit based on max-requests or max-lifetime.
@@ -460,13 +501,22 @@ Returns a list of integers (minutes before event)."
      ((integerp alert-time) (list alert-time))
      (t '(10)))))
 
-(defservlet get-all-todos application/json ()
+(defservlet get-all-todos application/json (path)
   "Endpoint: Return all TODO items from agenda files as JSON.
-Response is wrapped with notification defaults."
-  (let ((todos (org-agenda-api--get-agenda-todos))
-        (defaults `(("notifyBefore" . ,(vconcat (org-agenda-api--get-default-notify-before))))))
-    (insert (json-encode `(("defaults" . ,defaults)
-                           ("todos" . ,(vconcat todos))))))
+Response is wrapped with notification defaults.
+Accepts optional query param 'refresh' (true/1) to git pull repos first."
+  (let* ((query-string (cadr (split-string (or path "") "?")))
+         (params (when query-string (url-parse-query-string query-string)))
+         (refresh-param (cadr (assoc "refresh" params)))
+         (git-results (when (member refresh-param '("true" "1"))
+                        (org-agenda-api--git-refresh-all)))
+         (todos (org-agenda-api--get-agenda-todos))
+         (defaults `(("notifyBefore" . ,(vconcat (org-agenda-api--get-default-notify-before)))))
+         (response `(("defaults" . ,defaults)
+                     ("todos" . ,(vconcat todos)))))
+    (when git-results
+      (push `("gitRefresh" . ,(vconcat git-results)) response))
+    (insert (json-encode response)))
   (org-agenda-api--track-request))
 
 (defservlet get-todays-agenda application/json ()
@@ -478,16 +528,23 @@ Response is wrapped with notification defaults."
 
 (defservlet agenda application/json (path)
   "Endpoint: Return org-agenda entries as JSON.
-Accepts optional query param 'span' (day or week, defaults to day)."
+Accepts optional query params:
+  - 'span' (day or week, defaults to day)
+  - 'refresh' (true/1) to git pull repos first."
   (let* ((query-string (cadr (split-string (or path "") "?")))
          (params (when query-string (url-parse-query-string query-string)))
          (span-param (cadr (assoc "span" params)))
+         (refresh-param (cadr (assoc "refresh" params)))
+         (git-results (when (member refresh-param '("true" "1"))
+                        (org-agenda-api--git-refresh-all)))
          (span (if (string= span-param "week") 'week 'day))
-         (entries (org-agenda-api--run-agenda span)))
-    (insert (json-encode
-             `(("span" . ,(symbol-name span))
-               ("date" . ,(format-time-string "%Y-%m-%d"))
-               ("entries" . ,(vconcat entries))))))
+         (entries (org-agenda-api--run-agenda span))
+         (response `(("span" . ,(symbol-name span))
+                     ("date" . ,(format-time-string "%Y-%m-%d"))
+                     ("entries" . ,(vconcat entries)))))
+    (when git-results
+      (push `("gitRefresh" . ,(vconcat git-results)) response))
+    (insert (json-encode response)))
   (org-agenda-api--track-request))
 
 (defservlet create-todo application/json (_path _query headers)
