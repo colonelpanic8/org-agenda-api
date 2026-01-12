@@ -159,6 +159,16 @@ Call this at the end of each servlet."
 
 ;;; Internal Functions
 
+(defun org-agenda-api--parse-notify-before (value)
+  "Parse WILD_NOTIFIER_NOTIFY_BEFORE VALUE into a list of integers.
+VALUE can be space or comma separated minutes, e.g., \"10 30 60\" or \"10,30,60\"."
+  (when value
+    (let ((parts (split-string value "[, \t]+" t)))
+      (delq nil (mapcar (lambda (s)
+                          (let ((n (string-to-number s)))
+                            (when (> n 0) n)))
+                        parts)))))
+
 (defun org-agenda-api--get-todo-elements-from-filepath (filepath)
   "Extract all TODO headline elements from FILEPATH.
 Uses `org-map-entries' for efficient traversal instead of
@@ -176,7 +186,9 @@ expensive `org-element-at-point' calls."
              (deadline (org-get-deadline-time (point)))
              (pos (point))
              (org-id (org-entry-get (point) "ID"))
-             (olpath (org-get-outline-path t)))  ; include current heading
+             (olpath (org-get-outline-path t))  ; include current heading
+             (notify-before (org-agenda-api--parse-notify-before
+                             (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE"))))
          ;; Return an alist directly for JSON encoding (skip org-element overhead)
          `(("todo" . ,todo)
            ("title" . ,title)
@@ -189,7 +201,8 @@ expensive `org-element-at-point' calls."
            ("file" . ,filepath)
            ("pos" . ,pos)
            ("id" . ,org-id)
-           ("olpath" . ,(if olpath (vconcat olpath) nil)))))
+           ("olpath" . ,(if olpath (vconcat olpath) nil))
+           ("notifyBefore" . ,(when notify-before (vconcat notify-before))))))
      "/!"  ; MATCH: "/!" matches all entries with any TODO keyword
      'file)))
 
@@ -436,10 +449,24 @@ Returns an alist with status information."
 
 ;;; HTTP Endpoints
 
+(defun org-agenda-api--get-default-notify-before ()
+  "Get default notification times from org-wild-notifier-alert-time if available.
+Returns a list of integers (minutes before event)."
+  (let ((alert-time (and (boundp 'org-wild-notifier-alert-time)
+                         org-wild-notifier-alert-time)))
+    (cond
+     ((null alert-time) '(10))  ; Default to 10 minutes if not configured
+     ((listp alert-time) alert-time)
+     ((integerp alert-time) (list alert-time))
+     (t '(10)))))
+
 (defservlet get-all-todos application/json ()
-  "Endpoint: Return all TODO items from agenda files as JSON."
-  ;; Data is already in JSON-ready alist format from the optimized function
-  (insert (json-encode (org-agenda-api--get-agenda-todos)))
+  "Endpoint: Return all TODO items from agenda files as JSON.
+Response is wrapped with notification defaults."
+  (let ((todos (org-agenda-api--get-agenda-todos))
+        (defaults `(("notifyBefore" . ,(vconcat (org-agenda-api--get-default-notify-before))))))
+    (insert (json-encode `(("defaults" . ,defaults)
+                           ("todos" . ,(vconcat todos))))))
   (org-agenda-api--track-request))
 
 (defservlet get-todays-agenda application/json ()
