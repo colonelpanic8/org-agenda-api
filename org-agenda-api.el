@@ -173,7 +173,10 @@ expensive `org-element-at-point' calls."
              (tags (org-get-tags))
              (level (org-current-level))
              (scheduled (org-get-scheduled-time (point)))
-             (deadline (org-get-deadline-time (point))))
+             (deadline (org-get-deadline-time (point)))
+             (pos (point))
+             (org-id (org-entry-get (point) "ID"))
+             (olpath (org-get-outline-path t)))  ; include current heading
          ;; Return an alist directly for JSON encoding (skip org-element overhead)
          `(("todo" . ,todo)
            ("title" . ,title)
@@ -182,7 +185,11 @@ expensive `org-element-at-point' calls."
            ("scheduled" . ,(when scheduled
                              (format-time-string "%Y-%m-%dT%H:%M:%SZ" scheduled)))
            ("deadline" . ,(when deadline
-                            (format-time-string "%Y-%m-%dT%H:%M:%SZ" deadline))))))
+                            (format-time-string "%Y-%m-%dT%H:%M:%SZ" deadline)))
+           ("file" . ,filepath)
+           ("pos" . ,pos)
+           ("id" . ,org-id)
+           ("olpath" . ,(if olpath (vconcat olpath) nil)))))
      "/!"  ; MATCH: "/!" matches all entries with any TODO keyword
      'file)))
 
@@ -507,6 +514,81 @@ Otherwise, just restarts this worker."
                    (if use-supervisor
                        (call-process "supervisorctl" nil nil nil "restart" "emacs:*")
                      (kill-emacs 0))))))
+
+(defun org-agenda-api--find-todo-by-id (id)
+  "Find a TODO entry by its org ID.
+Returns (file . pos) cons or nil if not found."
+  (when id
+    (let ((loc (org-id-find id)))
+      (when loc
+        (cons (car loc) (cdr loc))))))
+
+(defun org-agenda-api--find-todo-by-file-pos-title (file pos title)
+  "Find a TODO entry by FILE, POS, and TITLE.
+Verifies the title matches at the given position.
+Returns (file . pos) cons or nil if not found."
+  (when (and file pos (file-exists-p file))
+    (with-current-buffer (find-file-noselect file)
+      (save-excursion
+        (goto-char pos)
+        (when (org-at-heading-p)
+          (let ((heading (org-get-heading t t t t)))
+            (when (or (not title) (string= heading title))
+              (cons file pos))))))))
+
+(defun org-agenda-api--complete-todo-at (file pos &optional new-state)
+  "Mark the TODO at FILE and POS as complete.
+NEW-STATE defaults to DONE if not specified.
+Returns alist with status and details."
+  (let ((new-state (or new-state "DONE")))
+    (with-current-buffer (find-file-noselect file)
+      (save-excursion
+        (goto-char pos)
+        (if (org-at-heading-p)
+            (let ((old-state (org-get-todo-state))
+                  (title (org-get-heading t t t t)))
+              (org-todo new-state)
+              (save-buffer)
+              (org-agenda-api--invalidate-cache)
+              `(("status" . "completed")
+                ("title" . ,title)
+                ("oldState" . ,old-state)
+                ("newState" . ,new-state)))
+          `(("status" . "error")
+            ("message" . "No heading found at position")))))))
+
+(defservlet complete application/json (_path _query headers)
+  "Endpoint: Mark a TODO as complete.
+Accepts JSON body with:
+  - id: org-id of the todo (preferred)
+  - file: file path (fallback)
+  - pos: position in file (fallback)
+  - title: heading title (for verification)
+  - state: new state (optional, defaults to DONE)"
+  (condition-case err
+      (let* ((content-header (cadr (assoc "Content" headers)))
+             (json-data (json-parse-string content-header))
+             (id (gethash "id" json-data))
+             (file (gethash "file" json-data))
+             (pos (gethash "pos" json-data))
+             (title (gethash "title" json-data))
+             (new-state (gethash "state" json-data))
+             (location nil))
+        ;; Try to find by ID first
+        (setq location (org-agenda-api--find-todo-by-id id))
+        ;; Fall back to file+pos+title
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
+        (if location
+            (let ((result (org-agenda-api--complete-todo-at
+                           (car location) (cdr location) new-state)))
+              (insert (json-encode result)))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Todo not found"))))))
+    (error
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
 
 ;;; Public API
 
