@@ -121,6 +121,30 @@ class APIClient:
         """POST /capture"""
         return self.post("/capture", json={"template": template, "values": values})
 
+    def get_agenda(self, span: str = "day") -> requests.Response:
+        """GET /agenda"""
+        return self.get(f"/agenda?span={span}")
+
+    def complete_todo(self, todo: dict, state: str = "DONE") -> requests.Response:
+        """POST /complete"""
+        return self.post("/complete", json={
+            "id": todo.get("id"),
+            "file": todo.get("file"),
+            "pos": todo.get("pos"),
+            "title": todo.get("title"),
+            "state": state,
+        })
+
+    def update_todo(self, todo: dict, updates: dict) -> requests.Response:
+        """POST /update"""
+        return self.post("/update", json={
+            "id": todo.get("id"),
+            "file": todo.get("file"),
+            "pos": todo.get("pos"),
+            "title": todo.get("title"),
+            **updates,
+        })
+
 
 def find_free_port() -> int:
     """Find a free port to use for testing."""

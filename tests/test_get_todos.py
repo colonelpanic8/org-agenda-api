@@ -11,33 +11,43 @@ class TestGetAllTodos:
         response = api.get_all_todos()
         assert response.status_code == 200
 
-    def test_returns_json_list(self, api):
-        """Endpoint should return a JSON array."""
+    def test_returns_json_object_with_todos(self, api):
+        """Endpoint should return a JSON object with todos array."""
         response = api.get_all_todos()
         data = response.json()
-        assert isinstance(data, list)
+        assert isinstance(data, dict)
+        assert "todos" in data
+        assert isinstance(data["todos"], list)
+
+    def test_returns_defaults(self, api):
+        """Endpoint should return defaults with notification settings."""
+        response = api.get_all_todos()
+        data = response.json()
+        assert "defaults" in data
+        assert "notifyBefore" in data["defaults"]
 
     def test_returns_todos_from_fixture(self, api):
         """Should return TODO items from our test fixtures."""
         response = api.get_all_todos()
         data = response.json()
+        todos = data["todos"]
 
         # We should have TODOs from sample.org and today.org
-        assert len(data) > 0
+        assert len(todos) > 0
 
         # Check that items have expected structure
-        for item in data:
+        for item in todos:
             assert "todo" in item
             assert "title" in item
 
     def test_todo_item_structure(self, api):
         """Each TODO item should have the expected fields."""
         response = api.get_all_todos()
-        data = response.json()
+        todos = response.json()["todos"]
 
         # Find a known item from sample.org
         buy_groceries = next(
-            (item for item in data if "Buy groceries" in item.get("title", "")),
+            (item for item in todos if "Buy groceries" in item.get("title", "")),
             None,
         )
         assert buy_groceries is not None
@@ -50,11 +60,11 @@ class TestGetAllTodos:
     def test_includes_items_with_tags(self, api):
         """Should include TODO items that have tags."""
         response = api.get_all_todos()
-        data = response.json()
+        todos = response.json()["todos"]
 
         # Find item with tags from sample.org
         review_pr = next(
-            (item for item in data if "Review PR" in item.get("title", "")),
+            (item for item in todos if "Review PR" in item.get("title", "")),
             None,
         )
         assert review_pr is not None
@@ -64,10 +74,10 @@ class TestGetAllTodos:
     def test_excludes_done_items(self, api):
         """Should not include DONE items (only active TODOs)."""
         response = api.get_all_todos()
-        data = response.json()
+        todos = response.json()["todos"]
 
         # The "Write tests" item is DONE in sample.org
-        done_items = [item for item in data if item.get("todo") == "DONE"]
+        done_items = [item for item in todos if item.get("todo") == "DONE"]
         # Note: The current implementation does include DONE items
         # This test documents current behavior - adjust if intended behavior differs
 

@@ -79,9 +79,9 @@ class TestCaptureWithTemplate:
 
         # Verify it appears in the list
         list_response = api.get_all_todos()
-        data = list_response.json()
+        todos = list_response.json()["todos"]
 
-        titles = [item.get("title", "") for item in data]
+        titles = [item.get("title", "") for item in todos]
         matching = [t for t in titles if unique_title in t]
 
         assert len(matching) > 0, f"Captured entry not found. Titles: {titles}"
