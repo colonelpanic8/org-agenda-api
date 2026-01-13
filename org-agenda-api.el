@@ -706,15 +706,41 @@ Accepts optional query params:
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))
 
+(defun org-agenda-api--check-capture-ready ()
+  "Check if capture system is ready (not stuck in minibuffer etc.).
+Returns nil if healthy, or an error message string if unhealthy."
+  (condition-case err
+      (progn
+        ;; Check for stuck minibuffer
+        (when (active-minibuffer-window)
+          (throw 'unhealthy "minibuffer is active"))
+        ;; Check for stuck capture mode
+        (when (and (boundp 'org-capture-mode) org-capture-mode)
+          (throw 'unhealthy "capture mode is active"))
+        ;; Check that inbox file is accessible
+        (unless (file-writable-p org-agenda-api-inbox-file)
+          (throw 'unhealthy (format "inbox file not writable: %s" org-agenda-api-inbox-file)))
+        ;; All checks passed
+        nil)
+    (error (error-message-string err))))
+
 (defservlet health application/json ()
   "Endpoint: Health check for monitoring systems (nginx, supervisord, etc.).
-Returns basic status information without heavy computation."
+Returns basic status information and capture readiness check."
   (let* ((uptime (when org-agenda-api--start-time
                    (float-time (time-subtract (current-time) org-agenda-api--start-time))))
-         (response `(("status" . "ok")
+         (capture-check (catch 'unhealthy (org-agenda-api--check-capture-ready)))
+         (healthy (null capture-check))
+         (response `(("status" . ,(if healthy "ok" "unhealthy"))
                      ("uptime" . ,uptime)
                      ("requests" . ,org-agenda-api--request-count))))
-    (insert (json-encode response))))
+    (when capture-check
+      (push `("captureStatus" . ,capture-check) response)
+      (org-agenda-api--log 'warn "Health check failed: %s" capture-check))
+    (insert (json-encode response))
+    ;; Return 503 if unhealthy so supervisord/nginx can detect it
+    (unless healthy
+      (httpd-error httpd-current-proc 503))))
 
 (defservlet restart application/json ()
   "Endpoint: Restart Emacs.
