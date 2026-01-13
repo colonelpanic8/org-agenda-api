@@ -304,8 +304,45 @@ Uses caching to avoid re-processing unchanged files."
               (org-agenda-api--get-scheduled-or-deadlined day filepath))
             org-agenda-files)))
 
+(defun org-agenda-api--extract-entry-data (marker agenda-line)
+  "Extract todo data from the org entry at MARKER.
+AGENDA-LINE is the raw agenda display text for reference."
+  (when (marker-buffer marker)
+    (with-current-buffer (marker-buffer marker)
+      (save-excursion
+        (goto-char marker)
+        (when (org-at-heading-p)
+          (let ((todo (org-get-todo-state))
+                (title (org-get-heading t t t t))
+                (tags (org-get-tags))
+                (level (org-current-level))
+                (scheduled (org-get-scheduled-time (point)))
+                (deadline (org-get-deadline-time (point)))
+                (pos (point))
+                (filepath (buffer-file-name))
+                (org-id (org-entry-get (point) "ID"))
+                (olpath (org-get-outline-path t))
+                (priority (org-get-priority (point)))
+                (notify-before (org-agenda-api--parse-notify-before
+                                (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE"))))
+            `(("todo" . ,todo)
+              ("title" . ,title)
+              ("tags" . ,(if tags (vconcat tags) nil))
+              ("level" . ,level)
+              ("scheduled" . ,(when scheduled
+                                (format-time-string "%Y-%m-%dT%H:%M:%SZ" scheduled)))
+              ("deadline" . ,(when deadline
+                               (format-time-string "%Y-%m-%dT%H:%M:%SZ" deadline)))
+              ("file" . ,filepath)
+              ("pos" . ,pos)
+              ("id" . ,org-id)
+              ("olpath" . ,(if olpath (vconcat olpath) nil))
+              ("priority" . ,priority)
+              ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
+              ("agendaLine" . ,(substring-no-properties agenda-line)))))))))
+
 (defun org-agenda-api--run-agenda (span)
-  "Run org-agenda and return entries as a list of strings.
+  "Run org-agenda and return entries as a list of JSON-encodable alists.
 SPAN should be `day' or `week'."
   (let ((org-agenda-span span)
         (org-agenda-use-time-grid t)
@@ -320,10 +357,12 @@ SPAN should be `day' or `week'."
         ;; Skip the header lines (date header etc.)
         (while (not (eobp))
           (let* ((line (buffer-substring (line-beginning-position) (line-end-position)))
-                 (has-marker (get-text-property 0 'org-marker line)))
+                 (marker (get-text-property 0 'org-marker line)))
             ;; Only include lines that have an org-marker (actual entries)
-            (when has-marker
-              (push (substring-no-properties line) entries)))
+            (when marker
+              (let ((entry-data (org-agenda-api--extract-entry-data marker line)))
+                (when entry-data
+                  (push entry-data entries)))))
           (forward-line 1)))
       (kill-buffer "*Org Agenda*"))
     (nreverse entries)))
