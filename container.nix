@@ -5,19 +5,12 @@
   tag ? "latest",
   customElispFile ? null,
   extraPackages ? [],
-  numWorkers ? 3,
 }:
 
 let
-  # Base port for emacs workers (worker 0 = 2025, worker 1 = 2026, etc.)
-  basePort = 2025;
+  port = 2025;
 
-  # Generate upstream server list for nginx
-  upstreamServers = builtins.concatStringsSep "\n" (
-    builtins.genList (i: "      server 127.0.0.1:${toString (basePort + i)};") numWorkers
-  );
-
-  # Nginx config that proxies to emacs workers
+  # Nginx config that proxies to emacs
   # Auth is configured dynamically via /tmp/nginx-auth.conf include
   nginxConf = pkgs.writeText "nginx.conf" ''
     # Run as nginx user
@@ -36,18 +29,26 @@ let
       uwsgi_temp_path /tmp/nginx_uwsgi;
       scgi_temp_path /tmp/nginx_scgi;
 
-      upstream emacs_workers {
-${upstreamServers}
+      upstream emacs {
+        server 127.0.0.1:${toString port};
       }
 
       server {
         listen 80;
 
+        # Health check endpoint - no auth required for monitoring tools
+        location /health {
+          proxy_pass http://emacs;
+          proxy_http_version 1.1;
+          proxy_connect_timeout 5s;
+          proxy_read_timeout 5s;
+        }
+
         location / {
           # Include auth config (generated at startup)
           include /tmp/nginx-auth.conf;
 
-          proxy_pass http://emacs_workers;
+          proxy_pass http://emacs;
           proxy_http_version 1.1;
           proxy_set_header Host $host;
           proxy_set_header X-Real-IP $remote_addr;
@@ -79,13 +80,39 @@ ${upstreamServers}
     then "ORG_API_CUSTOM_ELISP=${customElispFile}"
     else "";
 
-  # Wrapper script to launch emacs with correct port based on process number
-  emacsWorkerScript = pkgs.writeShellScript "emacs-worker" ''
-    WORKER_NUM="$1"
-    export ORG_API_PORT=$((${toString basePort} + WORKER_NUM))
+  # Health checker script that monitors emacs and restarts if unhealthy
+  healthCheckerScript = pkgs.writeShellScript "health-checker" ''
+    INTERVAL=''${HEALTH_CHECK_INTERVAL:-30}
+    TIMEOUT=''${HEALTH_CHECK_TIMEOUT:-5}
+    RETRIES=''${HEALTH_CHECK_RETRIES:-3}
 
-    echo "Worker $WORKER_NUM starting on port $ORG_API_PORT"
-    exec ${emacsWithPackages}/bin/emacs --fg-daemon=org-api-$WORKER_NUM --load ${orgAgendaApiEl} --load ${containerInitEl}
+    echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s, retries=''${RETRIES})"
+
+    # Wait for emacs to start up
+    sleep 15
+
+    while true; do
+      FAILURES=0
+
+      for attempt in $(seq 1 $RETRIES); do
+        if ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
+          FAILURES=0
+          break
+        else
+          FAILURES=$((FAILURES + 1))
+          if [ $attempt -lt $RETRIES ]; then
+            sleep 2
+          fi
+        fi
+      done
+
+      if [ $FAILURES -ge $RETRIES ]; then
+        echo "Emacs failed health check after $RETRIES attempts, restarting..."
+        ${pkgs.python3Packages.supervisor}/bin/supervisorctl restart emacs || true
+      fi
+
+      sleep $INTERVAL
+    done
   '';
 
   containerSupervisordConf = pkgs.writeText "supervisord.conf" ''
@@ -95,6 +122,15 @@ ${upstreamServers}
     logfile_maxbytes=0
     pidfile=/tmp/supervisord.pid
     user=root
+
+    [unix_http_server]
+    file=/tmp/supervisor.sock
+
+    [supervisorctl]
+    serverurl=unix:///tmp/supervisor.sock
+
+    [rpcinterface:supervisor]
+    supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
     [program:git-sync]
     command=${gitSyncRs}/bin/git-sync-rs watch -d /data/org
@@ -109,9 +145,7 @@ ${upstreamServers}
     environment=PATH="${pkgs.git}/bin:${pkgs.openssh}/bin",GIT_SYNC_INTERVAL="%(ENV_GIT_SYNC_INTERVAL)s",GIT_SYNC_NEW_FILES="%(ENV_GIT_SYNC_NEW_FILES)s",GIT_SYNC_REMOTE="%(ENV_GIT_SYNC_REMOTE)s"
 
     [program:emacs]
-    command=${emacsWorkerScript} %(process_num)d
-    process_name=%(program_name)s_%(process_num)02d
-    numprocs=${toString numWorkers}
+    command=${emacsWithPackages}/bin/emacs --fg-daemon=org-api --load ${orgAgendaApiEl} --load ${containerInitEl}
     autostart=true
     autorestart=true
     startretries=3
@@ -133,10 +167,16 @@ ${upstreamServers}
     stderr_logfile=/dev/stderr
     stderr_logfile_maxbytes=0
 
-    [eventlistener:processes]
-    command=${pkgs.bash}/bin/bash -c "while read line; do echo \"$line\"; done"
-    events=PROCESS_STATE
-    buffer_size=100
+    [program:health-checker]
+    command=${healthCheckerScript}
+    autostart=true
+    autorestart=true
+    startretries=3
+    startsecs=1
+    stdout_logfile=/dev/stdout
+    stdout_logfile_maxbytes=0
+    stderr_logfile=/dev/stderr
+    stderr_logfile_maxbytes=0
   '';
 
   containerStartupScript = pkgs.writeShellScript "start-org-agenda-api" ''
@@ -261,13 +301,15 @@ pkgs.dockerTools.buildImage {
       # Org agenda API settings
       "ORG_AGENDA_FILES=/data/org"
       "ORG_INBOX_FILE=/data/org/inbox.org"
-      "ORG_API_PORT=2025"
-      # Worker lifecycle - restart workers periodically for freshness
-      # Workers exit after completing a request when lifetime is reached
+      "ORG_API_PORT=${toString port}"
+      # Worker lifecycle - restart emacs periodically for freshness
+      # Emacs exits after completing a request when lifetime is reached
       # Set to empty to disable, or override with your own value
       "ORG_API_MAX_LIFETIME=900"
-      # Process manager - enables supervisorctl for restarting all workers
-      "ORG_API_SUPERVISOR=true"
+      # Health checker settings - monitors emacs and restarts if unhealthy
+      "HEALTH_CHECK_INTERVAL=30"
+      "HEALTH_CHECK_TIMEOUT=5"
+      "HEALTH_CHECK_RETRIES=3"
       # Git sync settings
       "GIT_SYNC_INTERVAL=60"
       "GIT_SYNC_NEW_FILES=true"

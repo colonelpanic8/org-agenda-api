@@ -39,6 +39,7 @@
 ;;       ?span=day|week - Agenda span (default: day)
 ;;       ?refresh=true - Git pull repos containing agenda files first
 ;;   GET /get-todays-agenda - Returns scheduled/deadlined items for today
+;;   GET /health - Health check endpoint for monitoring (nginx, supervisord)
 ;;   POST /create-todo - Create a new TODO item
 
 ;;; Code:
@@ -622,21 +623,22 @@ Accepts optional query params:
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))
 
+(defservlet health application/json ()
+  "Endpoint: Health check for monitoring systems (nginx, supervisord, etc.).
+Returns basic status information without heavy computation."
+  (let* ((uptime (when org-agenda-api--start-time
+                   (float-time (time-subtract (current-time) org-agenda-api--start-time))))
+         (response `(("status" . "ok")
+                     ("uptime" . ,uptime)
+                     ("requests" . ,org-agenda-api--request-count))))
+    (insert (json-encode response))))
+
 (defservlet restart application/json ()
-  "Endpoint: Restart Emacs worker(s).
-When running under supervisord (ORG_API_SUPERVISOR=true), restarts all workers.
-Otherwise, just restarts this worker."
-  (let ((use-supervisor (getenv "ORG_API_SUPERVISOR")))
-    (insert (json-encode
-             `(("status" . ,(if use-supervisor
-                                "restarting all workers"
-                              "restarting")))))
-    ;; Use run-at-time to allow the response to be sent before restarting
-    (run-at-time 0.1 nil
-                 (lambda ()
-                   (if use-supervisor
-                       (call-process "supervisorctl" nil nil nil "restart" "emacs:*")
-                     (kill-emacs 0))))))
+  "Endpoint: Restart Emacs.
+Exits gracefully, allowing supervisord to restart the process."
+  (insert (json-encode `(("status" . "restarting"))))
+  ;; Use run-at-time to allow the response to be sent before exiting
+  (run-at-time 0.1 nil #'kill-emacs 0))
 
 (defun org-agenda-api--find-todo-by-id (id)
   "Find a TODO entry by its org ID.
