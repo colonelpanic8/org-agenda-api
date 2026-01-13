@@ -88,7 +88,7 @@ let
     echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s)"
 
     # Wait for emacs to start up
-    sleep 15
+    ${pkgs.coreutils}/bin/sleep 15
 
     while true; do
       # First check
@@ -100,7 +100,7 @@ let
         fi
       fi
 
-      sleep $INTERVAL
+      ${pkgs.coreutils}/bin/sleep $INTERVAL
     done
   '';
 
