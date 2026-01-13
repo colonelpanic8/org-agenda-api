@@ -742,6 +742,36 @@ Returns basic status information and capture readiness check."
     (unless healthy
       (httpd-error httpd-current-proc 503))))
 
+(defun org-agenda-api--get-todo-states ()
+  "Get all configured TODO states from `org-todo-keywords'.
+Returns an alist with 'active' (not-done) and 'done' states."
+  (let ((active-states nil)
+        (done-states nil))
+    (dolist (keyword-set org-todo-keywords)
+      (let ((in-done-section nil))
+        (dolist (keyword (cdr keyword-set))  ; Skip 'sequence or 'type at beginning
+          (cond
+           ((string= keyword "|")
+            (setq in-done-section t))
+           ((string-match-p "(.*)$" keyword)
+            ;; Handle keywords with shortcuts like "TODO(t)"
+            (let ((clean-keyword (replace-regexp-in-string "(.*)$" "" keyword)))
+              (if in-done-section
+                  (push clean-keyword done-states)
+                (push clean-keyword active-states))))
+           (t
+            (if in-done-section
+                (push clean-keyword done-states)
+              (push clean-keyword active-states)))))))
+    `(("active" . ,(vconcat (nreverse active-states)))
+      ("done" . ,(vconcat (nreverse done-states))))))
+
+(defservlet todo-states application/json ()
+  "Endpoint: Return configured TODO states.
+Returns active (not-done) states and done states separately."
+  (insert (json-encode (org-agenda-api--get-todo-states)))
+  (org-agenda-api--track-request))
+
 (defservlet restart application/json ()
   "Endpoint: Restart Emacs.
 Exits gracefully, allowing supervisord to restart the process."
