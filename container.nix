@@ -82,33 +82,22 @@ let
 
   # Health checker script that monitors emacs and restarts if unhealthy
   healthCheckerScript = pkgs.writeShellScript "health-checker" ''
-    INTERVAL=''${HEALTH_CHECK_INTERVAL:-30}
+    INTERVAL=''${HEALTH_CHECK_INTERVAL:-10}
     TIMEOUT=''${HEALTH_CHECK_TIMEOUT:-5}
-    RETRIES=''${HEALTH_CHECK_RETRIES:-3}
 
-    echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s, retries=''${RETRIES})"
+    echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s)"
 
     # Wait for emacs to start up
     sleep 15
 
     while true; do
-      FAILURES=0
-
-      for attempt in $(seq 1 $RETRIES); do
-        if ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
-          FAILURES=0
-          break
-        else
-          FAILURES=$((FAILURES + 1))
-          if [ $attempt -lt $RETRIES ]; then
-            sleep 2
-          fi
+      # First check
+      if ! ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
+        # Immediate retry
+        if ! ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
+          echo "Emacs failed health check twice, restarting..."
+          ${pkgs.python3Packages.supervisor}/bin/supervisorctl restart emacs || true
         fi
-      done
-
-      if [ $FAILURES -ge $RETRIES ]; then
-        echo "Emacs failed health check after $RETRIES attempts, restarting..."
-        ${pkgs.python3Packages.supervisor}/bin/supervisorctl restart emacs || true
       fi
 
       sleep $INTERVAL
@@ -307,9 +296,9 @@ pkgs.dockerTools.buildImage {
       # Set to empty to disable, or override with your own value
       "ORG_API_MAX_LIFETIME=900"
       # Health checker settings - monitors emacs and restarts if unhealthy
-      "HEALTH_CHECK_INTERVAL=30"
+      # Checks every INTERVAL seconds; if check fails, retries immediately once
+      "HEALTH_CHECK_INTERVAL=10"
       "HEALTH_CHECK_TIMEOUT=5"
-      "HEALTH_CHECK_RETRIES=3"
       # Git sync settings
       "GIT_SYNC_INTERVAL=60"
       "GIT_SYNC_NEW_FILES=true"
