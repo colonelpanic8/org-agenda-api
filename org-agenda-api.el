@@ -411,12 +411,34 @@ SPAN should be `day' or `week'."
     ,(format "* TODO %s" content)
     :immediate-finish t))
 
+(defun org-agenda-api--cleanup-emacs-state ()
+  "Clean up Emacs state before capture to avoid minibuffer conflicts.
+This resets any stuck state from previous failed operations."
+  ;; Abort any active minibuffer
+  (when (active-minibuffer-window)
+    (org-agenda-api--log 'warn "Found active minibuffer, aborting it")
+    (with-current-buffer (window-buffer (active-minibuffer-window))
+      (abort-recursive-edit)))
+  ;; Abort any in-progress capture
+  (when (and (boundp 'org-capture-mode) org-capture-mode)
+    (org-agenda-api--log 'warn "Found active capture, aborting it")
+    (ignore-errors (org-capture-kill)))
+  ;; Clear the mark to avoid issues
+  (deactivate-mark)
+  ;; Kill any capture buffers that might be lying around
+  (dolist (buf (buffer-list))
+    (when (string-match-p "\\*Capture\\*\\|CAPTURE-" (buffer-name buf))
+      (org-agenda-api--log 'debug "Killing stale capture buffer: %s" (buffer-name buf))
+      (kill-buffer buf))))
+
 (defun org-agenda-api--capture (content)
   "Capture a new TODO with CONTENT."
   (org-agenda-api--log 'debug "Starting capture for: %s" content)
   (org-agenda-api--log 'debug "Inbox file: %s (exists: %s)"
                        org-agenda-api-inbox-file
                        (file-exists-p org-agenda-api-inbox-file))
+  ;; Clean up any stuck state from previous operations
+  (org-agenda-api--cleanup-emacs-state)
   (let ((org-capture-templates
          (list (org-agenda-api--build-capture-template content))))
     (org-agenda-api--log 'debug "Calling org-capture with template: %S" org-capture-templates)
@@ -426,6 +448,8 @@ SPAN should be `day' or `week'."
           (org-agenda-api--log 'debug "org-capture completed successfully"))
       (error
        (org-agenda-api--log 'error "org-capture failed: %s" (error-message-string err))
+       ;; Clean up after failure too
+       (ignore-errors (org-agenda-api--cleanup-emacs-state))
        (signal (car err) (cdr err)))))
   (org-agenda-api--invalidate-cache)
   (org-agenda-api--log 'debug "Cache invalidated, capture complete"))
