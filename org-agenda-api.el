@@ -753,16 +753,14 @@ Returns an alist with 'active' (not-done) and 'done' states."
           (cond
            ((string= keyword "|")
             (setq in-done-section t))
-           ((string-match-p "(.*)$" keyword)
+           (t
             ;; Handle keywords with shortcuts like "TODO(t)"
-            (let ((clean-keyword (replace-regexp-in-string "(.*)$" "" keyword)))
+            (let ((clean-keyword (if (string-match-p "(.*)$" keyword)
+                                     (replace-regexp-in-string "(.*)$" "" keyword)
+                                   keyword)))
               (if in-done-section
                   (push clean-keyword done-states)
-                (push clean-keyword active-states))))
-           (t
-            (if in-done-section
-                (push clean-keyword done-states)
-              (push clean-keyword active-states)))))))
+                (push clean-keyword active-states))))))))
     `(("active" . ,(vconcat (nreverse active-states)))
       ("done" . ,(vconcat (nreverse done-states))))))
 
