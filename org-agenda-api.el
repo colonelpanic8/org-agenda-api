@@ -44,12 +44,49 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'org)
 (require 'org-agenda)
 (require 'org-element)
 (require 'org-capture)
 (require 'json)
 (require 'simple-httpd)
+
+;;; Logging
+
+(defcustom org-agenda-api-log-level 'info
+  "Log level for org-agenda-api.
+Levels are: debug, info, warn, error."
+  :type '(choice (const :tag "Debug" debug)
+                 (const :tag "Info" info)
+                 (const :tag "Warn" warn)
+                 (const :tag "Error" error))
+  :group 'org-agenda-api)
+
+(defun org-agenda-api--log (level format-string &rest args)
+  "Log a message at LEVEL using FORMAT-STRING and ARGS.
+Only logs if LEVEL is at or above `org-agenda-api-log-level'."
+  (let ((levels '(debug info warn error))
+        (prefix (pcase level
+                  ('debug "[DEBUG]")
+                  ('info "[INFO]")
+                  ('warn "[WARN]")
+                  ('error "[ERROR]"))))
+    (when (>= (cl-position level levels)
+              (cl-position org-agenda-api-log-level levels))
+      (apply #'message (concat "org-agenda-api " prefix " " format-string) args))))
+
+(defun org-agenda-api--log-request (endpoint method)
+  "Log an incoming request to ENDPOINT with METHOD."
+  (org-agenda-api--log 'info "Request: %s %s" method endpoint))
+
+(defun org-agenda-api--log-response (endpoint status duration-ms)
+  "Log a response for ENDPOINT with STATUS and DURATION-MS."
+  (org-agenda-api--log 'info "Response: %s -> %s (%dms)" endpoint status duration-ms))
+
+(defun org-agenda-api--log-error (endpoint error-msg)
+  "Log an error for ENDPOINT with ERROR-MSG."
+  (org-agenda-api--log 'error "Error in %s: %s" endpoint error-msg))
 
 ;;; Customization
 
@@ -376,10 +413,22 @@ SPAN should be `day' or `week'."
 
 (defun org-agenda-api--capture (content)
   "Capture a new TODO with CONTENT."
+  (org-agenda-api--log 'debug "Starting capture for: %s" content)
+  (org-agenda-api--log 'debug "Inbox file: %s (exists: %s)"
+                       org-agenda-api-inbox-file
+                       (file-exists-p org-agenda-api-inbox-file))
   (let ((org-capture-templates
          (list (org-agenda-api--build-capture-template content))))
-    (org-capture nil "d"))
-  (org-agenda-api--invalidate-cache))
+    (org-agenda-api--log 'debug "Calling org-capture with template: %S" org-capture-templates)
+    (condition-case err
+        (progn
+          (org-capture nil "d")
+          (org-agenda-api--log 'debug "org-capture completed successfully"))
+      (error
+       (org-agenda-api--log 'error "org-capture failed: %s" (error-message-string err))
+       (signal (car err) (cdr err)))))
+  (org-agenda-api--invalidate-cache)
+  (org-agenda-api--log 'debug "Cache invalidated, capture complete"))
 
 ;;; Capture Template API Functions
 
@@ -589,12 +638,22 @@ Accepts optional query params:
 
 (defservlet create-todo application/json (_path _query headers)
   "Endpoint: Create a new TODO item from JSON body."
-  (let* ((content-header (cadr (assoc "Content" headers)))
-         (json-data (json-parse-string content-header))
-         (title (gethash "title" json-data)))
-    (org-agenda-api--capture title)
-    (insert (json-encode `(("status" . "created")
-                           ("title" . ,title)))))
+  (org-agenda-api--log-request "/create-todo" "POST")
+  (let ((start-time (current-time)))
+    (condition-case err
+        (let* ((content-header (cadr (assoc "Content" headers)))
+               (json-data (json-parse-string content-header))
+               (title (gethash "title" json-data)))
+          (org-agenda-api--log 'debug "Creating todo: %s" title)
+          (org-agenda-api--capture title)
+          (let ((duration-ms (round (* 1000 (float-time (time-subtract (current-time) start-time))))))
+            (org-agenda-api--log-response "/create-todo" "created" duration-ms))
+          (insert (json-encode `(("status" . "created")
+                                 ("title" . ,title)))))
+      (error
+       (org-agenda-api--log-error "/create-todo" (error-message-string err))
+       (insert (json-encode `(("status" . "error")
+                              ("message" . ,(error-message-string err))))))))
   (org-agenda-api--track-request))
 
 (defservlet templates application/json ()
