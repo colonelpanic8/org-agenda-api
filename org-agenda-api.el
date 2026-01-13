@@ -322,7 +322,7 @@ AGENDA-LINE is the raw agenda display text for reference."
                 (filepath (buffer-file-name))
                 (org-id (org-entry-get (point) "ID"))
                 (olpath (org-get-outline-path t))
-                (priority (org-get-priority (point)))
+                (priority (org-entry-get (point) "PRIORITY"))
                 (notify-before (org-agenda-api--parse-notify-before
                                 (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE"))))
             `(("todo" . ,todo)
