@@ -641,6 +641,120 @@ Returns alist with status and details."
           `(("status" . "error")
             ("message" . "No heading found at position")))))))
 
+(defun org-agenda-api--parse-datetime (datetime-string)
+  "Parse DATETIME-STRING into an Emacs time value.
+Accepts ISO format: YYYY-MM-DD or YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM:SS."
+  (when (and datetime-string (not (string-empty-p datetime-string)))
+    (let* ((normalized (replace-regexp-in-string "T" " " datetime-string))
+           (has-time (string-match-p ":" normalized)))
+      (condition-case nil
+          (if has-time
+              (date-to-time (concat normalized ":00"))
+            (date-to-time (concat normalized " 00:00:00")))
+        (error nil)))))
+
+(defun org-agenda-api--update-todo-at (file pos updates)
+  "Update the TODO at FILE and POS with UPDATES alist.
+UPDATES can contain: scheduled, deadline, priority.
+Returns alist with status and details."
+  (with-current-buffer (find-file-noselect file)
+    (save-excursion
+      (goto-char pos)
+      (if (org-at-heading-p)
+          (let ((title (org-get-heading t t t t))
+                (applied-updates nil))
+            ;; Handle scheduled
+            (when (assoc "scheduled" updates)
+              (let ((scheduled-value (cdr (assoc "scheduled" updates))))
+                (if (or (null scheduled-value) (string-empty-p scheduled-value))
+                    ;; Clear scheduled
+                    (progn
+                      (org-schedule '(4))  ; Universal arg removes scheduling
+                      (push '("scheduled" . nil) applied-updates))
+                  ;; Set scheduled
+                  (let ((time (org-agenda-api--parse-datetime scheduled-value)))
+                    (when time
+                      (org-schedule nil time)
+                      (push `("scheduled" . ,scheduled-value) applied-updates))))))
+            ;; Handle deadline
+            (when (assoc "deadline" updates)
+              (let ((deadline-value (cdr (assoc "deadline" updates))))
+                (if (or (null deadline-value) (string-empty-p deadline-value))
+                    ;; Clear deadline
+                    (progn
+                      (org-deadline '(4))  ; Universal arg removes deadline
+                      (push '("deadline" . nil) applied-updates))
+                  ;; Set deadline
+                  (let ((time (org-agenda-api--parse-datetime deadline-value)))
+                    (when time
+                      (org-deadline nil time)
+                      (push `("deadline" . ,deadline-value) applied-updates))))))
+            ;; Handle priority
+            (when (assoc "priority" updates)
+              (let ((priority-value (cdr (assoc "priority" updates))))
+                (if (or (null priority-value) (string-empty-p priority-value))
+                    ;; Clear priority
+                    (progn
+                      (org-priority ?\s)  ; Space removes priority
+                      (push '("priority" . nil) applied-updates))
+                  ;; Set priority (A, B, or C)
+                  (let ((priority-char (string-to-char (upcase priority-value))))
+                    (when (memq priority-char '(?A ?B ?C))
+                      (org-priority priority-char)
+                      (push `("priority" . ,priority-value) applied-updates))))))
+            (save-buffer)
+            (org-agenda-api--invalidate-cache)
+            `(("status" . "updated")
+              ("title" . ,title)
+              ("updates" . ,applied-updates)))
+        `(("status" . "error")
+          ("message" . "No heading found at position"))))))
+
+(defservlet update application/json (_path _query headers)
+  "Endpoint: Update a TODO's scheduled date, deadline, or priority.
+Accepts JSON body with:
+  - id: org-id of the todo (preferred)
+  - file: file path (fallback)
+  - pos: position in file (fallback)
+  - title: heading title (for verification)
+  - scheduled: ISO date/datetime string or null to clear
+  - deadline: ISO date/datetime string or null to clear
+  - priority: A, B, C, or null to clear"
+  (condition-case err
+      (let* ((content-header (cadr (assoc "Content" headers)))
+             (json-data (json-parse-string content-header))
+             (id (gethash "id" json-data))
+             (file (gethash "file" json-data))
+             (pos (gethash "pos" json-data))
+             (title (gethash "title" json-data))
+             (scheduled (gethash "scheduled" json-data))
+             (deadline (gethash "deadline" json-data))
+             (priority (gethash "priority" json-data))
+             (location nil)
+             (updates nil))
+        ;; Build updates alist (include keys even if value is nil, to signal clearing)
+        (when (gethash "scheduled" json-data json-data)
+          (push (cons "scheduled" (if (eq scheduled :null) nil scheduled)) updates))
+        (when (gethash "deadline" json-data json-data)
+          (push (cons "deadline" (if (eq deadline :null) nil deadline)) updates))
+        (when (gethash "priority" json-data json-data)
+          (push (cons "priority" (if (eq priority :null) nil priority)) updates))
+        ;; Try to find by ID first
+        (setq location (org-agenda-api--find-todo-by-id id))
+        ;; Fall back to file+pos+title
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
+        (if location
+            (let ((result (org-agenda-api--update-todo-at
+                           (car location) (cdr location) updates)))
+              (insert (json-encode result)))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Todo not found"))))))
+    (error
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
 (defservlet complete application/json (_path _query headers)
   "Endpoint: Mark a TODO as complete.
 Accepts JSON body with:
