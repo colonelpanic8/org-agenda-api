@@ -4,8 +4,10 @@ import pytest
 from conftest import TEST_DATE, TEST_DATE_NEXT_DAY, TEST_DATE_PREV_DAY
 
 
-# Note: Some tests may skip if the fake date configuration doesn't work
-# with org-agenda-list (which uses current-time, not calendar-current-date)
+# Note: The test setup uses a fake date (2024-06-15) configured in conftest.py.
+# The fake date is set by overriding calendar-current-date in Emacs.
+# The /agenda endpoint MUST use calendar-current-date (not current-time)
+# to determine the agenda start date for tests to work correctly.
 
 
 class TestAgenda:
@@ -95,6 +97,33 @@ class TestAgenda:
             assert entry.get("file") is not None, "Entry should have file path"
             assert entry.get("pos") is not None, "Entry should have position"
             assert isinstance(entry["pos"], int), "Position should be integer"
+
+    def test_agenda_returns_entries_for_today(self, api):
+        """Agenda should return entries scheduled for today (the fake test date).
+
+        This test verifies that the /agenda endpoint correctly uses the
+        fake test date (2024-06-15) set via calendar-current-date override.
+
+        The test fixture 'today.org' contains items scheduled for 2024-06-15:
+        - 'Task scheduled for today' with SCHEDULED
+        - 'Task with deadline today' with DEADLINE
+        """
+        response = api.get_agenda()
+        data = response.json()
+
+        # This test MUST find entries - if it fails, the date handling is broken
+        assert len(data["entries"]) > 0, (
+            "Agenda should contain entries for the test date (2024-06-15). "
+            "If this fails, the /agenda endpoint may not be using "
+            "calendar-current-date to determine the start date."
+        )
+
+        # Verify we got entries from today.org
+        titles = [entry.get("title") for entry in data["entries"]]
+        assert any("scheduled for today" in (t or "").lower() for t in titles), (
+            f"Expected to find 'Task scheduled for today' in agenda. "
+            f"Found titles: {titles}"
+        )
 
 
 class TestAgendaDateParameter:

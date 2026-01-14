@@ -22,10 +22,33 @@
                              (directory-file-name
                               (file-name-directory load-file-name)))))
 
-;; Load dependencies and the package
+;; Load dependencies
 (require 'org)
 (require 'org-agenda)
 (require 'simple-httpd)
+
+;; Override calendar-current-date and org-today BEFORE loading org-agenda-api
+;; and BEFORE setting org-agenda-files. This ensures all date-related
+;; operations use the fake date for deterministic tests.
+;; Format: "YYYY-MM-DD" e.g., "2024-06-15"
+(when test-fake-date
+  (let* ((parts (split-string test-fake-date "-"))
+         (year (string-to-number (nth 0 parts)))
+         (month (string-to-number (nth 1 parts)))
+         (day (string-to-number (nth 2 parts)))
+         ;; Calculate the absolute day number for the fake date
+         (absolute-day (calendar-absolute-from-gregorian (list month day year))))
+    (defun calendar-current-date ()
+      "Return a fake date for testing."
+      (list month day year))
+    ;; Also override org-today which is used internally by org-agenda
+    ;; to determine which items are scheduled/deadline for "today"
+    (defun org-today ()
+      "Return the fake date as an absolute day number for testing."
+      absolute-day)
+    (message "Test mode: Using fake date %s (absolute day %d)" test-fake-date absolute-day)))
+
+;; Now load org-agenda-api (after date overrides are in place)
 (require 'org-agenda-api)
 
 ;; Configure org-agenda-files to point to test directory
@@ -33,17 +56,6 @@
 ;; expects file paths, not directories
 (setq org-agenda-files
       (directory-files test-org-dir t "\\.org$"))
-
-;; Override calendar-current-date if a fake date is set (for deterministic tests)
-;; Format: "YYYY-MM-DD" e.g., "2024-06-15"
-(when test-fake-date
-  (let* ((parts (split-string test-fake-date "-"))
-         (year (string-to-number (nth 0 parts)))
-         (month (string-to-number (nth 1 parts)))
-         (day (string-to-number (nth 2 parts))))
-    (defun calendar-current-date ()
-      "Return a fake date for testing."
-      (list month day year))))
 
 ;; Configure the API
 (setq org-agenda-api-port test-port)
