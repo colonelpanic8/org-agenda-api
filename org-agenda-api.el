@@ -1094,11 +1094,12 @@ Accepts JSON body with:
              (location nil)
              (updates nil))
         ;; Build updates alist (include keys even if value is nil, to signal clearing)
-        (when (gethash "scheduled" json-data json-data)
+        ;; Use :not-found sentinel to properly detect if key exists in JSON
+        (unless (eq (gethash "scheduled" json-data :not-found) :not-found)
           (push (cons "scheduled" (if (eq scheduled :null) nil scheduled)) updates))
-        (when (gethash "deadline" json-data json-data)
+        (unless (eq (gethash "deadline" json-data :not-found) :not-found)
           (push (cons "deadline" (if (eq deadline :null) nil deadline)) updates))
-        (when (gethash "priority" json-data json-data)
+        (unless (eq (gethash "priority" json-data :not-found) :not-found)
           (push (cons "priority" (if (eq priority :null) nil priority)) updates))
         ;; Try to find by ID first
         (setq location (org-agenda-api--find-todo-by-id id))
