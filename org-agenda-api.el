@@ -380,17 +380,26 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
               ("agendaLine" . ,(substring-no-properties agenda-line)))))))))
 
-(defun org-agenda-api--run-agenda (span)
+(defun org-agenda-api--run-agenda (span &optional start-date)
   "Run org-agenda and return entries as a list of JSON-encodable alists.
-SPAN should be `day' or `week'."
+SPAN should be `day' or `week'.
+START-DATE is an optional date string in YYYY-MM-DD format."
   (let ((org-agenda-span span)
         (org-agenda-use-time-grid t)
         (org-agenda-start-on-weekday nil)
         (org-agenda-window-setup 'current-window)
+        ;; Parse date string to calendar date format (month day year) if provided
+        (parsed-date (when start-date
+                       (let ((parts (split-string start-date "-")))
+                         (when (= (length parts) 3)
+                           (list (string-to-number (nth 1 parts))  ; month
+                                 (string-to-number (nth 2 parts))  ; day
+                                 (string-to-number (nth 0 parts))) ; year
+                           ))))
         entries)
     ;; Run the agenda
     (save-window-excursion
-      (org-agenda-list nil nil (if (eq span 'day) 1 7))
+      (org-agenda-list parsed-date nil (if (eq span 'day) 1 7))
       (with-current-buffer "*Org Agenda*"
         (goto-char (point-min))
         ;; Skip the header lines (date header etc.)
@@ -615,13 +624,11 @@ Returns a list of integers (minutes before event)."
      ((integerp alert-time) (list alert-time))
      (t '(10)))))
 
-(defservlet get-all-todos application/json (path)
+(defservlet get-all-todos application/json (_path query)
   "Endpoint: Return all TODO items from agenda files as JSON.
 Response is wrapped with notification defaults.
 Accepts optional query param 'refresh' (true/1) to git pull repos first."
-  (let* ((query-string (cadr (split-string (or path "") "?")))
-         (params (when query-string (url-parse-query-string query-string)))
-         (refresh-param (cadr (assoc "refresh" params)))
+  (let* ((refresh-param (cadr (assoc "refresh" query)))
          (git-results (when (member refresh-param '("true" "1"))
                         (org-agenda-api--git-refresh-all)))
          (todos (org-agenda-api--get-agenda-todos))
@@ -640,21 +647,25 @@ Accepts optional query param 'refresh' (true/1) to git pull repos first."
                    (org-agenda-api--get-today-agenda))))
   (org-agenda-api--track-request))
 
-(defservlet agenda application/json (path)
+(defservlet agenda application/json (_path query)
   "Endpoint: Return org-agenda entries as JSON.
 Accepts optional query params:
   - 'span' (day or week, defaults to day)
+  - 'date' (YYYY-MM-DD format, defaults to today)
   - 'refresh' (true/1) to git pull repos first."
-  (let* ((query-string (cadr (split-string (or path "") "?")))
-         (params (when query-string (url-parse-query-string query-string)))
-         (span-param (cadr (assoc "span" params)))
-         (refresh-param (cadr (assoc "refresh" params)))
+  (let* ((span-param (cadr (assoc "span" query)))
+         (date-param (cadr (assoc "date" query)))
+         (refresh-param (cadr (assoc "refresh" query)))
          (git-results (when (member refresh-param '("true" "1"))
                         (org-agenda-api--git-refresh-all)))
          (span (if (string= span-param "week") 'week 'day))
-         (entries (org-agenda-api--run-agenda span))
+         ;; Use requested date or default to today (using calendar-current-date for testability)
+         (today (calendar-current-date))
+         (today-str (format "%04d-%02d-%02d" (nth 2 today) (nth 0 today) (nth 1 today)))
+         (effective-date (or date-param today-str))
+         (entries (org-agenda-api--run-agenda span effective-date))
          (response `(("span" . ,(symbol-name span))
-                     ("date" . ,(format-time-string "%Y-%m-%d"))
+                     ("date" . ,effective-date)
                      ("entries" . ,(vconcat entries)))))
     (when git-results
       (push `("gitRefresh" . ,(vconcat git-results)) response))

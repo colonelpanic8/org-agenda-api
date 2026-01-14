@@ -18,7 +18,10 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # This makes tests fully deterministic and reproducible
 TEST_DATE = "2024-06-15"  # A Saturday
 TEST_DATE_ORG = "2024-06-15 Sat"
+TEST_DATE_NEXT_DAY = "2024-06-16"
 TEST_DATE_NEXT_DAY_ORG = "2024-06-16 Sun"
+TEST_DATE_PREV_DAY = "2024-06-14"
+TEST_DATE_PREV_DAY_ORG = "2024-06-14 Fri"
 
 
 class EmacsServer:
@@ -109,6 +112,13 @@ class APIClient:
         """GET /get-todays-agenda"""
         return self.get("/get-todays-agenda")
 
+    def get_agenda(self, span: str = "day", date: str = None) -> requests.Response:
+        """GET /agenda with optional span and date parameters."""
+        params = f"?span={span}"
+        if date:
+            params += f"&date={date}"
+        return self.get(f"/agenda{params}")
+
     def create_todo(self, title: str) -> requests.Response:
         """POST /create-todo"""
         return self.post("/create-todo", json={"title": title})
@@ -120,10 +130,6 @@ class APIClient:
     def capture(self, template: str, values: dict) -> requests.Response:
         """POST /capture"""
         return self.post("/capture", json={"template": template, "values": values})
-
-    def get_agenda(self, span: str = "day") -> requests.Response:
-        """GET /agenda"""
-        return self.get(f"/agenda?span={span}")
 
     def complete_todo(self, todo: dict, state: str = "DONE") -> requests.Response:
         """POST /complete"""
@@ -180,6 +186,9 @@ def org_test_dir(tmp_path_factory):
 
 * TODO Task scheduled for tomorrow
   SCHEDULED: <{TEST_DATE_NEXT_DAY_ORG}>
+
+* TODO Task scheduled for yesterday
+  SCHEDULED: <{TEST_DATE_PREV_DAY_ORG}>
 """)
 
     return test_dir

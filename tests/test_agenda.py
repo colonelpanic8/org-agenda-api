@@ -1,6 +1,7 @@
 """Integration tests for GET /agenda endpoint."""
 
 import pytest
+from conftest import TEST_DATE, TEST_DATE_NEXT_DAY, TEST_DATE_PREV_DAY
 
 
 # Note: Some tests may skip if the fake date configuration doesn't work
@@ -94,3 +95,63 @@ class TestAgenda:
             assert entry.get("file") is not None, "Entry should have file path"
             assert entry.get("pos") is not None, "Entry should have position"
             assert isinstance(entry["pos"], int), "Position should be integer"
+
+
+class TestAgendaDateParameter:
+    """Tests for the date parameter on /agenda endpoint."""
+
+    def test_default_date_is_today(self, api):
+        """Without date parameter, should return today's date (TEST_DATE)."""
+        response = api.get_agenda()
+        data = response.json()
+        assert data["date"] == TEST_DATE
+
+    def test_date_parameter_accepted(self, api):
+        """Should accept a date parameter."""
+        response = api.get_agenda(date=TEST_DATE_NEXT_DAY)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date"] == TEST_DATE_NEXT_DAY
+
+    def test_date_parameter_returns_specified_date(self, api):
+        """Should return the specified date in the response."""
+        response = api.get_agenda(date=TEST_DATE_PREV_DAY)
+        data = response.json()
+        assert data["date"] == TEST_DATE_PREV_DAY
+
+    def test_entries_returned_as_array(self, api):
+        """Entries should be returned as an array."""
+        response = api.get_agenda(date=TEST_DATE)
+        data = response.json()
+
+        # Entries should be a list (may be empty if no items for that date)
+        assert isinstance(data["entries"], list)
+
+    def test_different_dates_return_correct_date_in_response(self, api):
+        """Different date parameters should be reflected in the response."""
+        today_response = api.get_agenda(date=TEST_DATE)
+        tomorrow_response = api.get_agenda(date=TEST_DATE_NEXT_DAY)
+        yesterday_response = api.get_agenda(date=TEST_DATE_PREV_DAY)
+
+        assert today_response.json()["date"] == TEST_DATE
+        assert tomorrow_response.json()["date"] == TEST_DATE_NEXT_DAY
+        assert yesterday_response.json()["date"] == TEST_DATE_PREV_DAY
+
+    def test_yesterday_date_parameter(self, api):
+        """Should be able to fetch yesterday's agenda."""
+        response = api.get_agenda(date=TEST_DATE_PREV_DAY)
+        data = response.json()
+
+        assert data["date"] == TEST_DATE_PREV_DAY
+        # Verify we got a valid response structure
+        assert "entries" in data
+        assert isinstance(data["entries"], list)
+
+    def test_date_with_week_span(self, api):
+        """Date parameter should work with week span."""
+        response = api.get_agenda(span="week", date=TEST_DATE_NEXT_DAY)
+        data = response.json()
+
+        assert response.status_code == 200
+        assert data["span"] == "week"
+        assert data["date"] == TEST_DATE_NEXT_DAY
