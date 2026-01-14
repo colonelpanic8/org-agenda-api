@@ -55,6 +55,59 @@
           inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiEl containerInitEl;
         };
 
+        # Package an existing emacs config directory (with pre-populated straight/)
+        # The straight/ directory should already have packages installed
+        # Usage: mkEmacsConfig { emacsConfigDir = ./path/to/emacs.d; packages = [...]; }
+        # packages: list of package names to include (default includes org essentials)
+        mkEmacsConfig = {
+          emacsConfigDir,
+          packages ? [
+            # Core
+            "straight.el" "melpa" "gnu-elpa-mirror" "use-package" "bind-key" "dash.el"
+            # Org ecosystem
+            "org" "org-agenda-api" "org-bullets" "org-project-capture" "org-ql"
+            "org-super-agenda" "org-wild-notifier.el" "org-window-habit"
+            # Dependencies
+            "s.el" "f.el" "ht.el" "ts.el" "peg" "compat" "transient" "magit" "with-editor"
+            "org-roam" "emacsql" "emacsql-sqlite-builtin"
+          ]
+        }:
+          pkgs.runCommand "emacs-config" {} ''
+            mkdir -p $out
+
+            # Copy elisp files
+            for f in ${emacsConfigDir}/*.el; do
+              if [ -f "$f" ]; then
+                cp "$f" $out/
+              fi
+            done
+
+            # Copy only needed packages from straight/
+            if [ -d "${emacsConfigDir}/straight" ]; then
+              mkdir -p $out/straight/repos $out/straight/build
+
+              # Copy repos
+              for pkg in ${pkgs.lib.concatStringsSep " " packages}; do
+                if [ -d "${emacsConfigDir}/straight/repos/$pkg" ]; then
+                  cp -rL --no-preserve=mode "${emacsConfigDir}/straight/repos/$pkg" $out/straight/repos/ 2>/dev/null || true
+                fi
+              done
+
+              # Copy build directories
+              for pkg in ${pkgs.lib.concatStringsSep " " packages}; do
+                # Build dirs don't have .el suffix
+                build_name=$(echo "$pkg" | sed 's/\.el$//')
+                if [ -d "${emacsConfigDir}/straight/build/$build_name" ]; then
+                  cp -rL --no-preserve=mode "${emacsConfigDir}/straight/build/$build_name" $out/straight/build/ 2>/dev/null || true
+                fi
+              done
+
+              # Copy essential straight.el files
+              cp "${emacsConfigDir}/straight/build-cache.el" $out/straight/ 2>/dev/null || true
+              cp "${emacsConfigDir}/straight/repos.el" $out/straight/ 2>/dev/null || true
+            fi
+          '';
+
         # Bootstrap script to populate straight.el packages
         # Run this outside the Nix sandbox to download packages
         bootstrapScript = pkgs.writeShellScriptBin "bootstrap-emacs-config" ''
@@ -99,8 +152,8 @@
         '';
 
       in {
-        # Expose mkContainer as a lib function
-        lib = { inherit mkContainer; };
+        # Expose builder functions
+        lib = { inherit mkContainer mkEmacsConfig; };
 
         packages = {
           # The elisp package
