@@ -10,6 +10,25 @@
 (require 'org)
 (require 'org-agenda)
 
+;; === Container Logging Configuration ===
+
+;; Enable debug-on-error to get tracebacks when errors occur
+(setq debug-on-error t)
+
+;; Log all Emacs messages to stderr so they appear in container logs
+(defun org-agenda-api--log-to-stderr (format-string &rest args)
+  "Log FORMAT-STRING with ARGS to stderr for container visibility."
+  (let ((msg (apply #'format format-string args)))
+    (unless (string-empty-p msg)
+      ;; Write to stderr using external-debugging-output
+      (princ (format "[emacs] %s\n" msg) #'external-debugging-output))))
+
+;; Advise message function to also log to stderr
+(advice-add 'message :after #'org-agenda-api--log-to-stderr)
+
+;; Log startup
+(message "org-agenda-api container-init.el loading...")
+
 ;; org-agenda-files should be set by custom elisp
 ;; We don't set a default here to avoid interfering with custom config
 
@@ -41,8 +60,16 @@
   (when (and custom-elisp-content (not (string-empty-p custom-elisp-content)))
     (eval (car (read-from-string (format "(progn %s)" custom-elisp-content))))))
 
+;; Log configuration summary
+(message "org-agenda-api configuration:")
+(message "  org-agenda-files: %s" org-agenda-files)
+(message "  inbox-file: %s" org-agenda-api-inbox-file)
+(message "  port: %d" org-agenda-api-port)
+
 ;; Start the API server
+(message "Starting org-agenda-api server...")
 (org-agenda-api-start)
+(message "org-agenda-api server started successfully on port %d" org-agenda-api-port)
 
 (provide 'container-init)
 ;;; container-init.el ends here
