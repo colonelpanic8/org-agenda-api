@@ -40,6 +40,7 @@
 ;;       ?refresh=true - Git pull repos containing agenda files first
 ;;   GET /get-todays-agenda - Returns scheduled/deadlined items for today
 ;;   GET /health - Health check endpoint for monitoring (nginx, supervisord)
+;;   GET /agenda-files - Returns list of org-agenda-files
 ;;   POST /create-todo - Create a new TODO item
 
 ;;; Code:
@@ -768,6 +769,19 @@ Returns an alist with 'active' (not-done) and 'done' states."
   "Endpoint: Return configured TODO states.
 Returns active (not-done) states and done states separately."
   (insert (json-encode (org-agenda-api--get-todo-states)))
+  (org-agenda-api--track-request))
+
+(defservlet agenda-files application/json ()
+  "Endpoint: Return the list of org-agenda-files as JSON."
+  (let* ((files (mapcar #'expand-file-name org-agenda-files))
+         (file-info (mapcar (lambda (f)
+                              `(("path" . ,f)
+                                ("exists" . ,(if (file-exists-p f) t :json-false))
+                                ("readable" . ,(if (file-readable-p f) t :json-false))))
+                            files))
+         (response `(("count" . ,(length files))
+                     ("files" . ,(vconcat file-info)))))
+    (insert (json-encode response)))
   (org-agenda-api--track-request))
 
 (defservlet restart application/json ()
