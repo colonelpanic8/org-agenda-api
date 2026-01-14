@@ -151,13 +151,15 @@ seconds, checked after each request completes."
 
 (defun org-agenda-api--get-max-mtime ()
   "Get the maximum modification time across all `org-agenda-files'."
-  (apply #'max
-         (mapcar (lambda (file)
-                   (if (file-exists-p file)
-                       (float-time (file-attribute-modification-time
-                                    (file-attributes file)))
-                     0))
-                 org-agenda-files)))
+  (if (null org-agenda-files)
+      0
+    (apply #'max
+           (mapcar (lambda (file)
+                     (if (file-exists-p file)
+                         (float-time (file-attribute-modification-time
+                                      (file-attributes file)))
+                       0))
+                   org-agenda-files))))
 
 (defun org-agenda-api--cache-valid-p ()
   "Return t if the TODO cache is still valid."
