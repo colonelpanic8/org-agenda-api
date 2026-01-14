@@ -123,6 +123,29 @@ class TestUpdatePriority:
         response = api.update_todo(todo, {"priority": None})
         assert response.status_code == 200
 
+    def test_clear_priority_when_none_exists(self, api):
+        """Should handle clearing priority on todo that has no priority."""
+        unique_title = "Clear nonexistent priority test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+        # Newly created todo should have no priority
+        assert todo.get("priority") is None
+
+        # Try to clear priority when there is none - should not error
+        response = api.update_todo(todo, {"priority": None})
+        assert response.status_code == 200
+        data = response.json()
+        # Should succeed, not return an error
+        assert data.get("status") == "updated"
+
 
 class TestUpdateScheduled:
     """Tests for updating todo scheduled date."""

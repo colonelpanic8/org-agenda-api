@@ -1056,9 +1056,11 @@ Returns alist with status and details."
             (when (assoc "priority" updates)
               (let ((priority-value (cdr (assoc "priority" updates))))
                 (if (or (null priority-value) (string-empty-p priority-value))
-                    ;; Clear priority
+                    ;; Clear priority - ignore error if no priority cookie exists
                     (progn
-                      (org-priority ?\s)  ; Space removes priority
+                      (condition-case nil
+                          (org-priority ?\s)  ; Space removes priority
+                        (error nil))  ; Ignore "No priority cookie found" error
                       (push '("priority" . nil) applied-updates))
                   ;; Set priority (A, B, or C)
                   (let ((priority-char (string-to-char (upcase priority-value))))
