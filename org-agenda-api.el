@@ -492,6 +492,58 @@ START-DATE is an optional date string in YYYY-MM-DD format."
     (org-agenda-api--log 'debug "run-agenda: Total entries found: %d" (length entries))
     (nreverse entries)))
 
+(defun org-agenda-api--list-custom-views ()
+  "Return a list of available custom agenda views.
+Each view is an alist with 'key' and 'name' entries."
+  (let ((views nil))
+    (dolist (cmd org-agenda-custom-commands)
+      (let ((key (car cmd))
+            (rest (cdr cmd)))
+        ;; Skip entries that are just category separators (string only)
+        (when (and (stringp key)
+                   (consp rest))
+          (let ((name (if (stringp (car rest))
+                          (car rest)
+                        ;; No description, use key as name
+                        key)))
+            (push `(("key" . ,key)
+                    ("name" . ,name))
+                  views)))))
+    (nreverse views)))
+
+(defun org-agenda-api--run-custom-view (key)
+  "Run the custom agenda view with KEY and return entries.
+Returns a list of entry alists extracted from the agenda buffer."
+  (org-agenda-api--log 'debug "run-custom-view: key=%s" key)
+  (let ((entries nil)
+        (org-agenda-window-setup 'current-window))
+    (save-window-excursion
+      ;; Run the custom agenda command
+      (org-agenda nil key)
+      (with-current-buffer "*Org Agenda*"
+        (org-agenda-api--log 'debug "run-custom-view: agenda buffer:\n%s" (buffer-string))
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let* ((line (buffer-substring (line-beginning-position) (line-end-position)))
+                 (marker (get-text-property (line-beginning-position) 'org-hd-marker)))
+            (when marker
+              (let ((entry-data (org-agenda-api--extract-entry-data marker line)))
+                (when entry-data
+                  (push entry-data entries)))))
+          (forward-line 1)))
+      (kill-buffer "*Org Agenda*"))
+    (org-agenda-api--log 'debug "run-custom-view: Total entries found: %d" (length entries))
+    (nreverse entries)))
+
+(defun org-agenda-api--get-custom-view-name (key)
+  "Get the name/description for the custom view with KEY."
+  (let ((cmd (assoc key org-agenda-custom-commands)))
+    (when cmd
+      (let ((rest (cdr cmd)))
+        (if (and (consp rest) (stringp (car rest)))
+            (car rest)
+          key)))))
+
 (defun org-agenda-api--build-capture-template (content)
   "Build a capture template for CONTENT."
   `("d" "Dynamic" entry (file ,org-agenda-api-inbox-file)
@@ -870,6 +922,35 @@ Returns active (not-done) states and done states separately."
          (response `(("count" . ,(length files))
                      ("files" . ,(vconcat file-info)))))
     (insert (json-encode response)))
+  (org-agenda-api--track-request))
+
+(defservlet custom-views application/json ()
+  "Endpoint: Return list of available custom agenda views."
+  (let* ((views (org-agenda-api--list-custom-views))
+         (response `(("views" . ,(vconcat views)))))
+    (insert (json-encode response)))
+  (org-agenda-api--track-request))
+
+(defservlet custom-view application/json (_path query)
+  "Endpoint: Run a custom agenda view and return entries as JSON.
+Accepts query params:
+  - 'key' (required): The custom agenda command key
+  - 'refresh' (optional): If 'true' or '1', git pull repos first."
+  (let* ((key (cadr (assoc "key" query)))
+         (refresh-param (cadr (assoc "refresh" query)))
+         (git-results (when (member refresh-param '("true" "1"))
+                        (org-agenda-api--git-refresh-all))))
+    (if (or (null key) (string= key ""))
+        (insert (json-encode `(("status" . "error")
+                               ("message" . "Missing required 'key' parameter"))))
+      (let* ((name (org-agenda-api--get-custom-view-name key))
+             (entries (org-agenda-api--run-custom-view key))
+             (response `(("key" . ,key)
+                         ("name" . ,name)
+                         ("entries" . ,(vconcat entries)))))
+        (when git-results
+          (push `("gitRefresh" . ,(vconcat git-results)) response))
+        (insert (json-encode response)))))
   (org-agenda-api--track-request))
 
 (defservlet restart application/json ()

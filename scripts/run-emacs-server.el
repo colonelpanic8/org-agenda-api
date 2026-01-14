@@ -57,6 +57,18 @@
 (setq org-agenda-files
       (directory-files test-org-dir t "\\.org$"))
 
+;; Configure TODO states to include NEXT, STARTED, etc.
+(setq org-todo-keywords
+      '((sequence "TODO(t)" "NEXT(n)" "STARTED(s)" "WAITING(w)" "|" "DONE(d)" "CANCELLED(c)")))
+
+;; Configure custom agenda commands for testing
+(setq org-agenda-custom-commands
+      '(("n" "Next actions" todo "NEXT")
+        ("s" "Started tasks" todo "STARTED")
+        ("w" "Waiting tasks" todo "WAITING")
+        ("h" "High priority" tags-todo "+PRIORITY=\"A\"")
+        ("W" "Work tasks" tags-todo "+work")))
+
 ;; Configure the API
 (setq org-agenda-api-port test-port)
 (when test-inbox

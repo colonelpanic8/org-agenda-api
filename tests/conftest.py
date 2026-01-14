@@ -151,6 +151,14 @@ class APIClient:
             **updates,
         })
 
+    def get_custom_views(self) -> requests.Response:
+        """GET /custom-views"""
+        return self.get("/custom-views")
+
+    def get_custom_view(self, key: str) -> requests.Response:
+        """GET /custom-view with key parameter."""
+        return self.get(f"/custom-view?key={key}")
+
 
 def find_free_port() -> int:
     """Find a free port to use for testing."""
