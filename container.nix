@@ -143,7 +143,7 @@ let
     stdout_logfile_maxbytes=0
     stderr_logfile=/dev/stderr
     stderr_logfile_maxbytes=0
-    environment=PATH="${pkgs.git}/bin:${pkgs.openssh}/bin"${if customElispFile != null then ",${customElispEnv}" else ""}
+    environment=PATH="${pkgs.coreutils}/bin:${pkgs.git}/bin:${pkgs.openssh}/bin"${if customElispFile != null then ",${customElispEnv}" else ""}
 
     [program:nginx]
     command=${pkgs.nginx}/bin/nginx -c ${nginxConf}
