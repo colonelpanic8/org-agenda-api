@@ -10,24 +10,8 @@
 (require 'org)
 (require 'org-agenda)
 
-;; Helper function to expand directories to org files
-(defun org-agenda-api--expand-to-org-files (paths)
-  "Expand PATHS to a list of org files.
-If a path is a directory, find all .org files in it recursively.
-If a path is a file, include it directly."
-  (cl-loop for path in paths
-           if (file-directory-p path)
-           append (directory-files-recursively path "\\.org$")
-           else if (file-exists-p path)
-           collect path))
-
-;; Set org-agenda-files from environment or default
-(setq org-agenda-files
-      (org-agenda-api--expand-to-org-files
-       (let ((env-files (getenv "ORG_AGENDA_FILES")))
-         (if env-files
-             (split-string env-files ":")
-           '("/data/org")))))
+;; org-agenda-files should be set by custom elisp
+;; We don't set a default here to avoid interfering with custom config
 
 ;; Set inbox file for captures
 (setq org-agenda-api-inbox-file
