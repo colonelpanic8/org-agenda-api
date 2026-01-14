@@ -249,6 +249,44 @@ VALUE can be space or comma separated minutes, e.g., \"10 30 60\" or \"10,30,60\
                             (when (> n 0) n)))
                         parts)))))
 
+(defun org-agenda-api--get-planning-info ()
+  "Get scheduled and deadline info at point, including whether they have times.
+Returns alist with scheduled-time, scheduled-has-time, deadline-time, deadline-has-time."
+  (save-excursion
+    (let ((scheduled-time (org-get-scheduled-time (point)))
+          (deadline-time (org-get-deadline-time (point)))
+          (scheduled-has-time nil)
+          (deadline-has-time nil))
+      ;; Check the planning line for time components
+      (when (or scheduled-time deadline-time)
+        (let ((end (save-excursion (outline-next-heading) (point))))
+          (forward-line 1)
+          (when (looking-at org-planning-line-re)
+            (let ((line (buffer-substring-no-properties (point) (line-end-position))))
+              ;; Check SCHEDULED timestamp for time
+              (when (and scheduled-time
+                         (string-match "SCHEDULED: <[^>]+>" line))
+                (let ((ts (match-string 0 line)))
+                  (setq scheduled-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))))
+              ;; Check DEADLINE timestamp for time
+              (when (and deadline-time
+                         (string-match "DEADLINE: <[^>]+>" line))
+                (let ((ts (match-string 0 line)))
+                  (setq deadline-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))))))))
+      `((scheduled-time . ,scheduled-time)
+        (scheduled-has-time . ,scheduled-has-time)
+        (deadline-time . ,deadline-time)
+        (deadline-has-time . ,deadline-has-time)))))
+
+(defun org-agenda-api--format-timestamp (time has-time)
+  "Format TIME as ISO string.
+If HAS-TIME is non-nil, include time component in local timezone.
+Otherwise return date-only format."
+  (when time
+    (if has-time
+        (format-time-string "%Y-%m-%dT%H:%M:%S" time)
+      (format-time-string "%Y-%m-%d" time))))
+
 (defun org-agenda-api--get-todo-elements-from-filepath (filepath)
   "Extract all TODO headline elements from FILEPATH.
 Uses `org-map-entries' for efficient traversal instead of
@@ -258,26 +296,27 @@ expensive `org-element-at-point' calls."
      (lambda ()
        ;; We're at a headline with a TODO keyword
        ;; Extract properties directly from org functions (much faster than org-element)
-       (let ((todo (org-get-todo-state))
-             (title (org-get-heading t t t t))  ; no-tags, no-todo, no-priority, no-comment
-             (tags (org-get-tags))
-             (level (org-current-level))
-             (scheduled (org-get-scheduled-time (point)))
-             (deadline (org-get-deadline-time (point)))
-             (pos (point))
-             (org-id (org-entry-get (point) "ID"))
-             (olpath (org-get-outline-path t))  ; include current heading
-             (notify-before (org-agenda-api--parse-notify-before
-                             (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE"))))
+       (let* ((todo (org-get-todo-state))
+              (title (org-get-heading t t t t))  ; no-tags, no-todo, no-priority, no-comment
+              (tags (org-get-tags))
+              (level (org-current-level))
+              (planning (org-agenda-api--get-planning-info))
+              (scheduled-time (alist-get 'scheduled-time planning))
+              (scheduled-has-time (alist-get 'scheduled-has-time planning))
+              (deadline-time (alist-get 'deadline-time planning))
+              (deadline-has-time (alist-get 'deadline-has-time planning))
+              (pos (point))
+              (org-id (org-entry-get (point) "ID"))
+              (olpath (org-get-outline-path t))  ; include current heading
+              (notify-before (org-agenda-api--parse-notify-before
+                              (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE"))))
          ;; Return an alist directly for JSON encoding (skip org-element overhead)
          `(("todo" . ,todo)
            ("title" . ,title)
            ("tags" . ,(if tags (vconcat tags) nil))
            ("level" . ,level)
-           ("scheduled" . ,(when scheduled
-                             (format-time-string "%Y-%m-%dT%H:%M:%SZ" scheduled)))
-           ("deadline" . ,(when deadline
-                            (format-time-string "%Y-%m-%dT%H:%M:%SZ" deadline)))
+           ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+           ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
            ("file" . ,filepath)
            ("pos" . ,pos)
            ("id" . ,org-id)
@@ -299,20 +338,29 @@ Uses caching to avoid re-processing unchanged files."
 
 (defun org-agenda-api--element-to-json (element)
   "Convert org ELEMENT to an alist suitable for JSON encoding."
-  (let ((todo (org-element-property :todo-keyword element))
-        (title (org-element-property :raw-value element))
-        (tags (org-element-property :tags element))
-        (level (org-element-property :level element))
-        (scheduled (org-element-property :scheduled element))
-        (deadline (org-element-property :deadline element)))
+  (let* ((todo (org-element-property :todo-keyword element))
+         (title (org-element-property :raw-value element))
+         (tags (org-element-property :tags element))
+         (level (org-element-property :level element))
+         (scheduled (org-element-property :scheduled element))
+         (deadline (org-element-property :deadline element))
+         ;; Check if timestamps have time components
+         (scheduled-has-time (and scheduled
+                                  (org-element-property :hour-start scheduled)))
+         (deadline-has-time (and deadline
+                                 (org-element-property :hour-start deadline))))
     `(("todo" . ,todo)
       ("title" . ,title)
       ("tags" . ,tags)
       ("level" . ,level)
       ("scheduled" . ,(when scheduled
-                        (org-format-timestamp scheduled "%Y-%m-%dT%H:%M:%SZ")))
+                        (if scheduled-has-time
+                            (org-format-timestamp scheduled "%Y-%m-%dT%H:%M:%S")
+                          (org-format-timestamp scheduled "%Y-%m-%d"))))
       ("deadline" . ,(when deadline
-                       (org-format-timestamp deadline "%Y-%m-%dT%H:%M:%SZ"))))))
+                       (if deadline-has-time
+                           (org-format-timestamp deadline "%Y-%m-%dT%H:%M:%S")
+                         (org-format-timestamp deadline "%Y-%m-%d")))))))
 
 (defun org-agenda-api--item-to-json (item)
   "Convert agenda ITEM to an alist suitable for JSON encoding."
@@ -320,10 +368,21 @@ Uses caching to avoid re-processing unchanged files."
          (title (substring-no-properties item))
          (tags (get-text-property 0 'tags item))
          (ts-date (get-text-property 0 'ts-date item))
+         ;; time-of-day is set when the timestamp has a time, nil otherwise
+         (time-of-day (get-text-property 0 'time-of-day item))
          (scheduled (when ts-date
-                      (org-format-timestamp
-                       (org-time-from-absolute ts-date)
-                       "%Y-%m-%dT%H:%M:%SZ"))))
+                      (if time-of-day
+                          ;; Has time - include it
+                          (let* ((hour (/ time-of-day 100))
+                                 (minute (mod time-of-day 100))
+                                 (date (org-time-from-absolute ts-date)))
+                            (format-time-string "%Y-%m-%dT%H:%M:%S"
+                                                (encode-time 0 minute hour
+                                                             (nth 3 (decode-time date))
+                                                             (nth 4 (decode-time date))
+                                                             (nth 5 (decode-time date)))))
+                        ;; No time - date only
+                        (format-time-string "%Y-%m-%d" (org-time-from-absolute ts-date))))))
     `(("todo" . ,todo)
       ("title" . ,title)
       ("tags" . ,tags)
@@ -351,27 +410,28 @@ AGENDA-LINE is the raw agenda display text for reference."
       (save-excursion
         (goto-char marker)
         (when (org-at-heading-p)
-          (let ((todo (org-get-todo-state))
-                (title (org-get-heading t t t t))
-                (tags (org-get-tags))
-                (level (org-current-level))
-                (scheduled (org-get-scheduled-time (point)))
-                (deadline (org-get-deadline-time (point)))
-                (pos (point))
-                (filepath (buffer-file-name))
-                (org-id (org-entry-get (point) "ID"))
-                (olpath (org-get-outline-path t))
-                (priority (org-entry-get (point) "PRIORITY"))
-                (notify-before (org-agenda-api--parse-notify-before
-                                (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE"))))
+          (let* ((todo (org-get-todo-state))
+                 (title (org-get-heading t t t t))
+                 (tags (org-get-tags))
+                 (level (org-current-level))
+                 (planning (org-agenda-api--get-planning-info))
+                 (scheduled-time (alist-get 'scheduled-time planning))
+                 (scheduled-has-time (alist-get 'scheduled-has-time planning))
+                 (deadline-time (alist-get 'deadline-time planning))
+                 (deadline-has-time (alist-get 'deadline-has-time planning))
+                 (pos (point))
+                 (filepath (buffer-file-name))
+                 (org-id (org-entry-get (point) "ID"))
+                 (olpath (org-get-outline-path t))
+                 (priority (org-entry-get (point) "PRIORITY"))
+                 (notify-before (org-agenda-api--parse-notify-before
+                                 (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE"))))
             `(("todo" . ,todo)
               ("title" . ,title)
               ("tags" . ,(if tags (vconcat tags) nil))
               ("level" . ,level)
-              ("scheduled" . ,(when scheduled
-                                (format-time-string "%Y-%m-%dT%H:%M:%SZ" scheduled)))
-              ("deadline" . ,(when deadline
-                               (format-time-string "%Y-%m-%dT%H:%M:%SZ" deadline)))
+              ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+              ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
               ("file" . ,filepath)
               ("pos" . ,pos)
               ("id" . ,org-id)
