@@ -666,7 +666,19 @@ This substitutes values into the template without interactive prompts."
   (let* ((plist (cdr template-entry))
          (prompts (plist-get plist :prompts))
          (capture-template (plist-get plist :template))
-         (template-string (nth 4 capture-template))
+         (template-raw (nth 4 capture-template))
+         ;; If template is a function, call it to get the actual string
+         (template-string
+          (cond
+           ;; (function ...) form
+           ((and (listp template-raw)
+                 (eq (car template-raw) 'function))
+            (funcall (cadr template-raw)))
+           ;; Already a function
+           ((functionp template-raw)
+            (funcall template-raw))
+           ;; Plain string
+           (t template-raw)))
          (result template-string))
     ;; Replace %^{Name} with the value
     ;; Do patterns with suffixes FIRST, then without (otherwise suffix gets left behind)
