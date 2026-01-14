@@ -4,11 +4,37 @@
   name ? "org-agenda-api",
   tag ? "latest",
   customElispFile ? null,
+  # Directory containing emacs config with straight/ subdirectory
+  # Should include: README.el, org-config.el, org-config-*.el, straight/
+  emacsConfigDir ? null,
+  # Entry point elisp file within emacsConfigDir (relative path)
+  # This file should load org-agenda-api and start the server
+  emacsConfigEntryPoint ? "org-config.el",
   extraPackages ? [],
 }:
 
 let
   port = 2025;
+
+  # Package the emacs config directory if provided
+  emacsConfigPackage = if emacsConfigDir != null then
+    pkgs.runCommand "emacs-config" {} ''
+      mkdir -p $out
+      # Copy elisp files
+      for f in ${emacsConfigDir}/*.el; do
+        if [ -f "$f" ]; then
+          cp "$f" $out/
+        fi
+      done
+      # Copy straight directory (repos and build)
+      if [ -d "${emacsConfigDir}/straight" ]; then
+        cp -r ${emacsConfigDir}/straight $out/
+      fi
+    ''
+  else null;
+
+  # Path where config will be in the container
+  containerConfigPath = "/emacs-config";
 
   # Nginx config that proxies to emacs
   # Auth is configured dynamically via /tmp/nginx-auth.conf include
@@ -104,6 +130,18 @@ let
     done
   '';
 
+  # Emacs command varies based on whether we have a custom config dir
+  emacsCommand = if emacsConfigDir != null then
+    # With custom config: set user-emacs-directory and load the entry point
+    ''${emacsWithPackages}/bin/emacs --fg-daemon=org-api \
+      --eval "(setq user-emacs-directory \"${containerConfigPath}/\")" \
+      --load ${orgAgendaApiEl} \
+      --load ${containerConfigPath}/${emacsConfigEntryPoint} \
+      --load ${containerInitEl}''
+  else
+    # Without custom config: just load org-agenda-api and container-init
+    "${emacsWithPackages}/bin/emacs --fg-daemon=org-api --load ${orgAgendaApiEl} --load ${containerInitEl}";
+
   containerSupervisordConf = pkgs.writeText "supervisord.conf" ''
     [supervisord]
     nodaemon=true
@@ -134,7 +172,7 @@ let
     environment=PATH="${pkgs.git}/bin:${pkgs.openssh}/bin",GIT_SYNC_INTERVAL="%(ENV_GIT_SYNC_INTERVAL)s",GIT_SYNC_NEW_FILES="%(ENV_GIT_SYNC_NEW_FILES)s",GIT_SYNC_REMOTE="%(ENV_GIT_SYNC_REMOTE)s"
 
     [program:emacs]
-    command=${emacsWithPackages}/bin/emacs --fg-daemon=org-api --load ${orgAgendaApiEl} --load ${containerInitEl}
+    command=${emacsCommand}
     autostart=true
     autorestart=true
     startretries=3
@@ -275,6 +313,11 @@ pkgs.dockerTools.buildImage {
     chmod 1777 /tmp
     chmod 700 /root/.ssh
     chown nginx:nginx /var/log/nginx /var/cache/nginx
+    ${if emacsConfigPackage != null then ''
+      # Copy emacs config into container
+      mkdir -p ${containerConfigPath}
+      cp -r ${emacsConfigPackage}/* ${containerConfigPath}/
+    '' else ""}
   '';
 
   config = {
