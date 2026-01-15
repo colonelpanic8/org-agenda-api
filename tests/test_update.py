@@ -188,6 +188,68 @@ class TestUpdateScheduled:
         response = api.update_todo(todo, {"scheduled": None})
         assert response.status_code == 200
 
+    def test_future_scheduled_appears_on_correct_date(self, api):
+        """Scheduling a todo in the future should make it appear on that date's agenda.
+
+        This test verifies that:
+        1. A todo scheduled 2 weeks in the future does NOT appear in today's agenda
+        2. The todo DOES appear when querying the agenda for the future date
+        3. The scheduled date persists on the todo when re-fetched
+        """
+        # Test date is 2024-06-15, schedule for 2 weeks later
+        future_date = "2024-06-29"
+        unique_title = "Future scheduled test todo 77777"
+
+        # Create a new todo
+        api.create_todo(unique_title)
+
+        # Find the todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None, f"Created todo not found: {unique_title}"
+
+        # Schedule it for 2 weeks in the future
+        update_response = api.update_todo(todo, {"scheduled": future_date})
+        assert update_response.status_code == 200
+
+        # Verify the scheduled date persists when re-fetching todos
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        updated_todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert updated_todo is not None, "Todo disappeared after scheduling"
+        assert updated_todo.get("scheduled") is not None, (
+            f"Scheduled date not persisted on todo. Got: {updated_todo}"
+        )
+        assert future_date in updated_todo["scheduled"], (
+            f"Expected scheduled date to contain {future_date}, "
+            f"got: {updated_todo['scheduled']}"
+        )
+
+        # Verify it does NOT appear in today's agenda (TEST_DATE = 2024-06-15)
+        today_agenda = api.get_agenda()
+        today_entries = today_agenda.json().get("entries", [])
+        today_titles = [e.get("title", "") for e in today_entries]
+        assert not any(unique_title in t for t in today_titles), (
+            f"Future-scheduled todo should NOT appear in today's agenda. "
+            f"Found in: {today_titles}"
+        )
+
+        # Verify it DOES appear in the future date's agenda
+        future_agenda = api.get_agenda(date=future_date)
+        future_entries = future_agenda.json().get("entries", [])
+        future_titles = [e.get("title", "") for e in future_entries]
+        assert any(unique_title in t for t in future_titles), (
+            f"Future-scheduled todo should appear in {future_date} agenda. "
+            f"Found titles: {future_titles}"
+        )
+
 
 class TestUpdateDeadline:
     """Tests for updating todo deadline."""

@@ -96,10 +96,10 @@ Returns the backtrace excluding internal logging frames."
          (if (fboundp 'backtrace-to-string)
              ;; Emacs 29+ has backtrace-to-string
              (backtrace-to-string)
-           ;; Fallback for older Emacs
+           ;; Fallback for older Emacs - use with-output-to-string
+           ;; which properly binds standard-output to capture the backtrace
            (with-output-to-string
-             (let ((standard-output (current-buffer)))
-               (backtrace))))))
+             (backtrace)))))
     ;; Filter out internal frames for cleaner output
     (with-temp-buffer
       (insert backtrace-str)
@@ -480,51 +480,60 @@ AGENDA-LINE is the raw agenda display text for reference."
   "Run org-agenda and return entries as a list of JSON-encodable alists.
 SPAN should be `day' or `week'.
 START-DATE is an optional date string in YYYY-MM-DD format."
-  (let ((org-agenda-span span)
-        (org-agenda-use-time-grid t)
-        (org-agenda-start-on-weekday nil)
-        (org-agenda-window-setup 'current-window)
-        ;; Parse date string to calendar date format (month day year) if provided,
-        ;; otherwise use calendar-current-date as the default (supports fake dates in tests)
-        (parsed-date (if start-date
-                         (let ((parts (split-string start-date "-")))
-                           (when (= (length parts) 3)
-                             (list (string-to-number (nth 1 parts))  ; month
-                                   (string-to-number (nth 2 parts))  ; day
-                                   (string-to-number (nth 0 parts))))) ; year
-                       (calendar-current-date)))
-        entries)
+  (let* ((org-agenda-span span)
+         (org-agenda-use-time-grid t)
+         (org-agenda-start-on-weekday nil)
+         (org-agenda-window-setup 'current-window)
+         ;; Parse date string to calendar date format (month day year) if provided,
+         ;; otherwise use calendar-current-date as the default (supports fake dates in tests)
+         (parsed-date (if start-date
+                          (let ((parts (split-string start-date "-")))
+                            (when (= (length parts) 3)
+                              (list (string-to-number (nth 1 parts))  ; month
+                                    (string-to-number (nth 2 parts))  ; day
+                                    (string-to-number (nth 0 parts))))) ; year
+                        (calendar-current-date)))
+         ;; Calculate absolute day number for the requested date
+         ;; This is needed to properly override org-today for future date queries
+         (absolute-day (when parsed-date
+                         (calendar-absolute-from-gregorian parsed-date)))
+         entries)
     ;; Debug logging
     (org-agenda-api--log 'debug "run-agenda: calendar-current-date=%S" (calendar-current-date))
     (org-agenda-api--log 'debug "run-agenda: org-today=%S" (org-today))
-    (org-agenda-api--log 'debug "run-agenda: parsed-date=%S span=%S" parsed-date span)
+    (org-agenda-api--log 'debug "run-agenda: parsed-date=%S span=%S absolute-day=%S" parsed-date span absolute-day)
     (org-agenda-api--log 'debug "run-agenda: org-agenda-files=%S" org-agenda-files)
-    ;; Run the agenda
-    (save-window-excursion
-      (org-agenda-list parsed-date nil (if (eq span 'day) 1 7))
-      (with-current-buffer "*Org Agenda*"
-        ;; Debug: log the agenda buffer contents
-        (org-agenda-api--log 'debug "run-agenda: agenda buffer:\n%s" (buffer-string))
-        (goto-char (point-min))
-        ;; Skip the header lines (date header etc.)
-        (while (not (eobp))
-          (let* ((line (buffer-substring (line-beginning-position) (line-end-position)))
-                 ;; Get org-hd-marker which points to the headline, not org-marker which
-                 ;; points to the timestamp. We need the headline marker for org-at-heading-p.
-                 (marker (get-text-property (line-beginning-position) 'org-hd-marker)))
-            ;; Debug logging for marker extraction
-            (when (> (length line) 0)
-              (org-agenda-api--log 'debug "run-agenda: line=%S marker=%S"
-                                   (substring line 0 (min 50 (length line))) marker))
-            ;; Only include lines that have an org-hd-marker (actual entries)
-            (when marker
-              (org-agenda-api--log 'debug "run-agenda: Found marker, extracting data")
-              (let ((entry-data (org-agenda-api--extract-entry-data marker line)))
-                (org-agenda-api--log 'debug "run-agenda: entry-data=%S" entry-data)
-                (when entry-data
-                  (push entry-data entries)))))
-          (forward-line 1)))
-      (kill-buffer "*Org Agenda*"))
+    ;; Ensure agenda file buffers are refreshed before running agenda
+    ;; This is necessary to pick up changes made via the update endpoint
+    (org-agenda-prepare-buffers org-agenda-files)
+    ;; Run the agenda with org-today temporarily overridden to match the requested date
+    ;; This ensures items scheduled for future dates appear when querying that date
+    (cl-letf (((symbol-function 'org-today) (lambda () absolute-day)))
+      (save-window-excursion
+        (org-agenda-list parsed-date nil (if (eq span 'day) 1 7))
+        (with-current-buffer "*Org Agenda*"
+          ;; Debug: log the agenda buffer contents
+          (org-agenda-api--log 'debug "run-agenda: agenda buffer:\n%s" (buffer-string))
+          (goto-char (point-min))
+          ;; Skip the header lines (date header etc.)
+          (while (not (eobp))
+            (let* ((line (buffer-substring (line-beginning-position) (line-end-position)))
+                   ;; Get org-hd-marker which points to the headline, not org-marker which
+                   ;; points to the timestamp. We need the headline marker for org-at-heading-p.
+                   (marker (get-text-property (line-beginning-position) 'org-hd-marker)))
+              ;; Debug logging for marker extraction
+              (when (> (length line) 0)
+                (org-agenda-api--log 'debug "run-agenda: line=%S marker=%S"
+                                     (substring line 0 (min 50 (length line))) marker))
+              ;; Only include lines that have an org-hd-marker (actual entries)
+              (when marker
+                (org-agenda-api--log 'debug "run-agenda: Found marker, extracting data")
+                (let ((entry-data (org-agenda-api--extract-entry-data marker line)))
+                  (org-agenda-api--log 'debug "run-agenda: entry-data=%S" entry-data)
+                  (when entry-data
+                    (push entry-data entries)))))
+            (forward-line 1)))
+        (kill-buffer "*Org Agenda*")))
     (org-agenda-api--log 'debug "run-agenda: Total entries found: %d" (length entries))
     (nreverse entries)))
 
