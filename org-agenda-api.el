@@ -1176,20 +1176,34 @@ Accepts JSON body with:
   - priority: A, B, C, or null to clear
 Returns updated todo with new file and pos for cache update."
   (condition-case err
-      (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (json-parse-string content-header))
-             (id (gethash "id" json-data))
-             (file (gethash "file" json-data))
-             (pos (gethash "pos" json-data))
-             (title (gethash "title" json-data))
-             (scheduled (gethash "scheduled" json-data))
-             (deadline (gethash "deadline" json-data))
-             (priority (gethash "priority" json-data))
-             (location nil)
-             (updates nil))
-        ;; Log incoming request for debugging
+      (catch 'done
+        (let* ((content-header (cadr (assoc "Content" headers)))
+               (json-data (json-parse-string content-header))
+               (id (gethash "id" json-data))
+               (file (gethash "file" json-data))
+               (pos (gethash "pos" json-data))
+               (title (gethash "title" json-data))
+               (scheduled (gethash "scheduled" json-data))
+               (deadline (gethash "deadline" json-data))
+               (priority (gethash "priority" json-data))
+               (location nil)
+               (updates nil))
+          ;; Log incoming request for debugging
         (message "[/update] Request: id=%s file=%s pos=%s title=%s scheduled=%s deadline=%s priority=%s"
                  id file pos title scheduled deadline priority)
+        ;; Check for unrecognized fields
+        (let ((allowed-fields '("id" "file" "pos" "title" "scheduled" "deadline" "priority"))
+              (unrecognized nil))
+          (maphash (lambda (key _value)
+                     (unless (member key allowed-fields)
+                       (push key unrecognized)))
+                   json-data)
+          (when unrecognized
+            (message "[/update] ERROR: Unrecognized fields: %s" unrecognized)
+            (insert (json-encode `(("status" . "error")
+                                   ("message" . ,(format "Unrecognized fields: %s. Did you mean 'scheduled' instead of 'schedule'?"
+                                                         (string-join unrecognized ", "))))))
+            (throw 'done nil)))
         ;; Build updates alist (include keys even if value is nil, to signal clearing)
         ;; Use :not-found sentinel to properly detect if key exists in JSON
         (unless (eq (gethash "scheduled" json-data :not-found) :not-found)
@@ -1220,7 +1234,7 @@ Returns updated todo with new file and pos for cache update."
                            (car location) (cdr location) updates)))
               (insert (json-encode result)))
           (insert (json-encode `(("status" . "error")
-                                 ("message" . "Todo not found"))))))
+                                 ("message" . "Todo not found")))))))
     (error
      (org-agenda-api--log-error-with-backtrace "/update" err)
      (insert (json-encode `(("status" . "error")
