@@ -89,6 +89,39 @@ Only logs if LEVEL is at or above `org-agenda-api-log-level'."
   "Log an error for ENDPOINT with ERROR-MSG."
   (org-agenda-api--log 'error "Error in %s: %s" endpoint error-msg))
 
+(defun org-agenda-api--capture-backtrace ()
+  "Capture current backtrace as a string.
+Returns the backtrace excluding internal logging frames."
+  (let ((backtrace-str
+         (if (fboundp 'backtrace-to-string)
+             ;; Emacs 29+ has backtrace-to-string
+             (backtrace-to-string)
+           ;; Fallback for older Emacs
+           (with-output-to-string
+             (let ((standard-output (current-buffer)))
+               (backtrace))))))
+    ;; Filter out internal frames for cleaner output
+    (with-temp-buffer
+      (insert backtrace-str)
+      (goto-char (point-min))
+      ;; Skip frames from our logging functions
+      (let ((skip-patterns '("org-agenda-api--capture-backtrace"
+                             "org-agenda-api--log-error-with-backtrace")))
+        (while (and (not (eobp))
+                    (cl-some (lambda (pat)
+                               (looking-at (concat ".*" (regexp-quote pat))))
+                             skip-patterns))
+          (forward-line 1)))
+      (buffer-substring (point) (point-max)))))
+
+(defun org-agenda-api--log-error-with-backtrace (endpoint err)
+  "Log an error for ENDPOINT with full backtrace.
+ERR should be the error caught by condition-case."
+  (let ((error-msg (error-message-string err))
+        (backtrace (org-agenda-api--capture-backtrace)))
+    (org-agenda-api--log 'error "Error in %s: %s" endpoint error-msg)
+    (org-agenda-api--log 'error "Backtrace:\n%s" backtrace)))
+
 ;;; Customization
 
 (defgroup org-agenda-api nil
@@ -198,6 +231,7 @@ seconds, checked after each request completes."
             ("status" . "success")
             ("output" . ,(string-trim output))))
       (error
+       (org-agenda-api--log-error-with-backtrace "git-refresh" err)
        `(("repo" . ,repo-path)
          ("status" . "error")
          ("message" . ,(error-message-string err)))))))
@@ -588,7 +622,7 @@ This resets any stuck state from previous failed operations."
           (org-capture nil "d")
           (org-agenda-api--log 'debug "org-capture completed successfully"))
       (error
-       (org-agenda-api--log 'error "org-capture failed: %s" (error-message-string err))
+       (org-agenda-api--log-error-with-backtrace "org-capture" err)
        ;; Clean up after failure too
        (ignore-errors (org-agenda-api--cleanup-emacs-state))
        (signal (car err) (cdr err)))))
@@ -830,7 +864,7 @@ Accepts optional query params:
           (insert (json-encode `(("status" . "created")
                                  ("title" . ,title)))))
       (error
-       (org-agenda-api--log-error "/create-todo" (error-message-string err))
+       (org-agenda-api--log-error-with-backtrace "/create-todo" err)
        (insert (json-encode `(("status" . "error")
                               ("message" . ,(error-message-string err))))))))
   (org-agenda-api--track-request))
@@ -857,6 +891,7 @@ Accepts optional query params:
      ;; Return error as JSON with appropriate status
      ;; Note: simple-httpd doesn't have great error handling, so we return 200 with error in body
      ;; A better approach would need custom error handling
+     (org-agenda-api--log-error-with-backtrace "/capture" err)
      (insert (json-encode `(("status" . "error")
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))
@@ -1129,6 +1164,7 @@ Accepts JSON body with:
           (insert (json-encode `(("status" . "error")
                                  ("message" . "Todo not found"))))))
     (error
+     (org-agenda-api--log-error-with-backtrace "/update" err)
      (insert (json-encode `(("status" . "error")
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))
@@ -1162,6 +1198,7 @@ Accepts JSON body with:
           (insert (json-encode `(("status" . "error")
                                  ("message" . "Todo not found"))))))
     (error
+     (org-agenda-api--log-error-with-backtrace "/complete" err)
      (insert (json-encode `(("status" . "error")
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))
