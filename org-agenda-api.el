@@ -1039,6 +1039,33 @@ Returns (file . pos) cons or nil if not found."
             (when (or (not title) (string= heading title))
               (cons file pos))))))))
 
+(defun org-agenda-api--find-todo-by-file-title (file title)
+  "Find a TODO entry by FILE and TITLE only.
+Searches the file for a heading matching TITLE.
+Returns (file . pos) cons or nil if not found."
+  (when (and file title (file-exists-p file))
+    (with-current-buffer (find-file-noselect file)
+      (save-excursion
+        (goto-char (point-min))
+        (let ((found nil))
+          (while (and (not found) (re-search-forward org-heading-regexp nil t))
+            (when (org-at-heading-p)
+              (let ((heading (org-get-heading t t t t)))
+                (when (string= heading title)
+                  (setq found (cons file (line-beginning-position)))))))
+          found)))))
+
+(defun org-agenda-api--find-todo-by-title (title)
+  "Find a TODO entry by TITLE across all agenda files.
+Searches all org-agenda-files for a heading matching TITLE.
+Returns (file . pos) cons or nil if not found."
+  (when title
+    (let ((found nil))
+      (dolist (file org-agenda-files)
+        (when (and (not found) (file-exists-p file))
+          (setq found (org-agenda-api--find-todo-by-file-title file title))))
+      found)))
+
 (defun org-agenda-api--complete-todo-at (file pos &optional new-state)
   "Mark the TODO at FILE and POS as complete.
 NEW-STATE defaults to DONE if not specified.
@@ -1075,13 +1102,14 @@ Accepts ISO format: YYYY-MM-DD or YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM:SS."
 (defun org-agenda-api--update-todo-at (file pos updates)
   "Update the TODO at FILE and POS with UPDATES alist.
 UPDATES can contain: scheduled, deadline, priority.
-Returns alist with status and details."
+Returns alist with status, details, and new position."
   (with-current-buffer (find-file-noselect file)
     (save-excursion
       (goto-char pos)
       (if (org-at-heading-p)
           (let ((title (org-get-heading t t t t))
-                (applied-updates nil))
+                (applied-updates nil)
+                (new-pos nil))
             ;; Handle scheduled
             (when (assoc "scheduled" updates)
               (let ((scheduled-value (cdr (assoc "scheduled" updates))))
@@ -1125,8 +1153,13 @@ Returns alist with status and details."
                       (push `("priority" . ,priority-value) applied-updates))))))
             (save-buffer)
             (org-agenda-api--invalidate-cache)
+            ;; Get new position - go back to beginning of heading line
+            (org-back-to-heading t)
+            (setq new-pos (point))
             `(("status" . "updated")
               ("title" . ,title)
+              ("file" . ,file)
+              ("pos" . ,new-pos)
               ("updates" . ,applied-updates)))
         `(("status" . "error")
           ("message" . "No heading found at position"))))))
@@ -1137,10 +1170,11 @@ Accepts JSON body with:
   - id: org-id of the todo (preferred)
   - file: file path (fallback)
   - pos: position in file (fallback)
-  - title: heading title (for verification)
+  - title: heading title (can match by title alone or with file)
   - scheduled: ISO date/datetime string or null to clear
   - deadline: ISO date/datetime string or null to clear
-  - priority: A, B, C, or null to clear"
+  - priority: A, B, C, or null to clear
+Returns updated todo with new file and pos for cache update."
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
              (json-data (json-parse-string content-header))
@@ -1166,6 +1200,12 @@ Accepts JSON body with:
         ;; Fall back to file+pos+title
         (unless location
           (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
+        ;; Fall back to file+title (handles position drift)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-title file title)))
+        ;; Fall back to title only across all agenda files
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-title title)))
         (if location
             (let ((result (org-agenda-api--update-todo-at
                            (car location) (cdr location) updates)))
