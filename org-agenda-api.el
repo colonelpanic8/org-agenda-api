@@ -1187,6 +1187,9 @@ Returns updated todo with new file and pos for cache update."
              (priority (gethash "priority" json-data))
              (location nil)
              (updates nil))
+        ;; Log incoming request for debugging
+        (message "[/update] Request: id=%s file=%s pos=%s title=%s scheduled=%s deadline=%s priority=%s"
+                 id file pos title scheduled deadline priority)
         ;; Build updates alist (include keys even if value is nil, to signal clearing)
         ;; Use :not-found sentinel to properly detect if key exists in JSON
         (unless (eq (gethash "scheduled" json-data :not-found) :not-found)
@@ -1195,17 +1198,23 @@ Returns updated todo with new file and pos for cache update."
           (push (cons "deadline" (if (eq deadline :null) nil deadline)) updates))
         (unless (eq (gethash "priority" json-data :not-found) :not-found)
           (push (cons "priority" (if (eq priority :null) nil priority)) updates))
+        (message "[/update] Updates to apply: %S" updates)
         ;; Try to find by ID first
         (setq location (org-agenda-api--find-todo-by-id id))
+        (when location (message "[/update] Found by ID"))
         ;; Fall back to file+pos+title
         (unless location
-          (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
+          (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title))
+          (when location (message "[/update] Found by file+pos+title")))
         ;; Fall back to file+title (handles position drift)
         (unless location
-          (setq location (org-agenda-api--find-todo-by-file-title file title)))
+          (setq location (org-agenda-api--find-todo-by-file-title file title))
+          (when location (message "[/update] Found by file+title")))
         ;; Fall back to title only across all agenda files
         (unless location
-          (setq location (org-agenda-api--find-todo-by-title title)))
+          (setq location (org-agenda-api--find-todo-by-title title))
+          (when location (message "[/update] Found by title only")))
+        (message "[/update] Location: %S" location)
         (if location
             (let ((result (org-agenda-api--update-todo-at
                            (car location) (cdr location) updates)))
@@ -1240,6 +1249,12 @@ Accepts JSON body with:
         ;; Fall back to file+pos+title
         (unless location
           (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
+        ;; Fall back to file+title (handles position drift)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-title file title)))
+        ;; Fall back to title only across all agenda files
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-title title)))
         (if location
             (let ((result (org-agenda-api--complete-todo-at
                            (car location) (cdr location) new-state)))
