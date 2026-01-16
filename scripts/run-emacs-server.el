@@ -58,8 +58,12 @@
       (directory-files test-org-dir t "\\.org$"))
 
 ;; Configure TODO states to include NEXT, STARTED, etc.
+;; The ! marker means log a timestamp when entering that state
 (setq org-todo-keywords
-      '((sequence "TODO(t)" "NEXT(n)" "STARTED(s)" "WAITING(w)" "|" "DONE(d)" "CANCELLED(c)")))
+      '((sequence "TODO(t!)" "NEXT(n!)" "STARTED(s!)" "WAITING(w!)" "|" "DONE(d!)" "CANCELLED(c!)")))
+
+;; Enable LOGBOOK drawer for state change logging
+(setq org-log-into-drawer t)
 
 ;; Configure custom agenda commands for testing
 (setq org-agenda-custom-commands

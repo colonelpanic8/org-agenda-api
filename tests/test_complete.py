@@ -1,5 +1,7 @@
 """Integration tests for POST /complete endpoint."""
 
+import re
+
 import pytest
 
 
@@ -133,3 +135,50 @@ class TestCompleteTodo:
 
         assert data.get("status") == "error"
         assert "message" in data
+
+    def test_creates_logbook_entry(self, api, org_dir):
+        """Completing a todo should create a LOGBOOK entry with state change timestamp.
+
+        This tests that the post-command-hook fix works correctly - org-mode logs
+        state changes via a hook that needs to be explicitly run in non-interactive
+        contexts.
+        """
+        # Create a unique todo
+        unique_title = "Logbook test todo 77777"
+        api.create_todo(unique_title)
+
+        # Find it in the list
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None, f"Created todo not found: {unique_title}"
+
+        # Complete it
+        response = api.complete_todo(todo)
+        assert response.status_code == 200
+
+        # Read the file and verify LOGBOOK entry was created
+        from pathlib import Path
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+
+        # Find the section for our todo
+        # The LOGBOOK should contain a state change entry like:
+        # :LOGBOOK:
+        # - State "DONE"       from "TODO"       [2024-06-15 Sat 12:34]
+        # :END:
+        logbook_pattern = re.compile(
+            r':LOGBOOK:\s*\n'
+            r'- State "DONE"\s+from "TODO"\s+\[\d{4}-\d{2}-\d{2} \w{3} \d{2}:\d{2}\]\s*\n'
+            r':END:',
+            re.MULTILINE
+        )
+
+        assert logbook_pattern.search(content), (
+            f"Expected LOGBOOK entry with state change not found in file.\n"
+            f"File content:\n{content}"
+        )
