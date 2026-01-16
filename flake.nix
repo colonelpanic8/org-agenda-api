@@ -28,6 +28,10 @@
           overlays = [ emacs-overlay.overlay ];
         };
 
+        # Git commit hash for version tracking
+        # Uses clean rev if available, otherwise dirtyRev for uncommitted changes
+        gitCommit = if (self ? rev) then self.rev else self.dirtyRev or "unknown";
+
         # Emacs with required packages (base packages from nix)
         emacsWithPackages = pkgs.emacs-nox.pkgs.withPackages (epkgs: [
           epkgs.simple-httpd
@@ -52,7 +56,7 @@
 
         # Import the container builder
         mkContainer = import ./container.nix {
-          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiEl containerInitEl;
+          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiEl containerInitEl gitCommit;
         };
 
         # Package an existing emacs config directory (with pre-populated straight/)

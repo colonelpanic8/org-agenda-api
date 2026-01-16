@@ -987,6 +987,14 @@ Returns basic status information and capture readiness check."
     (unless healthy
       (httpd-error httpd-current-proc 503))))
 
+(defservlet version application/json ()
+  "Endpoint: Return version information including git commit hash.
+The git commit is read from the ORG_AGENDA_API_GIT_COMMIT environment variable,
+which is set at build time by the Nix flake."
+  (let* ((git-commit (or (getenv "ORG_AGENDA_API_GIT_COMMIT") "unknown"))
+         (response `(("gitCommit" . ,git-commit))))
+    (insert (json-encode response))))
+
 (defun org-agenda-api--get-todo-states ()
   "Get all configured TODO states from `org-todo-keywords'.
 Returns an alist with 'active' (not-done) and 'done' states."
