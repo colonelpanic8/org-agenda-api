@@ -1143,6 +1143,10 @@ Returns alist with status and details."
             (let ((old-state (org-get-todo-state))
                   (title (org-get-heading t t t t)))
               (org-todo new-state)
+              ;; Run post-command-hook to trigger org-mode's state change logging
+              ;; (LOGBOOK entries). In non-interactive contexts, org-add-log-note
+              ;; is added to post-command-hook but never runs without this.
+              (run-hooks 'post-command-hook)
               (save-buffer)
               (org-agenda-api--invalidate-cache)
               `(("status" . "completed")
@@ -1216,6 +1220,8 @@ Returns alist with status, details, and new position."
                     (when (memq priority-char '(?A ?B ?C))
                       (org-priority priority-char)
                       (push `("priority" . ,priority-value) applied-updates))))))
+            ;; Run post-command-hook to trigger any deferred logging (e.g., reschedule/redeadline)
+            (run-hooks 'post-command-hook)
             (save-buffer)
             (org-agenda-api--invalidate-cache)
             ;; Get new position - go back to beginning of heading line
