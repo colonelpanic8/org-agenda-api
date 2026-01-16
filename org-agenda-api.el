@@ -506,9 +506,17 @@ START-DATE is an optional date string in YYYY-MM-DD format."
     ;; Ensure agenda file buffers are refreshed before running agenda
     ;; This is necessary to pick up changes made via the update endpoint
     (org-agenda-prepare-buffers org-agenda-files)
-    ;; Run the agenda with org-today temporarily overridden to match the requested date
-    ;; This ensures items scheduled for future dates appear when querying that date
-    (cl-letf (((symbol-function 'org-today) (lambda () absolute-day)))
+    ;; Run the agenda with org-today and calendar-current-date temporarily overridden
+    ;; to match the requested date. Both must be overridden because org-agenda uses
+    ;; both functions internally for date calculations. Without overriding both,
+    ;; there can be off-by-one errors when the server's system date differs from
+    ;; the requested date (e.g., server in UTC where it's already the next day).
+    (cl-letf (((symbol-function 'org-today) (lambda () absolute-day))
+              ((symbol-function 'calendar-current-date)
+               (lambda (&optional offset)
+                 (if offset
+                     (calendar-gregorian-from-absolute (+ absolute-day offset))
+                   parsed-date))))
       (save-window-excursion
         (org-agenda-list parsed-date nil (if (eq span 'day) 1 7))
         (with-current-buffer "*Org Agenda*"
