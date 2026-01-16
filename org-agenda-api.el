@@ -995,6 +995,17 @@ which is set at build time by the Nix flake."
          (response `(("gitCommit" . ,git-commit))))
     (insert (json-encode response))))
 
+(defservlet debug-config application/json ()
+  "Endpoint: Return current org configuration for debugging."
+  (let ((response `(("org-log-into-drawer" . ,org-log-into-drawer)
+                    ("org-log-done" . ,org-log-done)
+                    ("org-log-repeat" . ,org-log-repeat)
+                    ("org-log-reschedule" . ,org-log-reschedule)
+                    ("org-log-redeadline" . ,org-log-redeadline)
+                    ("org-todo-keywords" . ,(format "%S" org-todo-keywords))
+                    ("custom-elisp-file" . ,(getenv "ORG_API_CUSTOM_ELISP")))))
+    (insert (json-encode response))))
+
 (defun org-agenda-api--get-todo-states ()
   "Get all configured TODO states from `org-todo-keywords'.
 Returns an alist with 'active' (not-done) and 'done' states."
