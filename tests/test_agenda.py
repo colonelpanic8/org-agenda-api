@@ -138,7 +138,7 @@ class TestAgendaOverdueItems:
 
     In org-agenda, items scheduled for past dates appear on subsequent days
     with markers like "Sched. 1x" (1 day overdue), "Sched. 2x" (2 days overdue).
-    The API should replicate this behavior.
+    The API should replicate this behavior when include_overdue=True.
     """
 
     def test_overdue_items_appear_on_today(self, api):
@@ -147,9 +147,9 @@ class TestAgendaOverdueItems:
         The test fixture 'today.org' contains:
         - 'Task scheduled for yesterday' SCHEDULED: <2024-06-14>
 
-        When querying for today (2024-06-15), this overdue task should appear.
+        When querying for today (2024-06-15) with include_overdue=True, this overdue task should appear.
         """
-        response = api.get_agenda(date=TEST_DATE)
+        response = api.get_agenda(date=TEST_DATE, include_overdue=True)
         data = response.json()
 
         titles = [entry.get("title") for entry in data["entries"]]
@@ -166,7 +166,7 @@ class TestAgendaOverdueItems:
         When an item scheduled for 2024-06-14 appears in the 2024-06-15 agenda,
         its 'scheduled' field should still be '2024-06-14'.
         """
-        response = api.get_agenda(date=TEST_DATE)
+        response = api.get_agenda(date=TEST_DATE, include_overdue=True)
         data = response.json()
 
         # Find the overdue item
@@ -194,7 +194,7 @@ class TestAgendaOverdueItems:
         - 'Sched. 1x:' for 1 day overdue
         - 'Sched. 2x:' for 2 days overdue
         """
-        response = api.get_agenda(date=TEST_DATE)
+        response = api.get_agenda(date=TEST_DATE, include_overdue=True)
         data = response.json()
 
         # Find the overdue item
@@ -220,7 +220,7 @@ class TestAgendaOverdueItems:
         Query for the day after TEST_DATE to see items from TEST_DATE_PREV_DAY
         as 2 days overdue.
         """
-        response = api.get_agenda(date=TEST_DATE_NEXT_DAY)
+        response = api.get_agenda(date=TEST_DATE_NEXT_DAY, include_overdue=True)
         data = response.json()
 
         # Find the item that was scheduled for TEST_DATE_PREV_DAY (2024-06-14)
@@ -526,8 +526,10 @@ class TestAgendaDateIsolation:
 
         If an item is overdue, agendaLine should show "Sched. Nx:".
         If an item is scheduled for the query date, it should show "Scheduled:".
+
+        This test uses include_overdue=True to include overdue items in the agenda.
         """
-        response = api.get_agenda(date=TEST_DATE)
+        response = api.get_agenda(date=TEST_DATE, include_overdue=True)
         data = response.json()
 
         for entry in data["entries"]:
@@ -547,3 +549,86 @@ class TestAgendaDateIsolation:
                     f"Same-day item '{entry.get('title')}' should not have overdue marker. "
                     f"Got: {agenda_line}"
                 )
+
+
+class TestAgendaIncludeOverdueParameter:
+    """Tests for the include_overdue parameter that controls overdue item inclusion.
+
+    When include_overdue=false (default), querying for a specific date should only
+    return items scheduled for that exact date, not overdue items from
+    previous days.
+
+    When include_overdue=true, the behavior is the same as before - overdue items
+    from previous days are included (treating the query date as "today").
+    """
+
+    def test_default_excludes_overdue_items(self, api):
+        """By default (include_overdue=false), overdue items should NOT be included.
+
+        When querying for TEST_DATE without include_overdue=true, the agenda should
+        only show items scheduled for TEST_DATE itself, not overdue items
+        from previous days.
+        """
+        response = api.get_agenda(date=TEST_DATE)
+        data = response.json()
+
+        titles = [entry.get("title", "").lower() for entry in data["entries"]]
+
+        # The overdue task from yesterday should NOT appear
+        assert not any("yesterday" in t for t in titles), (
+            f"With include_overdue=false (default), overdue items should not appear. "
+            f"Found 'yesterday' in titles: {titles}"
+        )
+
+    def test_include_overdue_true_includes_overdue_items(self, api):
+        """With include_overdue=true, overdue items SHOULD be included.
+
+        This preserves the traditional org-agenda behavior where overdue
+        items from previous days appear in the current day's agenda.
+        """
+        response = api.get_agenda(date=TEST_DATE, include_overdue=True)
+        data = response.json()
+
+        titles = [entry.get("title", "").lower() for entry in data["entries"]]
+
+        # The overdue task from yesterday SHOULD appear
+        assert any("yesterday" in t for t in titles), (
+            f"With include_overdue=true, overdue items should appear. "
+            f"Expected 'Task scheduled for yesterday' in agenda. "
+            f"Found titles: {titles}"
+        )
+
+    def test_include_overdue_false_explicit_excludes_overdue_items(self, api):
+        """Explicitly setting include_overdue=false should exclude overdue items.
+
+        This test explicitly passes include_overdue=false to verify the parameter
+        is correctly parsed and handled.
+        """
+        response = api.get_agenda(date=TEST_DATE, include_overdue=False)
+        data = response.json()
+
+        titles = [entry.get("title", "").lower() for entry in data["entries"]]
+
+        # The overdue task from yesterday should NOT appear
+        assert not any("yesterday" in t for t in titles), (
+            f"With include_overdue=false, overdue items should not appear. "
+            f"Found 'yesterday' in titles: {titles}"
+        )
+
+    def test_include_overdue_still_shows_items_for_query_date(self, api):
+        """With include_overdue=false, items scheduled for the query date should appear.
+
+        This verifies that only overdue items are excluded, not items
+        actually scheduled for the requested date.
+        """
+        response = api.get_agenda(date=TEST_DATE, include_overdue=False)
+        data = response.json()
+
+        titles = [entry.get("title", "").lower() for entry in data["entries"]]
+
+        # Items scheduled for today should still appear
+        assert any("scheduled for today" in t for t in titles), (
+            f"Items scheduled for the query date should appear. "
+            f"Expected 'Task scheduled for today' in agenda. "
+            f"Found titles: {titles}"
+        )

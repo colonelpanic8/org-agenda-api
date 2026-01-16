@@ -112,11 +112,13 @@ class APIClient:
         """GET /get-todays-agenda"""
         return self.get("/get-todays-agenda")
 
-    def get_agenda(self, span: str = "day", date: str = None) -> requests.Response:
-        """GET /agenda with optional span and date parameters."""
+    def get_agenda(self, span: str = "day", date: str = None, include_overdue: bool = None) -> requests.Response:
+        """GET /agenda with optional span, date, and include_overdue parameters."""
         params = f"?span={span}"
         if date:
             params += f"&date={date}"
+        if include_overdue is not None:
+            params += f"&include_overdue={'true' if include_overdue else 'false'}"
         return self.get(f"/agenda{params}")
 
     def create_todo(self, title: str) -> requests.Response:

@@ -476,10 +476,11 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
               ("agendaLine" . ,(substring-no-properties agenda-line)))))))))
 
-(defun org-agenda-api--run-agenda (span &optional start-date)
+(defun org-agenda-api--run-agenda (span &optional start-date include-overdue)
   "Run org-agenda and return entries as a list of JSON-encodable alists.
 SPAN should be `day' or `week'.
-START-DATE is an optional date string in YYYY-MM-DD format."
+START-DATE is an optional date string in YYYY-MM-DD format.
+INCLUDE-OVERDUE when non-nil includes overdue items from previous days."
   (let* ((org-agenda-span span)
          (org-agenda-use-time-grid t)
          (org-agenda-start-on-weekday nil)
@@ -497,53 +498,87 @@ START-DATE is an optional date string in YYYY-MM-DD format."
          ;; This is needed to properly override org-today for future date queries
          (absolute-day (when parsed-date
                          (calendar-absolute-from-gregorian parsed-date)))
+         ;; Store original function definitions for restoration
+         (orig-org-today (symbol-function 'org-today))
+         (orig-calendar-current-date (symbol-function 'calendar-current-date))
          entries)
     ;; Debug logging
     (org-agenda-api--log 'debug "run-agenda: calendar-current-date=%S" (calendar-current-date))
     (org-agenda-api--log 'debug "run-agenda: org-today=%S" (org-today))
     (org-agenda-api--log 'debug "run-agenda: parsed-date=%S span=%S absolute-day=%S" parsed-date span absolute-day)
     (org-agenda-api--log 'debug "run-agenda: org-agenda-files=%S" org-agenda-files)
-    ;; Ensure agenda file buffers are refreshed before running agenda
-    ;; This is necessary to pick up changes made via the update endpoint
-    (org-agenda-prepare-buffers org-agenda-files)
-    ;; Run the agenda with org-today and calendar-current-date temporarily overridden
-    ;; to match the requested date. Both must be overridden because org-agenda uses
-    ;; both functions internally for date calculations. Without overriding both,
-    ;; there can be off-by-one errors when the server's system date differs from
-    ;; the requested date (e.g., server in UTC where it's already the next day).
-    (cl-letf (((symbol-function 'org-today) (lambda () absolute-day))
-              ((symbol-function 'calendar-current-date)
-               (lambda (&optional offset)
-                 (if offset
-                     (calendar-gregorian-from-absolute (+ absolute-day offset))
-                   parsed-date))))
-      (save-window-excursion
-        (org-agenda-list parsed-date nil (if (eq span 'day) 1 7))
-        (with-current-buffer "*Org Agenda*"
-          ;; Debug: log the agenda buffer contents
-          (org-agenda-api--log 'debug "run-agenda: agenda buffer:\n%s" (buffer-string))
-          (goto-char (point-min))
-          ;; Skip the header lines (date header etc.)
-          (while (not (eobp))
-            (let* ((line (buffer-substring (line-beginning-position) (line-end-position)))
-                   ;; Get org-hd-marker which points to the headline, not org-marker which
-                   ;; points to the timestamp. We need the headline marker for org-at-heading-p.
-                   (marker (get-text-property (line-beginning-position) 'org-hd-marker)))
-              ;; Debug logging for marker extraction
-              (when (> (length line) 0)
-                (org-agenda-api--log 'debug "run-agenda: line=%S marker=%S"
-                                     (substring line 0 (min 50 (length line))) marker))
-              ;; Only include lines that have an org-hd-marker (actual entries)
-              (when marker
-                (org-agenda-api--log 'debug "run-agenda: Found marker, extracting data")
-                (let ((entry-data (org-agenda-api--extract-entry-data marker line)))
-                  (org-agenda-api--log 'debug "run-agenda: entry-data=%S" entry-data)
-                  (when entry-data
-                    (push entry-data entries)))))
-            (forward-line 1)))
-        (kill-buffer "*Org Agenda*")))
+    ;; Override org-today and calendar-current-date using fset for robust override
+    ;; that works with byte-compiled code. cl-letf may not work reliably with
+    ;; byte-compiled org-mode in production.
+    (unwind-protect
+        (progn
+          ;; Override functions globally using fset
+          (fset 'org-today (lambda () absolute-day))
+          (fset 'calendar-current-date
+                (lambda (&optional offset)
+                  (if offset
+                      (calendar-gregorian-from-absolute (+ absolute-day offset))
+                    parsed-date)))
+          ;; Debug: verify overrides are in effect
+          (org-agenda-api--log 'debug "run-agenda: AFTER OVERRIDE org-today=%S calendar-current-date=%S"
+                               (org-today) (calendar-current-date))
+          ;; Prepare buffers INSIDE the override scope
+          (org-agenda-prepare-buffers org-agenda-files)
+          (save-window-excursion
+            (org-agenda-list nil start-date (if (eq span 'day) 1 7))
+            (with-current-buffer "*Org Agenda*"
+              ;; Debug: log the agenda buffer contents
+              (org-agenda-api--log 'debug "run-agenda: agenda buffer:\n%s" (buffer-string))
+              (goto-char (point-min))
+              ;; Skip the header lines (date header etc.)
+              (while (not (eobp))
+                (let* ((line (buffer-substring (line-beginning-position) (line-end-position)))
+                       ;; Get org-hd-marker which points to the headline, not org-marker which
+                       ;; points to the timestamp. We need the headline marker for org-at-heading-p.
+                       (marker (get-text-property (line-beginning-position) 'org-hd-marker)))
+                  ;; Debug logging for marker extraction
+                  (when (> (length line) 0)
+                    (org-agenda-api--log 'debug "run-agenda: line=%S marker=%S"
+                                         (substring line 0 (min 50 (length line))) marker))
+                  ;; Only include lines that have an org-hd-marker (actual entries)
+                  (when marker
+                    (org-agenda-api--log 'debug "run-agenda: Found marker, extracting data")
+                    (let ((entry-data (org-agenda-api--extract-entry-data marker line)))
+                      (org-agenda-api--log 'debug "run-agenda: entry-data=%S" entry-data)
+                      (when entry-data
+                        (push entry-data entries)))))
+                (forward-line 1)))
+            (kill-buffer "*Org Agenda*")))
+      ;; Restore original functions
+      (fset 'org-today orig-org-today)
+      (fset 'calendar-current-date orig-calendar-current-date))
     (org-agenda-api--log 'debug "run-agenda: Total entries found: %d" (length entries))
-    (nreverse entries)))
+    (let ((all-entries (nreverse entries)))
+      ;; Filter entries based on their scheduled date
+      ;; When include-overdue is true: keep items scheduled for query date OR earlier (overdue)
+      ;; When include-overdue is false: keep only items scheduled for query date exactly
+      (if include-overdue
+          ;; Include overdue: keep items where scheduled <= start-date
+          (cl-remove-if-not
+           (lambda (entry)
+             (let ((scheduled (cdr (assoc "scheduled" entry))))
+               ;; Keep entries with no scheduled date, or scheduled <= start-date
+               (or (null scheduled)
+                   (not (string-greaterp scheduled start-date)))))
+           all-entries)
+        ;; Default: only items scheduled for the exact query date
+        (cl-remove-if-not
+         (lambda (entry)
+           (let ((scheduled (cdr (assoc "scheduled" entry)))
+                 (deadline (cdr (assoc "deadline" entry))))
+             ;; Keep entries that have either:
+             ;; - scheduled date matching start-date
+             ;; - deadline matching start-date
+             ;; - no scheduled/deadline (time grid items, etc.)
+             (or (and (null scheduled) (null deadline))
+                 (and scheduled (string-prefix-p start-date scheduled))
+                 (and deadline (string-prefix-p start-date deadline)))))
+         all-entries)))))
 
 (defun org-agenda-api--list-custom-views ()
   "Return a list of available custom agenda views.
@@ -846,18 +881,21 @@ Accepts optional query param 'refresh' (true/1) to git pull repos first."
 Accepts optional query params:
   - 'span' (day or week, defaults to day)
   - 'date' (YYYY-MM-DD format, defaults to today)
+  - 'include_overdue' (true/1) to include overdue items from previous days (default: false)
   - 'refresh' (true/1) to git pull repos first."
   (let* ((span-param (cadr (assoc "span" query)))
          (date-param (cadr (assoc "date" query)))
+         (include-overdue-param (cadr (assoc "include_overdue" query)))
          (refresh-param (cadr (assoc "refresh" query)))
          (git-results (when (member refresh-param '("true" "1"))
                         (org-agenda-api--git-refresh-all)))
          (span (if (string= span-param "week") 'week 'day))
+         (include-overdue (member include-overdue-param '("true" "1")))
          ;; Use requested date or default to today (using calendar-current-date for testability)
          (today (calendar-current-date))
          (today-str (format "%04d-%02d-%02d" (nth 2 today) (nth 0 today) (nth 1 today)))
          (effective-date (or date-param today-str))
-         (entries (org-agenda-api--run-agenda span effective-date))
+         (entries (org-agenda-api--run-agenda span effective-date include-overdue))
          (response `(("span" . ,(symbol-name span))
                      ("date" . ,effective-date)
                      ("entries" . ,(vconcat entries)))))
