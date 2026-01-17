@@ -335,6 +335,10 @@ expensive `org-element-at-point' calls."
        (let* ((todo (org-get-todo-state))
               (title (org-get-heading t t t t))  ; no-tags, no-todo, no-priority, no-comment
               (tags (org-get-tags))
+              ;; Only return priority if there's an explicit [#X] cookie in the heading
+              (heading-line (buffer-substring (line-beginning-position) (line-end-position)))
+              (priority (when (string-match "\\[#\\([A-Z]\\)\\]" heading-line)
+                          (match-string 1 heading-line)))
               (level (org-current-level))
               (planning (org-agenda-api--get-planning-info))
               (scheduled-time (alist-get 'scheduled-time planning))
@@ -357,7 +361,8 @@ expensive `org-element-at-point' calls."
            ("pos" . ,pos)
            ("id" . ,org-id)
            ("olpath" . ,(if olpath (vconcat olpath) nil))
-           ("notifyBefore" . ,(when notify-before (vconcat notify-before))))))
+           ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
+           ("priority" . ,priority))))
      "/!"  ; MATCH: "/!" matches all entries with any TODO keyword
      'file)))
 
@@ -681,6 +686,63 @@ This resets any stuck state from previous failed operations."
   (org-agenda-api--invalidate-cache)
   (org-agenda-api--log 'debug "Cache invalidated, capture complete"))
 
+(defun org-agenda-api--capture-extended (title &optional scheduled deadline priority tags todo-state)
+  "Capture a new TODO with TITLE and optional fields.
+SCHEDULED and DEADLINE are ISO date strings (YYYY-MM-DD or YYYY-MM-DD HH:MM).
+PRIORITY is a single letter (A, B, or C).
+TAGS is a list of tag strings.
+TODO-STATE is the todo keyword (e.g., \"TODO\", \"NEXT\")."
+  (org-agenda-api--log 'debug "Starting extended capture for: %s" title)
+  (org-agenda-api--log 'debug "  scheduled=%s deadline=%s priority=%s tags=%s todo=%s"
+                       scheduled deadline priority tags todo-state)
+  (org-agenda-api--log 'debug "Inbox file: %s (exists: %s)"
+                       org-agenda-api-inbox-file
+                       (file-exists-p org-agenda-api-inbox-file))
+  ;; Clean up any stuck state from previous operations
+  (org-agenda-api--cleanup-emacs-state)
+  ;; Build the headline string
+  (let* ((state (or todo-state "TODO"))
+         (priority-cookie (when (and priority (not (string-empty-p priority)))
+                            (format " [#%s]" (upcase priority))))
+         (tag-string (when (and tags (> (length tags) 0))
+                       (let ((tag-list (if (vectorp tags) (append tags nil) tags)))
+                         (concat " :" (mapconcat #'identity tag-list ":") ":"))))
+         (headline (format "* %s%s %s%s"
+                           state
+                           (or priority-cookie "")
+                           title
+                           (or tag-string ""))))
+    (org-agenda-api--log 'debug "Built headline: %s" headline)
+    ;; Write to inbox file
+    (with-current-buffer (find-file-noselect org-agenda-api-inbox-file)
+      (goto-char (point-max))
+      ;; Ensure we're on a new line
+      (unless (bolp)
+        (insert "\n"))
+      ;; Insert the headline
+      (insert headline "\n")
+      ;; Add planning line if we have scheduled or deadline
+      (let ((entry-pos (save-excursion
+                         (forward-line -1)
+                         (point))))
+        (when (or scheduled deadline)
+          (save-excursion
+            (goto-char entry-pos)
+            (org-back-to-heading t)
+            ;; Set scheduled if provided
+            (when (and scheduled (not (string-empty-p scheduled)))
+              (let ((time (org-agenda-api--parse-datetime scheduled)))
+                (when time
+                  (org-schedule nil time))))
+            ;; Set deadline if provided
+            (when (and deadline (not (string-empty-p deadline)))
+              (let ((time (org-agenda-api--parse-datetime deadline)))
+                (when time
+                  (org-deadline nil time)))))))
+      (save-buffer)))
+  (org-agenda-api--invalidate-cache)
+  (org-agenda-api--log 'debug "Extended capture complete"))
+
 ;;; Capture Template API Functions
 
 (defun org-agenda-api--get-template (key)
@@ -905,15 +967,37 @@ Accepts optional query params:
   (org-agenda-api--track-request))
 
 (defservlet create-todo application/json (_path _query headers)
-  "Endpoint: Create a new TODO item from JSON body."
+  "Endpoint: Create a new TODO item from JSON body.
+Accepts JSON body with:
+  - title: heading title (required)
+  - scheduled: ISO date string (optional)
+  - deadline: ISO date string (optional)
+  - priority: A, B, or C (optional)
+  - tags: array of tag strings (optional)
+  - todo: TODO state keyword (optional, defaults to TODO)"
   (org-agenda-api--log-request "/create-todo" "POST")
   (let ((start-time (current-time)))
     (condition-case err
         (let* ((content-header (cadr (assoc "Content" headers)))
                (json-data (json-parse-string content-header))
-               (title (gethash "title" json-data)))
-          (org-agenda-api--log 'debug "Creating todo: %s" title)
-          (org-agenda-api--capture title)
+               (title (gethash "title" json-data))
+               (scheduled (gethash "scheduled" json-data))
+               (deadline (gethash "deadline" json-data))
+               (priority (gethash "priority" json-data))
+               (tags (gethash "tags" json-data))
+               (todo-state (gethash "todo" json-data)))
+          (org-agenda-api--log 'debug "Creating todo: %s (scheduled=%s deadline=%s priority=%s tags=%s todo=%s)"
+                               title scheduled deadline priority tags todo-state)
+          ;; Convert :null to nil for optional fields
+          (when (eq scheduled :null) (setq scheduled nil))
+          (when (eq deadline :null) (setq deadline nil))
+          (when (eq priority :null) (setq priority nil))
+          (when (eq tags :null) (setq tags nil))
+          (when (eq todo-state :null) (setq todo-state nil))
+          ;; Use extended capture if any optional fields are provided
+          (if (or scheduled deadline priority tags todo-state)
+              (org-agenda-api--capture-extended title scheduled deadline priority tags todo-state)
+            (org-agenda-api--capture title))
           (let ((duration-ms (round (* 1000 (float-time (time-subtract (current-time) start-time))))))
             (org-agenda-api--log-response "/create-todo" "created" duration-ms))
           (insert (json-encode `(("status" . "created")
@@ -1170,7 +1254,7 @@ Accepts ISO format: YYYY-MM-DD or YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM:SS."
 
 (defun org-agenda-api--update-todo-at (file pos updates)
   "Update the TODO at FILE and POS with UPDATES alist.
-UPDATES can contain: scheduled, deadline, priority.
+UPDATES can contain: scheduled, deadline, priority, tags.
 Returns alist with status, details, and new position."
   (with-current-buffer (find-file-noselect file)
     (save-excursion
@@ -1220,6 +1304,18 @@ Returns alist with status, details, and new position."
                     (when (memq priority-char '(?A ?B ?C))
                       (org-priority priority-char)
                       (push `("priority" . ,priority-value) applied-updates))))))
+            ;; Handle tags
+            (when (assoc "tags" updates)
+              (let ((tags-value (cdr (assoc "tags" updates))))
+                ;; Only process if not null/json-null (null means no change)
+                (unless (or (eq tags-value :json-null)
+                            (and (not (vectorp tags-value)) (null tags-value)))
+                  ;; Convert vector to list if needed, then set tags
+                  (let ((tag-list (if (vectorp tags-value)
+                                      (append tags-value nil)
+                                    tags-value)))
+                    (org-set-tags tag-list)
+                    (push `("tags" . ,(vconcat tag-list)) applied-updates)))))
             ;; Run post-command-hook to trigger any deferred logging (e.g., reschedule/redeadline)
             (run-hooks 'post-command-hook)
             (save-buffer)
@@ -1236,7 +1332,7 @@ Returns alist with status, details, and new position."
           ("message" . "No heading found at position"))))))
 
 (defservlet update application/json (_path _query headers)
-  "Endpoint: Update a TODO's scheduled date, deadline, or priority.
+  "Endpoint: Update a TODO's scheduled date, deadline, priority, or tags.
 Accepts JSON body with:
   - id: org-id of the todo (preferred)
   - file: file path (fallback)
@@ -1245,6 +1341,7 @@ Accepts JSON body with:
   - scheduled: ISO date/datetime string or null to clear
   - deadline: ISO date/datetime string or null to clear
   - priority: A, B, C, or null to clear
+  - tags: array of tag strings to set, or empty array to clear
 Returns updated todo with new file and pos for cache update."
   (condition-case err
       (catch 'done
@@ -1257,13 +1354,14 @@ Returns updated todo with new file and pos for cache update."
                (scheduled (gethash "scheduled" json-data))
                (deadline (gethash "deadline" json-data))
                (priority (gethash "priority" json-data))
+               (tags (gethash "tags" json-data))
                (location nil)
                (updates nil))
           ;; Log incoming request for debugging
         (message "[/update] Request: id=%s file=%s pos=%s title=%s scheduled=%s deadline=%s priority=%s"
                  id file pos title scheduled deadline priority)
         ;; Check for unrecognized fields
-        (let ((allowed-fields '("id" "file" "pos" "title" "scheduled" "deadline" "priority"))
+        (let ((allowed-fields '("id" "file" "pos" "title" "scheduled" "deadline" "priority" "tags"))
               (unrecognized nil))
           (maphash (lambda (key _value)
                      (unless (member key allowed-fields)
@@ -1283,6 +1381,8 @@ Returns updated todo with new file and pos for cache update."
           (push (cons "deadline" (if (eq deadline :null) nil deadline)) updates))
         (unless (eq (gethash "priority" json-data :not-found) :not-found)
           (push (cons "priority" (if (eq priority :null) nil priority)) updates))
+        (unless (eq (gethash "tags" json-data :not-found) :not-found)
+          (push (cons "tags" (if (eq tags :null) nil tags)) updates))
         (message "[/update] Updates to apply: %S" updates)
         ;; Try to find by ID first
         (setq location (org-agenda-api--find-todo-by-id id))
