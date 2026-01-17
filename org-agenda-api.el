@@ -977,35 +977,58 @@ Accepts JSON body with:
   - todo: TODO state keyword (optional, defaults to TODO)"
   (org-agenda-api--log-request "/create-todo" "POST")
   (let ((start-time (current-time)))
-    (condition-case err
-        (let* ((content-header (cadr (assoc "Content" headers)))
-               (json-data (json-parse-string content-header))
-               (title (gethash "title" json-data))
-               (scheduled (gethash "scheduled" json-data))
-               (deadline (gethash "deadline" json-data))
-               (priority (gethash "priority" json-data))
-               (tags (gethash "tags" json-data))
-               (todo-state (gethash "todo" json-data)))
-          (org-agenda-api--log 'debug "Creating todo: %s (scheduled=%s deadline=%s priority=%s tags=%s todo=%s)"
-                               title scheduled deadline priority tags todo-state)
-          ;; Convert :null to nil for optional fields
-          (when (eq scheduled :null) (setq scheduled nil))
-          (when (eq deadline :null) (setq deadline nil))
-          (when (eq priority :null) (setq priority nil))
-          (when (eq tags :null) (setq tags nil))
-          (when (eq todo-state :null) (setq todo-state nil))
-          ;; Use extended capture if any optional fields are provided
-          (if (or scheduled deadline priority tags todo-state)
-              (org-agenda-api--capture-extended title scheduled deadline priority tags todo-state)
-            (org-agenda-api--capture title))
-          (let ((duration-ms (round (* 1000 (float-time (time-subtract (current-time) start-time))))))
-            (org-agenda-api--log-response "/create-todo" "created" duration-ms))
-          (insert (json-encode `(("status" . "created")
-                                 ("title" . ,title)))))
-      (error
-       (org-agenda-api--log-error-with-backtrace "/create-todo" err)
-       (insert (json-encode `(("status" . "error")
-                              ("message" . ,(error-message-string err))))))))
+    (catch 'done
+      (condition-case err
+          (let* ((content-header (cadr (assoc "Content" headers)))
+                 (json-data (json-parse-string content-header))
+                 (title (gethash "title" json-data))
+                 (scheduled (gethash "scheduled" json-data))
+                 (deadline (gethash "deadline" json-data))
+                 (priority (gethash "priority" json-data))
+                 (tags (gethash "tags" json-data))
+                 (todo-state (gethash "todo" json-data))
+                 (created-fields nil))
+            (org-agenda-api--log 'debug "Creating todo: %s (scheduled=%s deadline=%s priority=%s tags=%s todo=%s)"
+                                 title scheduled deadline priority tags todo-state)
+            ;; Validate title is provided
+            (when (or (null title)
+                      (eq title :null)
+                      (and (stringp title) (string-empty-p title)))
+              (insert (json-encode `(("status" . "error")
+                                     ("message" . "Missing required field: title"))))
+              (throw 'done nil))
+            ;; Convert :null to nil for optional fields
+            (when (eq scheduled :null) (setq scheduled nil))
+            (when (eq deadline :null) (setq deadline nil))
+            (when (eq priority :null) (setq priority nil))
+            (when (eq tags :null) (setq tags nil))
+            (when (eq todo-state :null) (setq todo-state nil))
+            ;; Validate priority if provided
+            (when (and priority (not (string-empty-p priority)))
+              (let ((priority-char (string-to-char (upcase priority))))
+                (unless (memq priority-char '(?A ?B ?C))
+                  (insert (json-encode `(("status" . "error")
+                                         ("message" . ,(format "Invalid priority: %s. Must be A, B, or C" priority)))))
+                  (throw 'done nil))))
+            ;; Use extended capture if any optional fields are provided
+            (if (or scheduled deadline priority tags todo-state)
+                (org-agenda-api--capture-extended title scheduled deadline priority tags todo-state)
+              (org-agenda-api--capture title))
+            ;; Build list of created fields for response
+            (when scheduled (push `("scheduled" . ,scheduled) created-fields))
+            (when deadline (push `("deadline" . ,deadline) created-fields))
+            (when priority (push `("priority" . ,priority) created-fields))
+            (when tags (push `("tags" . ,tags) created-fields))
+            (when todo-state (push `("todo" . ,todo-state) created-fields))
+            (let ((duration-ms (round (* 1000 (float-time (time-subtract (current-time) start-time))))))
+              (org-agenda-api--log-response "/create-todo" "created" duration-ms))
+            (insert (json-encode `(("status" . "created")
+                                   ("title" . ,title)
+                                   ("appliedFields" . ,created-fields)))))
+        (error
+         (org-agenda-api--log-error-with-backtrace "/create-todo" err)
+         (insert (json-encode `(("status" . "error")
+                                ("message" . ,(error-message-string err)))))))))
   (org-agenda-api--track-request))
 
 (defservlet templates application/json ()
