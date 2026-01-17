@@ -15,12 +15,6 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs }:
-    {
-      # NixOS modules
-      nixosModules.default = import ./org-agenda-api.nix;
-      nixosModules.org-agenda-api = import ./org-agenda-api.nix;
-    }
-    //
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
