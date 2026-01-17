@@ -1,4 +1,4 @@
-{ pkgs, emacsWithPackages, gitSyncRs, orgAgendaApiEl, containerInitEl, gitCommit ? "unknown" }:
+{ pkgs, emacsWithPackages, gitSyncRs, orgAgendaApiEl, containerInitEl, gitCommit ? "unknown", movaWeb }:
 
 {
   name ? "org-agenda-api",
@@ -48,6 +48,8 @@ let
       worker_connections 64;
     }
     http {
+      include ${pkgs.nginx}/conf/mime.types;
+      default_type application/octet-stream;
       access_log /dev/stdout;
       client_body_temp_path /tmp/nginx_client_body;
       proxy_temp_path /tmp/nginx_proxy;
@@ -61,6 +63,13 @@ let
 
       server {
         listen 80;
+
+        # Mova web app - no auth required (static files)
+        location /app {
+          alias /var/www/mova;
+          index index.html;
+          try_files $uri $uri/ /app/index.html;
+        }
 
         # Health check endpoint - no auth required for monitoring tools
         location /health {
@@ -310,9 +319,12 @@ pkgs.dockerTools.buildImage {
     mkdir -p /secrets
     mkdir -p /var/log/nginx
     mkdir -p /var/cache/nginx
+    mkdir -p /var/www/mova
     chmod 1777 /tmp
     chmod 700 /root/.ssh
     chown nginx:nginx /var/log/nginx /var/cache/nginx
+    # Copy mova web app
+    cp -r ${movaWeb}/* /var/www/mova/
     ${if emacsConfigPackage != null then ''
       # Copy emacs config into container
       mkdir -p ${containerConfigPath}

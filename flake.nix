@@ -12,9 +12,13 @@
       url = "github:colonelpanic8/git-sync-rs";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    mova = {
+      url = "github:colonelpanic8/mova";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs }:
+  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -43,6 +47,62 @@
           doCheck = false;
         });
 
+        # Node.js for building mova
+        nodejs = pkgs.nodejs_22;
+
+        # Mova package info
+        movaPackageJson = builtins.fromJSON (builtins.readFile "${mova}/package.json");
+
+        # Mova node_modules built with mkYarnModules
+        movaNodeModules = pkgs.mkYarnModules {
+          pname = movaPackageJson.name;
+          version = movaPackageJson.version;
+          inherit nodejs;
+          packageJSON = "${mova}/package.json";
+          yarnLock = "${mova}/yarn.lock";
+          offlineCache = pkgs.fetchYarnDeps {
+            name = "mova-deps-offline-cache";
+            yarnLock = "${mova}/yarn.lock";
+            hash = "sha256-frZDiP2uXYok+HoVzHf5PYQu6qARKwG+8WWXVsgIci4=";
+          };
+        };
+
+        # Mova web build
+        movaWeb = pkgs.stdenv.mkDerivation {
+          pname = "mova-web";
+          version = movaPackageJson.version;
+
+          src = mova;
+
+          nativeBuildInputs = [
+            pkgs.yarn
+            nodejs
+          ];
+
+          buildPhase = ''
+            runHook preBuild
+
+            # Set HOME for Expo cache
+            export HOME=$(pwd)
+
+            # Copy prebuilt node_modules
+            cp -r ${movaNodeModules}/node_modules ./node_modules
+
+            # Create cache directory
+            mkdir -p .cache
+
+            # Build web export
+            yarn --offline expo export --platform web
+
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            mkdir -p $out
+            cp -r dist/* $out/
+          '';
+        };
+
         # The elisp files
         orgAgendaApiEl = ./org-agenda-api.el;
         containerInitEl = ./container-init.el;
@@ -50,7 +110,7 @@
 
         # Import the container builder
         mkContainer = import ./container.nix {
-          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiEl containerInitEl gitCommit;
+          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiEl containerInitEl gitCommit movaWeb;
         };
 
         # Package an existing emacs config directory (with pre-populated straight/)
@@ -159,6 +219,9 @@
             mkdir -p $out/share/emacs/site-lisp
             cp ${orgAgendaApiEl} $out/share/emacs/site-lisp/org-agenda-api.el
           '';
+
+          # Mova web app build
+          inherit movaWeb;
 
           # Default Docker container image (minimal, no custom config)
           container = mkContainer {};
