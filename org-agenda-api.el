@@ -286,34 +286,60 @@ VALUE can be space or comma separated minutes, e.g., \"10 30 60\" or \"10,30,60\
                             (when (> n 0) n)))
                         parts)))))
 
+(defun org-agenda-api--parse-repeater (timestamp-string)
+  "Parse repeater from TIMESTAMP-STRING like '<2026-01-20 Mon +1w>'.
+Returns plist (:type \"+\" :value 1 :unit \"w\") or nil if no repeater.
+Supports repeater types: + (cumulative), ++ (catch-up), .+ (restart)."
+  (when (and timestamp-string
+             (string-match "\\(\\.\\+\\|\\+\\+\\|\\+\\)\\([0-9]+\\)\\([hdwmy]\\)" timestamp-string))
+    (let ((type (match-string 1 timestamp-string))
+          (value (string-to-number (match-string 2 timestamp-string)))
+          (unit (match-string 3 timestamp-string)))
+      `(:type ,type :value ,value :unit ,unit))))
+
+(defun org-agenda-api--repeater-to-json (repeater)
+  "Convert REPEATER plist to JSON-encodable alist.
+Returns nil if REPEATER is nil."
+  (when repeater
+    `(("type" . ,(plist-get repeater :type))
+      ("value" . ,(plist-get repeater :value))
+      ("unit" . ,(plist-get repeater :unit)))))
+
 (defun org-agenda-api--get-planning-info ()
   "Get scheduled and deadline info at point, including whether they have times.
-Returns alist with scheduled-time, scheduled-has-time, deadline-time, deadline-has-time."
+Returns alist with scheduled-time, scheduled-has-time, deadline-time, deadline-has-time,
+scheduled-repeater, and deadline-repeater."
   (save-excursion
     (let ((scheduled-time (org-get-scheduled-time (point)))
           (deadline-time (org-get-deadline-time (point)))
           (scheduled-has-time nil)
-          (deadline-has-time nil))
-      ;; Check the planning line for time components
+          (deadline-has-time nil)
+          (scheduled-repeater nil)
+          (deadline-repeater nil))
+      ;; Check the planning line for time components and repeaters
       (when (or scheduled-time deadline-time)
         (let ((end (save-excursion (outline-next-heading) (point))))
           (forward-line 1)
           (when (looking-at org-planning-line-re)
             (let ((line (buffer-substring-no-properties (point) (line-end-position))))
-              ;; Check SCHEDULED timestamp for time
+              ;; Check SCHEDULED timestamp for time and repeater
               (when (and scheduled-time
                          (string-match "SCHEDULED: <[^>]+>" line))
                 (let ((ts (match-string 0 line)))
-                  (setq scheduled-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))))
-              ;; Check DEADLINE timestamp for time
+                  (setq scheduled-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))
+                  (setq scheduled-repeater (org-agenda-api--parse-repeater ts))))
+              ;; Check DEADLINE timestamp for time and repeater
               (when (and deadline-time
                          (string-match "DEADLINE: <[^>]+>" line))
                 (let ((ts (match-string 0 line)))
-                  (setq deadline-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))))))))
+                  (setq deadline-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))
+                  (setq deadline-repeater (org-agenda-api--parse-repeater ts))))))))
       `((scheduled-time . ,scheduled-time)
         (scheduled-has-time . ,scheduled-has-time)
+        (scheduled-repeater . ,scheduled-repeater)
         (deadline-time . ,deadline-time)
-        (deadline-has-time . ,deadline-has-time)))))
+        (deadline-has-time . ,deadline-has-time)
+        (deadline-repeater . ,deadline-repeater)))))
 
 (defun org-agenda-api--format-timestamp (time has-time)
   "Format TIME as ISO string.
@@ -344,8 +370,10 @@ expensive `org-element-at-point' calls."
               (planning (org-agenda-api--get-planning-info))
               (scheduled-time (alist-get 'scheduled-time planning))
               (scheduled-has-time (alist-get 'scheduled-has-time planning))
+              (scheduled-repeater (alist-get 'scheduled-repeater planning))
               (deadline-time (alist-get 'deadline-time planning))
               (deadline-has-time (alist-get 'deadline-has-time planning))
+              (deadline-repeater (alist-get 'deadline-repeater planning))
               (pos (point))
               (org-id (org-entry-get (point) "ID"))
               (olpath (org-get-outline-path t))  ; include current heading
@@ -357,7 +385,9 @@ expensive `org-element-at-point' calls."
            ("tags" . ,(if tags (vconcat tags) nil))
            ("level" . ,level)
            ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+           ("scheduledRepeater" . ,(org-agenda-api--repeater-to-json scheduled-repeater))
            ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
+           ("deadlineRepeater" . ,(org-agenda-api--repeater-to-json deadline-repeater))
            ("file" . ,filepath)
            ("pos" . ,pos)
            ("id" . ,org-id)
@@ -459,8 +489,10 @@ AGENDA-LINE is the raw agenda display text for reference."
                  (planning (org-agenda-api--get-planning-info))
                  (scheduled-time (alist-get 'scheduled-time planning))
                  (scheduled-has-time (alist-get 'scheduled-has-time planning))
+                 (scheduled-repeater (alist-get 'scheduled-repeater planning))
                  (deadline-time (alist-get 'deadline-time planning))
                  (deadline-has-time (alist-get 'deadline-has-time planning))
+                 (deadline-repeater (alist-get 'deadline-repeater planning))
                  (pos (point))
                  (filepath (buffer-file-name))
                  (org-id (org-entry-get (point) "ID"))
@@ -473,7 +505,9 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("tags" . ,(if tags (vconcat tags) nil))
               ("level" . ,level)
               ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+              ("scheduledRepeater" . ,(org-agenda-api--repeater-to-json scheduled-repeater))
               ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
+              ("deadlineRepeater" . ,(org-agenda-api--repeater-to-json deadline-repeater))
               ("file" . ,filepath)
               ("pos" . ,pos)
               ("id" . ,org-id)
@@ -1196,9 +1230,52 @@ Accepts ISO format: YYYY-MM-DD or YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM:SS."
             (date-to-time (concat normalized " 00:00:00")))
         (error nil)))))
 
+(defun org-agenda-api--format-repeater-string (repeater)
+  "Format REPEATER alist/hash-table as org-mode repeater string.
+REPEATER should have type, value, and unit keys.
+Returns string like \"+1w\" or nil if REPEATER is nil/empty."
+  (when repeater
+    (let ((type (cond
+                 ((hash-table-p repeater) (gethash "type" repeater))
+                 ((listp repeater) (cdr (assoc "type" repeater)))
+                 (t nil)))
+          (value (cond
+                  ((hash-table-p repeater) (gethash "value" repeater))
+                  ((listp repeater) (cdr (assoc "value" repeater)))
+                  (t nil)))
+          (unit (cond
+                 ((hash-table-p repeater) (gethash "unit" repeater))
+                 ((listp repeater) (cdr (assoc "unit" repeater)))
+                 (t nil))))
+      (when (and type value unit)
+        (format "%s%d%s" type value unit)))))
+
+(defun org-agenda-api--set-timestamp-with-repeater (time repeater-string set-fn)
+  "Set a timestamp with optional repeater.
+TIME is the Emacs time value.
+REPEATER-STRING is the org-mode repeater like \"+1w\" or nil.
+SET-FN is either `org-schedule' or `org-deadline'."
+  (if repeater-string
+      ;; With repeater: format timestamp string manually and insert
+      (let* ((has-time (and time
+                            (let ((decoded (decode-time time)))
+                              (not (and (= (nth 0 decoded) 0)
+                                        (= (nth 1 decoded) 0)
+                                        (= (nth 2 decoded) 0))))))
+             (ts-format (if has-time
+                            "<%Y-%m-%d %a %H:%M %s>"
+                          "<%Y-%m-%d %a %s>"))
+             (ts-string (format-time-string
+                         (replace-regexp-in-string "%s" repeater-string ts-format)
+                         time)))
+        ;; Use org-schedule/org-deadline with the formatted string
+        (funcall set-fn nil ts-string))
+    ;; Without repeater: use standard org function
+    (funcall set-fn nil time)))
+
 (defun org-agenda-api--update-todo-at (file pos updates)
   "Update the TODO at FILE and POS with UPDATES alist.
-UPDATES can contain: scheduled, deadline, priority, tags.
+UPDATES can contain: scheduled, scheduledRepeater, deadline, deadlineRepeater, priority, tags.
 Returns alist with status, details, and new position."
   (with-current-buffer (find-file-noselect file)
     (save-excursion
@@ -1207,32 +1284,44 @@ Returns alist with status, details, and new position."
           (let ((title (org-get-heading t t t t))
                 (applied-updates nil)
                 (new-pos nil))
-            ;; Handle scheduled
-            (when (assoc "scheduled" updates)
-              (let ((scheduled-value (cdr (assoc "scheduled" updates))))
-                (if (or (null scheduled-value) (string-empty-p scheduled-value))
-                    ;; Clear scheduled
+            ;; Handle scheduled (with optional repeater)
+            (when (or (assoc "scheduled" updates) (assoc "scheduledRepeater" updates))
+              (let* ((scheduled-value (cdr (assoc "scheduled" updates)))
+                     (repeater-value (cdr (assoc "scheduledRepeater" updates)))
+                     (repeater-string (org-agenda-api--format-repeater-string repeater-value)))
+                (if (and (or (null scheduled-value) (string-empty-p scheduled-value))
+                         (not (assoc "scheduledRepeater" updates)))
+                    ;; Clear scheduled (only if not just updating repeater)
                     (progn
                       (org-schedule '(4))  ; Universal arg removes scheduling
-                      (push '("scheduled" . nil) applied-updates))
-                  ;; Set scheduled
+                      (push '("scheduled" . nil) applied-updates)
+                      (push '("scheduledRepeater" . nil) applied-updates))
+                  ;; Set scheduled with optional repeater
                   (let ((time (org-agenda-api--parse-datetime scheduled-value)))
                     (when time
-                      (org-schedule nil time)
-                      (push `("scheduled" . ,scheduled-value) applied-updates))))))
-            ;; Handle deadline
-            (when (assoc "deadline" updates)
-              (let ((deadline-value (cdr (assoc "deadline" updates))))
-                (if (or (null deadline-value) (string-empty-p deadline-value))
-                    ;; Clear deadline
+                      (org-agenda-api--set-timestamp-with-repeater time repeater-string #'org-schedule)
+                      (push `("scheduled" . ,scheduled-value) applied-updates)
+                      (when repeater-value
+                        (push `("scheduledRepeater" . ,repeater-value) applied-updates)))))))
+            ;; Handle deadline (with optional repeater)
+            (when (or (assoc "deadline" updates) (assoc "deadlineRepeater" updates))
+              (let* ((deadline-value (cdr (assoc "deadline" updates)))
+                     (repeater-value (cdr (assoc "deadlineRepeater" updates)))
+                     (repeater-string (org-agenda-api--format-repeater-string repeater-value)))
+                (if (and (or (null deadline-value) (string-empty-p deadline-value))
+                         (not (assoc "deadlineRepeater" updates)))
+                    ;; Clear deadline (only if not just updating repeater)
                     (progn
                       (org-deadline '(4))  ; Universal arg removes deadline
-                      (push '("deadline" . nil) applied-updates))
-                  ;; Set deadline
+                      (push '("deadline" . nil) applied-updates)
+                      (push '("deadlineRepeater" . nil) applied-updates))
+                  ;; Set deadline with optional repeater
                   (let ((time (org-agenda-api--parse-datetime deadline-value)))
                     (when time
-                      (org-deadline nil time)
-                      (push `("deadline" . ,deadline-value) applied-updates))))))
+                      (org-agenda-api--set-timestamp-with-repeater time repeater-string #'org-deadline)
+                      (push `("deadline" . ,deadline-value) applied-updates)
+                      (when repeater-value
+                        (push `("deadlineRepeater" . ,repeater-value) applied-updates)))))))
             ;; Handle priority
             (when (assoc "priority" updates)
               (let ((priority-value (cdr (assoc "priority" updates))))
@@ -1276,14 +1365,16 @@ Returns alist with status, details, and new position."
           ("message" . "No heading found at position"))))))
 
 (defservlet update application/json (_path _query headers)
-  "Endpoint: Update a TODO's scheduled date, deadline, priority, or tags.
+  "Endpoint: Update a TODO's scheduled date, deadline, priority, tags, or repeaters.
 Accepts JSON body with:
   - id: org-id of the todo (preferred)
   - file: file path (fallback)
   - pos: position in file (fallback)
   - title: heading title (can match by title alone or with file)
   - scheduled: ISO date/datetime string or null to clear
+  - scheduledRepeater: object with type/value/unit or null to clear
   - deadline: ISO date/datetime string or null to clear
+  - deadlineRepeater: object with type/value/unit or null to clear
   - priority: A, B, C, or null to clear
   - tags: array of tag strings to set, or empty array to clear
 Returns updated todo with new file and pos for cache update."
@@ -1296,7 +1387,9 @@ Returns updated todo with new file and pos for cache update."
                (pos (gethash "pos" json-data))
                (title (gethash "title" json-data))
                (scheduled (gethash "scheduled" json-data))
+               (scheduled-repeater (gethash "scheduledRepeater" json-data))
                (deadline (gethash "deadline" json-data))
+               (deadline-repeater (gethash "deadlineRepeater" json-data))
                (priority (gethash "priority" json-data))
                (tags (gethash "tags" json-data))
                (location nil)
@@ -1305,7 +1398,8 @@ Returns updated todo with new file and pos for cache update."
         (message "[/update] Request: id=%s file=%s pos=%s title=%s scheduled=%s deadline=%s priority=%s"
                  id file pos title scheduled deadline priority)
         ;; Check for unrecognized fields
-        (let ((allowed-fields '("id" "file" "pos" "title" "scheduled" "deadline" "priority" "tags"))
+        (let ((allowed-fields '("id" "file" "pos" "title" "scheduled" "scheduledRepeater"
+                                "deadline" "deadlineRepeater" "priority" "tags"))
               (unrecognized nil))
           (maphash (lambda (key _value)
                      (unless (member key allowed-fields)
@@ -1321,8 +1415,12 @@ Returns updated todo with new file and pos for cache update."
         ;; Use :not-found sentinel to properly detect if key exists in JSON
         (unless (eq (gethash "scheduled" json-data :not-found) :not-found)
           (push (cons "scheduled" (if (eq scheduled :null) nil scheduled)) updates))
+        (unless (eq (gethash "scheduledRepeater" json-data :not-found) :not-found)
+          (push (cons "scheduledRepeater" (if (eq scheduled-repeater :null) nil scheduled-repeater)) updates))
         (unless (eq (gethash "deadline" json-data :not-found) :not-found)
           (push (cons "deadline" (if (eq deadline :null) nil deadline)) updates))
+        (unless (eq (gethash "deadlineRepeater" json-data :not-found) :not-found)
+          (push (cons "deadlineRepeater" (if (eq deadline-repeater :null) nil deadline-repeater)) updates))
         (unless (eq (gethash "priority" json-data :not-found) :not-found)
           (push (cons "priority" (if (eq priority :null) nil priority)) updates))
         (unless (eq (gethash "tags" json-data :not-found) :not-found)
