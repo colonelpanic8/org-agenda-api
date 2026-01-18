@@ -71,6 +71,20 @@ let
           try_files $uri $uri/ /app/index.html;
         }
 
+        # Expo assets - served at root level (Expo generates absolute paths)
+        # Note: alias requires trailing slashes on both location and alias for proper path construction
+        location /_expo/ {
+          alias /var/www/mova/_expo/;
+        }
+
+        location /assets/ {
+          alias /var/www/mova/assets/;
+        }
+
+        location = /favicon.ico {
+          alias /var/www/mova/favicon.ico;
+        }
+
         # Health check endpoint - no auth required for monitoring tools
         location /health {
           proxy_pass http://emacs;
