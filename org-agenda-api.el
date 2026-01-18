@@ -467,7 +467,8 @@ AGENDA-LINE is the raw agenda display text for reference."
                  (olpath (org-get-outline-path t))
                  (priority (org-entry-get (point) "PRIORITY"))
                  (notify-before (org-agenda-api--parse-notify-before
-                                 (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE"))))
+                                 (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
+                 (category (org-get-category)))
             `(("todo" . ,todo)
               ("title" . ,title)
               ("tags" . ,(if tags (vconcat tags) nil))
@@ -480,6 +481,7 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("olpath" . ,(if olpath (vconcat olpath) nil))
               ("priority" . ,priority)
               ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
+              ("category" . ,category)
               ("agendaLine" . ,(substring-no-properties agenda-line)))))))))
 
 (defun org-agenda-api--run-agenda (span &optional start-date include-overdue)
