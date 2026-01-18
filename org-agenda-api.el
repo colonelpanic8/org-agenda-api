@@ -4,7 +4,7 @@
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
@@ -56,7 +56,7 @@
 
 ;;; Version
 
-(defconst org-agenda-api-version "0.1.0"
+(defconst org-agenda-api-version "0.2.0"
   "Version of org-agenda-api.")
 
 ;;; Logging

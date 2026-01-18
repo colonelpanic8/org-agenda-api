@@ -16,6 +16,11 @@
 let
   port = 2025;
 
+  # Nginx with headers-more module for clearing WWW-Authenticate header
+  nginxWithModules = pkgs.nginx.override {
+    modules = [ pkgs.nginxModules.moreheaders ];
+  };
+
   # Package the emacs config directory if provided
   emacsConfigPackage = if emacsConfigDir != null then
     pkgs.runCommand "emacs-config" {} ''
@@ -48,7 +53,7 @@ let
       worker_connections 64;
     }
     http {
-      include ${pkgs.nginx}/conf/mime.types;
+      include ${nginxWithModules}/conf/mime.types;
       default_type application/octet-stream;
       access_log /dev/stdout;
       client_body_temp_path /tmp/nginx_client_body;
@@ -76,6 +81,10 @@ let
         # API endpoints - proxy to emacs with auth
         location ~ ^/(version|agenda|agenda-files|get-all-todos|complete|update|todo-states|templates|capture|custom-views|custom-view|debug-config)$ {
           include /tmp/nginx-auth.conf;
+
+          # Clear WWW-Authenticate header to prevent browser's native auth popup
+          # JS handles 401 responses directly
+          more_clear_headers 'WWW-Authenticate';
 
           proxy_pass http://emacs;
           proxy_http_version 1.1;
@@ -243,7 +252,7 @@ let
     environment=PATH="${pkgs.coreutils}/bin:${pkgs.git}/bin:${pkgs.openssh}/bin"${if customElispFile != null then ",${customElispEnv}" else ""}
 
     [program:nginx]
-    command=${pkgs.nginx}/bin/nginx -c ${nginxConf}
+    command=${nginxWithModules}/bin/nginx -c ${nginxConf}
     autostart=true
     autorestart=true
     startretries=3
@@ -365,7 +374,7 @@ pkgs.dockerTools.buildImage {
     name = "org-agenda-api-root";
     paths = [
       emacsWithPackages
-      pkgs.nginx
+      nginxWithModules
       pkgs.curl
       pkgs.coreutils
       pkgs.bash
