@@ -859,6 +859,8 @@ VALUES is an alist of (PROMPT-NAME . VALUE) pairs.
 In addition to template prompts, VALUES may contain universal org fields:
   - scheduled: ISO date string
   - deadline: ISO date string
+  - scheduledRepeater: repeater object with type, value, unit
+  - deadlineRepeater: repeater object with type, value, unit
   - priority: A, B, or C
   - tags: list of tag strings
   - todo: TODO state keyword
@@ -880,6 +882,8 @@ Returns an alist with status information."
            ;; Extract universal fields from values
            (scheduled (cdr (assoc "scheduled" values)))
            (deadline (cdr (assoc "deadline" values)))
+           (scheduled-repeater (cdr (assoc "scheduledRepeater" values)))
+           (deadline-repeater (cdr (assoc "deadlineRepeater" values)))
            (priority (cdr (assoc "priority" values)))
            (tags (cdr (assoc "tags" values)))
            (todo-state (cdr (assoc "todo" values)))
@@ -905,16 +909,22 @@ Returns an alist with status information."
               (let ((priority-char (string-to-char (upcase priority))))
                 (when (memq priority-char '(?A ?B ?C))
                   (org-priority priority-char))))
-            ;; Apply scheduled
+            ;; Apply scheduled (with optional repeater)
             (when (and scheduled (not (string-empty-p scheduled)))
               (let ((time (org-agenda-api--parse-datetime scheduled)))
                 (when time
-                  (org-schedule nil time))))
-            ;; Apply deadline
+                  (if scheduled-repeater
+                      (org-agenda-api--set-timestamp-with-repeater
+                       'scheduled time scheduled-repeater)
+                    (org-schedule nil time)))))
+            ;; Apply deadline (with optional repeater)
             (when (and deadline (not (string-empty-p deadline)))
               (let ((time (org-agenda-api--parse-datetime deadline)))
                 (when time
-                  (org-deadline nil time))))
+                  (if deadline-repeater
+                      (org-agenda-api--set-timestamp-with-repeater
+                       'deadline time deadline-repeater)
+                    (org-deadline nil time)))))
             ;; Apply tags
             (when (and tags (> (length tags) 0))
               (let ((tag-list (if (vectorp tags) (append tags nil) tags)))
