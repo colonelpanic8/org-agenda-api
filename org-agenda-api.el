@@ -1062,10 +1062,59 @@ Returns an alist with 'active' (not-done) and 'done' states."
     `(("active" . ,(vconcat (nreverse active-states)))
       ("done" . ,(vconcat (nreverse done-states))))))
 
+(defun org-agenda-api--get-filter-options ()
+  "Get all available filter options from agenda files.
+Returns an alist with todoStates, priorities, tags, and categories."
+  (let ((todo-states (org-agenda-api--get-todo-states))
+        (priorities '())
+        (tags '())
+        (categories '()))
+    ;; Get priority range
+    (let ((highest (or org-priority-highest ?A))
+          (lowest (or org-priority-lowest ?C)))
+      (setq priorities
+            (mapcar #'char-to-string
+                    (number-sequence highest lowest))))
+    ;; Collect tags and categories from all agenda files
+    (dolist (file org-agenda-files)
+      (when (file-readable-p file)
+        (with-current-buffer (find-file-noselect file)
+          ;; Get file-level category
+          (save-excursion
+            (goto-char (point-min))
+            (when (re-search-forward "^#\\+CATEGORY:[ \t]+\\(.+\\)$" nil t)
+              (let ((cat (string-trim (match-string 1))))
+                (unless (member cat categories)
+                  (push cat categories)))))
+          ;; Get tags from buffer
+          (let ((buffer-tags (org-get-buffer-tags)))
+            (dolist (tag-pair buffer-tags)
+              (let ((tag (car tag-pair)))
+                (unless (member tag tags)
+                  (push tag tags)))))
+          ;; Get categories from headings
+          (org-map-entries
+           (lambda ()
+             (let ((cat (org-get-category)))
+               (when (and cat (not (member cat categories)))
+                 (push cat categories))))
+           nil 'file))))
+    `(("todoStates" . ,(vconcat (append (cdr (assoc "active" todo-states))
+                                        (cdr (assoc "done" todo-states)))))
+      ("priorities" . ,(vconcat priorities))
+      ("tags" . ,(vconcat (sort tags #'string<)))
+      ("categories" . ,(vconcat (sort categories #'string<))))))
+
 (defservlet todo-states application/json ()
   "Endpoint: Return configured TODO states.
 Returns active (not-done) states and done states separately."
   (insert (json-encode (org-agenda-api--get-todo-states)))
+  (org-agenda-api--track-request))
+
+(defservlet filter-options application/json ()
+  "Endpoint: Return all available filter options for the UI.
+Returns todoStates, priorities, tags, and categories."
+  (insert (json-encode (org-agenda-api--get-filter-options)))
   (org-agenda-api--track-request))
 
 (defservlet agenda-files application/json ()
