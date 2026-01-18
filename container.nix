@@ -63,38 +63,18 @@ let
 
       server {
         listen 80;
-
-        # Mova web app - no auth required (static files)
-        location /app {
-          alias /var/www/mova;
-          index index.html;
-          try_files $uri $uri/ /app/index.html;
-        }
-
-        # Expo assets - served at root level (Expo generates absolute paths)
-        # Note: alias requires trailing slashes on both location and alias for proper path construction
-        location /_expo/ {
-          alias /var/www/mova/_expo/;
-        }
-
-        location /assets/ {
-          alias /var/www/mova/assets/;
-        }
-
-        location = /favicon.ico {
-          alias /var/www/mova/favicon.ico;
-        }
+        root /var/www/mova;
 
         # Health check endpoint - no auth required for monitoring tools
-        location /health {
+        location = /health {
           proxy_pass http://emacs;
           proxy_http_version 1.1;
           proxy_connect_timeout 5s;
           proxy_read_timeout 5s;
         }
 
-        location / {
-          # Include auth config (generated at startup)
+        # API endpoints - proxy to emacs with auth
+        location ~ ^/(version|agenda|agenda-files|get-all-todos|complete|update|todo-states|templates|capture|custom-views|custom-view|debug-config)$ {
           include /tmp/nginx-auth.conf;
 
           proxy_pass http://emacs;
@@ -119,6 +99,11 @@ let
             add_header 'Content-Type' 'text/plain';
             return 204;
           }
+        }
+
+        # Static files - serve mova web app (no auth)
+        location / {
+          try_files $uri $uri/ /index.html;
         }
       }
     }
