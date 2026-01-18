@@ -134,11 +134,6 @@ ERR should be the error caught by condition-case."
   :type 'integer
   :group 'org-agenda-api)
 
-(defcustom org-agenda-api-inbox-file "~/org/inbox.org"
-  "File where new TODOs are captured."
-  :type 'file
-  :group 'org-agenda-api)
-
 (defcustom org-agenda-api-capture-templates nil
   "Capture templates registered for API use.
 Each entry is a list of (KEY . PLIST) where PLIST contains:
@@ -637,12 +632,6 @@ Returns a list of entry alists extracted from the agenda buffer."
             (car rest)
           key)))))
 
-(defun org-agenda-api--build-capture-template (content)
-  "Build a capture template for CONTENT."
-  `("d" "Dynamic" entry (file ,org-agenda-api-inbox-file)
-    ,(format "* TODO %s" content)
-    :immediate-finish t))
-
 (defun org-agenda-api--cleanup-emacs-state ()
   "Clean up Emacs state before capture to avoid minibuffer conflicts.
 This resets any stuck state from previous failed operations."
@@ -663,91 +652,34 @@ This resets any stuck state from previous failed operations."
       (org-agenda-api--log 'debug "Killing stale capture buffer: %s" (buffer-name buf))
       (kill-buffer buf))))
 
-(defun org-agenda-api--capture (content)
-  "Capture a new TODO with CONTENT."
-  (org-agenda-api--log 'debug "Starting capture for: %s" content)
-  (org-agenda-api--log 'debug "Inbox file: %s (exists: %s)"
-                       org-agenda-api-inbox-file
-                       (file-exists-p org-agenda-api-inbox-file))
-  ;; Clean up any stuck state from previous operations
-  (org-agenda-api--cleanup-emacs-state)
-  (let ((org-capture-templates
-         (list (org-agenda-api--build-capture-template content))))
-    (org-agenda-api--log 'debug "Calling org-capture with template: %S" org-capture-templates)
-    (condition-case err
-        (progn
-          (org-capture nil "d")
-          (org-agenda-api--log 'debug "org-capture completed successfully"))
-      (error
-       (org-agenda-api--log-error-with-backtrace "org-capture" err)
-       ;; Clean up after failure too
-       (ignore-errors (org-agenda-api--cleanup-emacs-state))
-       (signal (car err) (cdr err)))))
-  (org-agenda-api--invalidate-cache)
-  (org-agenda-api--log 'debug "Cache invalidated, capture complete"))
-
-(defun org-agenda-api--capture-extended (title &optional scheduled deadline priority tags todo-state)
-  "Capture a new TODO with TITLE and optional fields.
-SCHEDULED and DEADLINE are ISO date strings (YYYY-MM-DD or YYYY-MM-DD HH:MM).
-PRIORITY is a single letter (A, B, or C).
-TAGS is a list of tag strings.
-TODO-STATE is the todo keyword (e.g., \"TODO\", \"NEXT\")."
-  (org-agenda-api--log 'debug "Starting extended capture for: %s" title)
-  (org-agenda-api--log 'debug "  scheduled=%s deadline=%s priority=%s tags=%s todo=%s"
-                       scheduled deadline priority tags todo-state)
-  (org-agenda-api--log 'debug "Inbox file: %s (exists: %s)"
-                       org-agenda-api-inbox-file
-                       (file-exists-p org-agenda-api-inbox-file))
-  ;; Clean up any stuck state from previous operations
-  (org-agenda-api--cleanup-emacs-state)
-  ;; Build the headline string
-  (let* ((state (or todo-state "TODO"))
-         (priority-cookie (when (and priority (not (string-empty-p priority)))
-                            (format " [#%s]" (upcase priority))))
-         (tag-string (when (and tags (> (length tags) 0))
-                       (let ((tag-list (if (vectorp tags) (append tags nil) tags)))
-                         (concat " :" (mapconcat #'identity tag-list ":") ":"))))
-         (headline (format "* %s%s %s%s"
-                           state
-                           (or priority-cookie "")
-                           title
-                           (or tag-string ""))))
-    (org-agenda-api--log 'debug "Built headline: %s" headline)
-    ;; Write to inbox file
-    (with-current-buffer (find-file-noselect org-agenda-api-inbox-file)
-      (goto-char (point-max))
-      ;; Ensure we're on a new line
-      (unless (bolp)
-        (insert "\n"))
-      ;; Insert the headline
-      (insert headline "\n")
-      ;; Add planning line if we have scheduled or deadline
-      (let ((entry-pos (save-excursion
-                         (forward-line -1)
-                         (point))))
-        (when (or scheduled deadline)
-          (save-excursion
-            (goto-char entry-pos)
-            (org-back-to-heading t)
-            ;; Set scheduled if provided
-            (when (and scheduled (not (string-empty-p scheduled)))
-              (let ((time (org-agenda-api--parse-datetime scheduled)))
-                (when time
-                  (org-schedule nil time))))
-            ;; Set deadline if provided
-            (when (and deadline (not (string-empty-p deadline)))
-              (let ((time (org-agenda-api--parse-datetime deadline)))
-                (when time
-                  (org-deadline nil time)))))))
-      (save-buffer)))
-  (org-agenda-api--invalidate-cache)
-  (org-agenda-api--log 'debug "Extended capture complete"))
-
 ;;; Capture Template API Functions
 
+(defun org-agenda-api--get-default-capture-target ()
+  "Get the target file for the default capture template.
+Returns the first file in `org-agenda-files', or signals an error if none exist."
+  (let ((agenda-files (org-agenda-files)))
+    (unless agenda-files
+      (error "No agenda files configured - cannot capture"))
+    (car agenda-files)))
+
+(defun org-agenda-api--make-default-template ()
+  "Create the default capture template entry.
+Returns a template entry in the format (KEY . PLIST)."
+  (let ((target-file (org-agenda-api--get-default-capture-target)))
+    `("default" .
+      (:name "Todo"
+       :template ("d" "Todo" entry (file ,target-file)
+                  "* TODO %^{Title}\n"
+                  :immediate-finish t)
+       :prompts (("Title" :type string :required t))))))
+
 (defun org-agenda-api--get-template (key)
-  "Get the API capture template with KEY."
-  (assoc key org-agenda-api-capture-templates))
+  "Get the API capture template with KEY.
+If KEY is \"default\" and no user template exists with that key,
+returns the built-in default template."
+  (or (assoc key org-agenda-api-capture-templates)
+      (when (string= key "default")
+        (org-agenda-api--make-default-template))))
 
 (defun org-agenda-api--template-to-json (template-entry)
   "Convert TEMPLATE-ENTRY to JSON-encodable alist."
@@ -766,8 +698,15 @@ TODO-STATE is the todo keyword (e.g., \"TODO\", \"NEXT\")."
                              prompts))))))
 
 (defun org-agenda-api--get-all-templates-json ()
-  "Get all registered templates as a JSON-encodable alist."
-  (mapcar #'org-agenda-api--template-to-json org-agenda-api-capture-templates))
+  "Get all registered templates as a JSON-encodable alist.
+Includes the built-in default template if no user template with key \"default\" exists."
+  (let ((user-templates (mapcar #'org-agenda-api--template-to-json
+                                org-agenda-api-capture-templates)))
+    ;; Add default template if not already defined by user
+    (if (assoc "default" org-agenda-api-capture-templates)
+        user-templates
+      (cons (org-agenda-api--template-to-json (org-agenda-api--make-default-template))
+            user-templates))))
 
 (defvar org-agenda-api--current-capture-values nil
   "Dynamically bound alist of prompt values for current API capture.")

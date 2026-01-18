@@ -29,9 +29,6 @@
 ;; Log startup
 (message "org-agenda-api container-init.el loading...")
 
-;; org-agenda-files should be set by custom elisp
-;; We don't set a default here to avoid interfering with custom config
-
 ;; Set inbox file for captures
 (setq org-agenda-api-inbox-file
       (or (getenv "ORG_INBOX_FILE") "/data/org/inbox.org"))
@@ -59,6 +56,68 @@
 (let ((custom-elisp-content (getenv "ORG_API_CUSTOM_ELISP_CONTENT")))
   (when (and custom-elisp-content (not (string-empty-p custom-elisp-content)))
     (eval (car (read-from-string (format "(progn %s)" custom-elisp-content))))))
+
+;; === Auto-discovery of org files ===
+;; If org-agenda-files is not set after loading custom elisp,
+;; auto-discover org files from the data directory
+
+(defun org-agenda-api--discover-org-files ()
+  "Discover org files in /data directory.
+Searches for .org files in:
+1. Repo paths from GIT_SYNC_REPOSITORIES env var
+2. /data/org (legacy single-repo path) if it's a git repo
+3. All subdirectories of /data as fallback"
+  (let ((repos-json (getenv "GIT_SYNC_REPOSITORIES"))
+        (search-dirs nil)
+        (org-files nil))
+    (cond
+     ;; Multi-repo mode: parse repo paths from JSON
+     (repos-json
+      (condition-case nil
+          (let ((repos (json-parse-string repos-json :array-type 'list)))
+            (dolist (repo repos)
+              (let ((path (gethash "path" repo)))
+                (when path
+                  (push (concat "/data/" path) search-dirs)))))
+        (error
+         (message "Warning: Failed to parse GIT_SYNC_REPOSITORIES"))))
+     ;; Legacy: use /data/org if it's a git repo
+     ((file-directory-p "/data/org/.git")
+      (push "/data/org" search-dirs)))
+    ;; Always also search /data for any other org files
+    (push "/data" search-dirs)
+    (setq search-dirs (delete-dups search-dirs))
+    ;; Find all .org files in search directories
+    (dolist (dir search-dirs)
+      (when (file-directory-p dir)
+        (setq org-files
+              (append org-files
+                      (directory-files-recursively dir "\\.org$")))))
+    ;; Remove duplicates and filter out common non-agenda files
+    (delete-dups
+     (cl-remove-if
+      (lambda (f)
+        (or (string-match-p "/\\.git/" f)
+            (string-match-p "/node_modules/" f)
+            (string-match-p "/straight/" f)
+            (string-match-p "#" f)))
+      org-files))))
+
+(unless org-agenda-files
+  (message "org-agenda-files not set, auto-discovering org files...")
+  (let ((discovered (org-agenda-api--discover-org-files)))
+    (if discovered
+        (progn
+          (setq org-agenda-files discovered)
+          (message "Auto-discovered %d org files" (length discovered))
+          ;; Set inbox file to first repo's inbox.org if not explicitly set
+          (unless (getenv "ORG_INBOX_FILE")
+            (let* ((first-file (car discovered))
+                   (first-dir (file-name-directory first-file))
+                   (inbox-candidate (expand-file-name "inbox.org" first-dir)))
+              (setq org-agenda-api-inbox-file inbox-candidate)
+              (message "Auto-set inbox file to: %s" inbox-candidate))))
+      (message "Warning: No org files found in /data"))))
 
 ;; Log configuration summary
 (message "org-agenda-api configuration:")

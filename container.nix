@@ -129,6 +129,57 @@ let
     then "ORG_API_CUSTOM_ELISP=${customElispFile}"
     else "";
 
+  # Multi-repo git sync wrapper script
+  gitSyncMultiScript = pkgs.writeShellScript "git-sync-multi" ''
+    PIDS=""
+
+    cleanup() {
+      echo "git-sync-multi: Stopping all git-sync processes..."
+      for pid in $PIDS; do
+        kill $pid 2>/dev/null || true
+      done
+      wait
+      exit 0
+    }
+
+    trap cleanup SIGTERM SIGINT
+
+    start_sync() {
+      local repo_path="$1"
+      echo "git-sync-multi: Starting sync for $repo_path"
+      ${gitSyncRs}/bin/git-sync-rs watch -d "$repo_path" &
+      PIDS="$PIDS $!"
+    }
+
+    if [ -n "$GIT_SYNC_REPOSITORIES" ]; then
+      echo "git-sync-multi: Multi-repo mode"
+      PATHS=$(${pkgs.jq}/bin/jq -r '.[].path // empty' <<< "$GIT_SYNC_REPOSITORIES" 2>/dev/null)
+      if [ -z "$PATHS" ]; then
+        echo "git-sync-multi: ERROR - Failed to parse GIT_SYNC_REPOSITORIES JSON"
+        exit 1
+      fi
+      for path in $PATHS; do
+        repo_dir="/data/$path"
+        if [ -d "$repo_dir/.git" ]; then
+          start_sync "$repo_dir"
+        else
+          echo "git-sync-multi: WARNING - $repo_dir is not a git repository, skipping"
+        fi
+      done
+    elif [ -d "/data/org/.git" ]; then
+      echo "git-sync-multi: Single-repo mode (legacy)"
+      start_sync "/data/org"
+    else
+      echo "git-sync-multi: No repositories configured or found"
+      while true; do
+        ${pkgs.coreutils}/bin/sleep 3600
+      done
+    fi
+
+    echo "git-sync-multi: Monitoring ''${#PIDS} sync processes"
+    wait
+  '';
+
   # Health checker script that monitors emacs and restarts if unhealthy
   healthCheckerScript = pkgs.writeShellScript "health-checker" ''
     INTERVAL=''${HEALTH_CHECK_INTERVAL:-10}
@@ -183,7 +234,7 @@ let
     supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
     [program:git-sync]
-    command=${gitSyncRs}/bin/git-sync-rs watch -d /data/org
+    command=${gitSyncMultiScript}
     autostart=true
     autorestart=true
     startretries=3
@@ -290,13 +341,31 @@ let
     # Set git config for commits
     ${pkgs.git}/bin/git config --global user.email "''${GIT_USER_EMAIL:-org-agenda-api@localhost}"
     ${pkgs.git}/bin/git config --global user.name "''${GIT_USER_NAME:-org-agenda-api}"
-    # Mark /data/org as safe directory (needed when mounting from different user)
-    ${pkgs.git}/bin/git config --global --add safe.directory /data/org
 
-    # If GIT_SYNC_REPOSITORY is set and /data/org is empty, clone the repo
-    if [ -n "$GIT_SYNC_REPOSITORY" ] && [ ! -d "/data/org/.git" ]; then
-      ${pkgs.coreutils}/bin/echo "Cloning repository from $GIT_SYNC_REPOSITORY..."
-      ${pkgs.git}/bin/git clone "$GIT_SYNC_REPOSITORY" /data/org
+    # Clone and configure repositories
+    if [ -n "$GIT_SYNC_REPOSITORIES" ]; then
+      ${pkgs.coreutils}/bin/echo "Configuring multiple repositories..."
+      ${pkgs.jq}/bin/jq -c '.[]' <<< "$GIT_SYNC_REPOSITORIES" 2>/dev/null | while read -r repo; do
+        url=$(${pkgs.jq}/bin/jq -r '.url' <<< "$repo")
+        path=$(${pkgs.jq}/bin/jq -r '.path' <<< "$repo")
+        repo_dir="/data/$path"
+        ${pkgs.coreutils}/bin/mkdir -p "$repo_dir"
+        ${pkgs.git}/bin/git config --global --add safe.directory "$repo_dir"
+        if [ ! -d "$repo_dir/.git" ]; then
+          ${pkgs.coreutils}/bin/echo "Cloning $url to $repo_dir..."
+          ${pkgs.git}/bin/git clone "$url" "$repo_dir"
+        else
+          ${pkgs.coreutils}/bin/echo "Repository already exists at $repo_dir"
+        fi
+      done
+    elif [ -n "$GIT_SYNC_REPOSITORY" ]; then
+      ${pkgs.git}/bin/git config --global --add safe.directory /data/org
+      if [ ! -d "/data/org/.git" ]; then
+        ${pkgs.coreutils}/bin/echo "Cloning repository from $GIT_SYNC_REPOSITORY..."
+        ${pkgs.git}/bin/git clone "$GIT_SYNC_REPOSITORY" /data/org
+      fi
+    else
+      ${pkgs.git}/bin/git config --global --add safe.directory /data/org
     fi
 
     ${pkgs.coreutils}/bin/echo "Starting supervisord..."
@@ -317,6 +386,8 @@ pkgs.dockerTools.buildImage {
       pkgs.bash
       pkgs.git
       pkgs.openssh
+      pkgs.jq
+      pkgs.cacert
       pkgs.python3Packages.supervisor
       gitSyncRs
     ] ++ extraPackages;
@@ -352,10 +423,13 @@ pkgs.dockerTools.buildImage {
       "80/tcp" = {};
     };
     Volumes = {
-      "/data/org" = {};
+      "/data" = {};
       "/secrets" = {};
     };
     Env = [
+      # SSL certificates for HTTPS git repos
+      "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+      "NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
       # Org agenda API settings
       "ORG_AGENDA_FILES=/data/org"
       "ORG_INBOX_FILE=/data/org/inbox.org"
@@ -376,7 +450,12 @@ pkgs.dockerTools.buildImage {
       # Git user (for commits)
       "GIT_USER_EMAIL=org-agenda-api@localhost"
       "GIT_USER_NAME=org-agenda-api"
-      # GIT_SYNC_REPOSITORY - set this to clone on startup
+      # Git repository options (choose one):
+      # GIT_SYNC_REPOSITORIES - JSON array for multiple repos:
+      #   [{"url": "git@github.com:user/org.git", "path": "org"},
+      #    {"url": "git@github.com:user/work.git", "path": "work"}]
+      #   Repos are cloned to /data/<path>/
+      # GIT_SYNC_REPOSITORY - single repo URL (legacy), clones to /data/org
       # GIT_SSH_PRIVATE_KEY - or mount key to /secrets/ssh_key
       # ORG_API_CUSTOM_ELISP - path to custom elisp file
     ];
