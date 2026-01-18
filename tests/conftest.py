@@ -199,6 +199,9 @@ def org_test_dir(tmp_path_factory):
 
 * TODO Task scheduled for yesterday
   SCHEDULED: <{TEST_DATE_PREV_DAY_ORG}>
+
+* TODO Task scheduled with specific time
+  SCHEDULED: <{TEST_DATE_ORG} 10:00>
 """)
 
     return test_dir

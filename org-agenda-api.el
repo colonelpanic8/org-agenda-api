@@ -871,16 +871,20 @@ Returns an alist with status information."
               (let ((priority-char (string-to-char (upcase priority))))
                 (when (memq priority-char '(?A ?B ?C))
                   (org-priority priority-char))))
-            ;; Apply scheduled
+            ;; Apply scheduled - use org timestamp string to preserve time
             (when (and scheduled (not (string-empty-p scheduled)))
-              (let ((time (org-agenda-api--parse-datetime scheduled)))
-                (when time
-                  (org-schedule nil time))))
-            ;; Apply deadline
+              (let* ((has-time (org-agenda-api--datetime-has-time-p scheduled))
+                     (time (org-agenda-api--parse-datetime scheduled))
+                     (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+                (when org-ts
+                  (org-schedule nil org-ts))))
+            ;; Apply deadline - use org timestamp string to preserve time
             (when (and deadline (not (string-empty-p deadline)))
-              (let ((time (org-agenda-api--parse-datetime deadline)))
-                (when time
-                  (org-deadline nil time))))
+              (let* ((has-time (org-agenda-api--datetime-has-time-p deadline))
+                     (time (org-agenda-api--parse-datetime deadline))
+                     (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+                (when org-ts
+                  (org-deadline nil org-ts))))
             ;; Apply tags
             (when (and tags (> (length tags) 0))
               (let ((tag-list (if (vectorp tags) (append tags nil) tags)))
@@ -1184,17 +1188,37 @@ Returns alist with status and details."
           `(("status" . "error")
             ("message" . "No heading found at position")))))))
 
+(defun org-agenda-api--datetime-has-time-p (datetime-string)
+  "Return non-nil if DATETIME-STRING includes a time component."
+  (and datetime-string
+       (not (string-empty-p datetime-string))
+       (string-match-p ":" datetime-string)))
+
 (defun org-agenda-api--parse-datetime (datetime-string)
   "Parse DATETIME-STRING into an Emacs time value.
 Accepts ISO format: YYYY-MM-DD or YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM:SS."
   (when (and datetime-string (not (string-empty-p datetime-string)))
     (let* ((normalized (replace-regexp-in-string "T" " " datetime-string))
-           (has-time (string-match-p ":" normalized)))
+           (colon-count (cl-count ?: normalized)))
       (condition-case nil
-          (if has-time
-              (date-to-time (concat normalized ":00"))
+          (cond
+           ;; No colons: date only (YYYY-MM-DD)
+           ((= colon-count 0)
             (date-to-time (concat normalized " 00:00:00")))
+           ;; One colon: time without seconds (YYYY-MM-DD HH:MM)
+           ((= colon-count 1)
+            (date-to-time (concat normalized ":00")))
+           ;; Two colons: full datetime with seconds (YYYY-MM-DD HH:MM:SS)
+           (t
+            (date-to-time normalized)))
         (error nil)))))
+
+(defun org-agenda-api--format-org-timestamp (time has-time)
+  "Format TIME as an org timestamp string.
+If HAS-TIME is non-nil, include the time component."
+  (if has-time
+      (format-time-string "<%Y-%m-%d %a %H:%M>" time)
+    (format-time-string "<%Y-%m-%d %a>" time)))
 
 (defun org-agenda-api--update-todo-at (file pos updates)
   "Update the TODO at FILE and POS with UPDATES alist.
@@ -1215,10 +1239,12 @@ Returns alist with status, details, and new position."
                     (progn
                       (org-schedule '(4))  ; Universal arg removes scheduling
                       (push '("scheduled" . nil) applied-updates))
-                  ;; Set scheduled
-                  (let ((time (org-agenda-api--parse-datetime scheduled-value)))
-                    (when time
-                      (org-schedule nil time)
+                  ;; Set scheduled - use org timestamp string to preserve time
+                  (let* ((has-time (org-agenda-api--datetime-has-time-p scheduled-value))
+                         (time (org-agenda-api--parse-datetime scheduled-value))
+                         (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+                    (when org-ts
+                      (org-schedule nil org-ts)
                       (push `("scheduled" . ,scheduled-value) applied-updates))))))
             ;; Handle deadline
             (when (assoc "deadline" updates)
@@ -1228,10 +1254,12 @@ Returns alist with status, details, and new position."
                     (progn
                       (org-deadline '(4))  ; Universal arg removes deadline
                       (push '("deadline" . nil) applied-updates))
-                  ;; Set deadline
-                  (let ((time (org-agenda-api--parse-datetime deadline-value)))
-                    (when time
-                      (org-deadline nil time)
+                  ;; Set deadline - use org timestamp string to preserve time
+                  (let* ((has-time (org-agenda-api--datetime-has-time-p deadline-value))
+                         (time (org-agenda-api--parse-datetime deadline-value))
+                         (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+                    (when org-ts
+                      (org-deadline nil org-ts)
                       (push `("deadline" . ,deadline-value) applied-updates))))))
             ;; Handle priority
             (when (assoc "priority" updates)
