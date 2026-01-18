@@ -1076,29 +1076,31 @@ Returns an alist with todoStates, priorities, tags, and categories."
             (mapcar #'char-to-string
                     (number-sequence highest lowest))))
     ;; Collect tags and categories from all agenda files
-    (dolist (file org-agenda-files)
-      (when (file-readable-p file)
-        (with-current-buffer (find-file-noselect file)
-          ;; Get file-level category
-          (save-excursion
-            (goto-char (point-min))
-            (when (re-search-forward "^#\\+CATEGORY:[ \t]+\\(.+\\)$" nil t)
-              (let ((cat (string-trim (match-string 1))))
-                (unless (member cat categories)
-                  (push cat categories)))))
-          ;; Get tags from buffer
-          (let ((buffer-tags (org-get-buffer-tags)))
-            (dolist (tag-pair buffer-tags)
-              (let ((tag (car tag-pair)))
-                (unless (member tag tags)
-                  (push tag tags)))))
-          ;; Get categories from headings
-          (org-map-entries
-           (lambda ()
-             (let ((cat (org-get-category)))
-               (when (and cat (not (member cat categories)))
-                 (push cat categories))))
-           nil 'file))))
+    (dolist (file (mapcar #'expand-file-name org-agenda-files))
+      (condition-case nil
+          (when (file-readable-p file)
+            (with-current-buffer (find-file-noselect file)
+              ;; Get file-level category
+              (save-excursion
+                (goto-char (point-min))
+                (when (re-search-forward "^#\\+CATEGORY:[ \t]+\\(.+\\)$" nil t)
+                  (let ((cat (string-trim (match-string 1))))
+                    (unless (member cat categories)
+                      (push cat categories)))))
+              ;; Get tags from buffer
+              (let ((buffer-tags (org-get-buffer-tags)))
+                (dolist (tag-pair buffer-tags)
+                  (let ((tag (car tag-pair)))
+                    (unless (member tag tags)
+                      (push tag tags)))))
+              ;; Get categories from headings
+              (org-map-entries
+               (lambda ()
+                 (let ((cat (org-get-category)))
+                   (when (and cat (not (member cat categories)))
+                     (push cat categories))))
+               nil 'file)))
+        (error nil)))  ; Silently skip files that cause errors
     `(("todoStates" . ,(vconcat (append (cdr (assoc "active" todo-states))
                                         (cdr (assoc "done" todo-states)))))
       ("priorities" . ,(vconcat priorities))
