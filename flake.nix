@@ -13,7 +13,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mova = {
-      url = "github:colonelpanic8/mova";
+      url = "git+ssh://git@github.com/colonelpanic8/mova";
       flake = false;
     };
   };
@@ -29,6 +29,9 @@
         # Git commit hash for version tracking
         # Uses clean rev if available, otherwise dirtyRev for uncommitted changes
         gitCommit = if (self ? rev) then self.rev else self.dirtyRev or "unknown";
+
+        # Mova git commit from flake input
+        movaGitCommit = mova.rev or "unknown";
 
         # Emacs with required packages (base packages from nix)
         emacsWithPackages = pkgs.emacs-nox.pkgs.withPackages (epkgs: [
@@ -84,6 +87,9 @@
 
             # Set HOME for Expo cache
             export HOME=$(pwd)
+
+            # Set mova git commit for version tracking
+            export MOVA_GIT_COMMIT=${movaGitCommit}
 
             # Copy prebuilt node_modules
             cp -r ${movaNodeModules}/node_modules ./node_modules
@@ -286,7 +292,6 @@
             echo "  GIT_USER_EMAIL       - Git user email for commits"
             echo "  GIT_USER_NAME        - Git user name for commits"
             echo "  ORG_AGENDA_FILES     - Colon-separated list of org file paths"
-            echo "  ORG_INBOX_FILE       - Path for new captures (default: /data/org/inbox.org)"
           '';
         };
       }

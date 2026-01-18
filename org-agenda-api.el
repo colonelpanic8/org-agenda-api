@@ -41,7 +41,8 @@
 ;;   GET /get-todays-agenda - Returns scheduled/deadlined items for today
 ;;   GET /health - Health check endpoint for monitoring (nginx, supervisord)
 ;;   GET /agenda-files - Returns list of org-agenda-files
-;;   POST /create-todo - Create a new TODO item
+;;   GET /templates - Returns available capture templates
+;;   POST /capture - Create a new entry using a capture template
 
 ;;; Code:
 
@@ -52,6 +53,11 @@
 (require 'org-capture)
 (require 'json)
 (require 'simple-httpd)
+
+;;; Version
+
+(defconst org-agenda-api-version "0.1.0"
+  "Version of org-agenda-api.")
 
 ;;; Logging
 
@@ -816,6 +822,13 @@ This substitutes values into the template without interactive prompts."
 (defun org-agenda-api--capture-with-template (template-key values)
   "Capture using TEMPLATE-KEY with VALUES for prompts.
 VALUES is an alist of (PROMPT-NAME . VALUE) pairs.
+In addition to template prompts, VALUES may contain universal org fields:
+  - scheduled: ISO date string
+  - deadline: ISO date string
+  - priority: A, B, or C
+  - tags: list of tag strings
+  - todo: TODO state keyword
+These are applied after the entry is created.
 Returns an alist with status information."
   (let ((template-entry (org-agenda-api--get-template template-key)))
     (unless template-entry
@@ -828,14 +841,50 @@ Returns an alist with status information."
            (target-file (let ((target (nth 3 capture-template)))
                           (if (and (listp target) (eq (car target) 'file))
                               (cadr target)
-                            org-agenda-api-inbox-file)))
-           (entry-text (org-agenda-api--build-entry-from-template template-entry values)))
+                            (org-agenda-api--get-default-capture-target))))
+           (entry-text (org-agenda-api--build-entry-from-template template-entry values))
+           ;; Extract universal fields from values
+           (scheduled (cdr (assoc "scheduled" values)))
+           (deadline (cdr (assoc "deadline" values)))
+           (priority (cdr (assoc "priority" values)))
+           (tags (cdr (assoc "tags" values)))
+           (todo-state (cdr (assoc "todo" values)))
+           (entry-pos nil))
       ;; Append entry to target file
       (with-current-buffer (find-file-noselect target-file)
         (goto-char (point-max))
         (unless (bolp) (insert "\n"))
+        (setq entry-pos (point))
         (insert entry-text)
         (unless (string-suffix-p "\n" entry-text) (insert "\n"))
+        ;; Apply universal fields to the newly created entry
+        (save-excursion
+          (goto-char entry-pos)
+          (when (org-at-heading-p)
+            ;; Apply TODO state if specified and different from template default
+            (when (and todo-state
+                       (not (string-empty-p todo-state))
+                       (not (string= todo-state "TODO")))
+              (org-todo todo-state))
+            ;; Apply priority
+            (when (and priority (not (string-empty-p priority)))
+              (let ((priority-char (string-to-char (upcase priority))))
+                (when (memq priority-char '(?A ?B ?C))
+                  (org-priority priority-char))))
+            ;; Apply scheduled
+            (when (and scheduled (not (string-empty-p scheduled)))
+              (let ((time (org-agenda-api--parse-datetime scheduled)))
+                (when time
+                  (org-schedule nil time))))
+            ;; Apply deadline
+            (when (and deadline (not (string-empty-p deadline)))
+              (let ((time (org-agenda-api--parse-datetime deadline)))
+                (when time
+                  (org-deadline nil time))))
+            ;; Apply tags
+            (when (and tags (> (length tags) 0))
+              (let ((tag-list (if (vectorp tags) (append tags nil) tags)))
+                (org-set-tags tag-list)))))
         (save-buffer))
       (org-agenda-api--invalidate-cache)
       `(("status" . "created")
@@ -905,71 +954,6 @@ Accepts optional query params:
     (insert (json-encode response)))
   (org-agenda-api--track-request))
 
-(defservlet create-todo application/json (_path _query headers)
-  "Endpoint: Create a new TODO item from JSON body.
-Accepts JSON body with:
-  - title: heading title (required)
-  - scheduled: ISO date string (optional)
-  - deadline: ISO date string (optional)
-  - priority: A, B, or C (optional)
-  - tags: array of tag strings (optional)
-  - todo: TODO state keyword (optional, defaults to TODO)"
-  (org-agenda-api--log-request "/create-todo" "POST")
-  (let ((start-time (current-time)))
-    (catch 'done
-      (condition-case err
-          (let* ((content-header (cadr (assoc "Content" headers)))
-                 (json-data (json-parse-string content-header))
-                 (title (gethash "title" json-data))
-                 (scheduled (gethash "scheduled" json-data))
-                 (deadline (gethash "deadline" json-data))
-                 (priority (gethash "priority" json-data))
-                 (tags (gethash "tags" json-data))
-                 (todo-state (gethash "todo" json-data))
-                 (created-fields nil))
-            (org-agenda-api--log 'debug "Creating todo: %s (scheduled=%s deadline=%s priority=%s tags=%s todo=%s)"
-                                 title scheduled deadline priority tags todo-state)
-            ;; Validate title is provided
-            (when (or (null title)
-                      (eq title :null)
-                      (and (stringp title) (string-empty-p title)))
-              (insert (json-encode `(("status" . "error")
-                                     ("message" . "Missing required field: title"))))
-              (throw 'done nil))
-            ;; Convert :null to nil for optional fields
-            (when (eq scheduled :null) (setq scheduled nil))
-            (when (eq deadline :null) (setq deadline nil))
-            (when (eq priority :null) (setq priority nil))
-            (when (eq tags :null) (setq tags nil))
-            (when (eq todo-state :null) (setq todo-state nil))
-            ;; Validate priority if provided
-            (when (and priority (not (string-empty-p priority)))
-              (let ((priority-char (string-to-char (upcase priority))))
-                (unless (memq priority-char '(?A ?B ?C))
-                  (insert (json-encode `(("status" . "error")
-                                         ("message" . ,(format "Invalid priority: %s. Must be A, B, or C" priority)))))
-                  (throw 'done nil))))
-            ;; Use extended capture if any optional fields are provided
-            (if (or scheduled deadline priority tags todo-state)
-                (org-agenda-api--capture-extended title scheduled deadline priority tags todo-state)
-              (org-agenda-api--capture title))
-            ;; Build list of created fields for response
-            (when scheduled (push `("scheduled" . ,scheduled) created-fields))
-            (when deadline (push `("deadline" . ,deadline) created-fields))
-            (when priority (push `("priority" . ,priority) created-fields))
-            (when tags (push `("tags" . ,tags) created-fields))
-            (when todo-state (push `("todo" . ,todo-state) created-fields))
-            (let ((duration-ms (round (* 1000 (float-time (time-subtract (current-time) start-time))))))
-              (org-agenda-api--log-response "/create-todo" "created" duration-ms))
-            (insert (json-encode `(("status" . "created")
-                                   ("title" . ,title)
-                                   ("appliedFields" . ,created-fields)))))
-        (error
-         (org-agenda-api--log-error-with-backtrace "/create-todo" err)
-         (insert (json-encode `(("status" . "error")
-                                ("message" . ,(error-message-string err)))))))))
-  (org-agenda-api--track-request))
-
 (defservlet templates application/json ()
   "Endpoint: Return registered capture templates and their prompts."
   (insert (json-encode (org-agenda-api--get-all-templates-json)))
@@ -1008,9 +992,12 @@ Returns nil if healthy, or an error message string if unhealthy."
         ;; Check for stuck capture mode
         (when (and (boundp 'org-capture-mode) org-capture-mode)
           (throw 'unhealthy "capture mode is active"))
-        ;; Check that inbox file is accessible
-        (unless (file-writable-p org-agenda-api-inbox-file)
-          (throw 'unhealthy (format "inbox file not writable: %s" org-agenda-api-inbox-file)))
+        ;; Check that we have agenda files and can write to the default capture target
+        (let ((agenda-files (org-agenda-files)))
+          (unless agenda-files
+            (throw 'unhealthy "no agenda files configured"))
+          (unless (file-writable-p (car agenda-files))
+            (throw 'unhealthy (format "default capture target not writable: %s" (car agenda-files)))))
         ;; All checks passed
         nil)
     (error (error-message-string err))))
@@ -1034,11 +1021,12 @@ Returns basic status information and capture readiness check."
       (httpd-error httpd-current-proc 503))))
 
 (defservlet version application/json ()
-  "Endpoint: Return version information including git commit hash.
+  "Endpoint: Return version information including semantic version and git commit hash.
 The git commit is read from the ORG_AGENDA_API_GIT_COMMIT environment variable,
 which is set at build time by the Nix flake."
   (let* ((git-commit (or (getenv "ORG_AGENDA_API_GIT_COMMIT") "unknown"))
-         (response `(("gitCommit" . ,git-commit))))
+         (response `(("version" . ,org-agenda-api-version)
+                     ("gitCommit" . ,git-commit))))
     (insert (json-encode response))))
 
 (defservlet debug-config application/json ()
