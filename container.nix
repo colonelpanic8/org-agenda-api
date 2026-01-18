@@ -79,12 +79,16 @@ let
         }
 
         # API endpoints - proxy to emacs with auth
-        location ~ ^/(version|agenda|agenda-files|get-all-todos|complete|update|todo-states|templates|capture|custom-views|custom-view|debug-config)$ {
+        # Support both /endpoint and /api/endpoint paths for backwards compatibility
+        location ~ ^/(api/)?(version|agenda|agenda-files|get-all-todos|complete|update|todo-states|templates|capture|custom-views|custom-view|debug-config)$ {
           include /tmp/nginx-auth.conf;
 
           # Clear WWW-Authenticate header to prevent browser's native auth popup
           # JS handles 401 responses directly
           more_clear_headers 'WWW-Authenticate';
+
+          # Strip /api prefix if present (backend only understands /endpoint paths)
+          rewrite ^/api/(.*)$ /$1 break;
 
           proxy_pass http://emacs;
           proxy_http_version 1.1;
