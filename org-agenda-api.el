@@ -992,12 +992,6 @@ Returns nil if healthy, or an error message string if unhealthy."
         ;; Check for stuck capture mode
         (when (and (boundp 'org-capture-mode) org-capture-mode)
           (throw 'unhealthy "capture mode is active"))
-        ;; Check that we have agenda files and can write to the default capture target
-        (let ((agenda-files (org-agenda-files)))
-          (unless agenda-files
-            (throw 'unhealthy "no agenda files configured"))
-          (unless (file-writable-p (car agenda-files))
-            (throw 'unhealthy (format "default capture target not writable: %s" (car agenda-files)))))
         ;; All checks passed
         nil)
     (error (error-message-string err))))
