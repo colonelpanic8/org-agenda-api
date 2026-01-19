@@ -989,7 +989,17 @@ Accepts optional query params:
 
 (defservlet templates application/json ()
   "Endpoint: Return registered capture templates and their prompts."
-  (insert (json-encode (org-agenda-api--get-all-templates-json)))
+  (condition-case err
+      (let ((templates-data (org-agenda-api--get-all-templates-json)))
+        (message "[org-agenda-api] /templates: returning %d templates"
+                 (length templates-data))
+        (insert (json-encode templates-data)))
+    (error
+     (message "[org-agenda-api] /templates ERROR: %S" err)
+     (message "[org-agenda-api] org-agenda-api-capture-templates: %S"
+              org-agenda-api-capture-templates)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(format "Server error: %S" err)))))))
   (org-agenda-api--track-request))
 
 (defservlet capture application/json (_path _query headers)
@@ -1161,9 +1171,16 @@ Returns todoStates, priorities, tags, and categories."
 
 (defservlet custom-views application/json ()
   "Endpoint: Return list of available custom agenda views."
-  (let* ((views (org-agenda-api--list-custom-views))
-         (response `(("views" . ,(vconcat views)))))
-    (insert (json-encode response)))
+  (condition-case err
+      (let* ((views (org-agenda-api--list-custom-views))
+             (response `(("views" . ,(vconcat views)))))
+        (message "[org-agenda-api] /custom-views: returning %d views"
+                 (length views))
+        (insert (json-encode response)))
+    (error
+     (message "[org-agenda-api] /custom-views ERROR: %S" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(format "Server error: %S" err)))))))
   (org-agenda-api--track-request))
 
 (defservlet custom-view application/json (_path query)
