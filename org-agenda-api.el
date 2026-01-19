@@ -1153,7 +1153,19 @@ Returns active (not-done) states and done states separately."
 (defservlet filter-options application/json ()
   "Endpoint: Return all available filter options for the UI.
 Returns todoStates, priorities, tags, and categories."
-  (insert (json-encode (org-agenda-api--get-filter-options)))
+  (condition-case err
+      (progn
+        (message "[org-agenda-api] /filter-options: fetching options...")
+        (let ((result (org-agenda-api--get-filter-options)))
+          (message "[org-agenda-api] /filter-options: got %d todo states, %d priorities, %d tags, %d categories"
+                   (length (cdr (assoc "todoStates" result)))
+                   (length (cdr (assoc "priorities" result)))
+                   (length (cdr (assoc "tags" result)))
+                   (length (cdr (assoc "categories" result))))
+          (insert (json-encode result))))
+    (error
+     (message "[org-agenda-api] /filter-options ERROR: %S" err)
+     (httpd-error t 500 (format "Error: %S" err))))
   (org-agenda-api--track-request))
 
 (defservlet agenda-files application/json ()
