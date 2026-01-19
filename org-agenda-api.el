@@ -4,7 +4,7 @@
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 0.4.2
+;; Version: 0.4.3
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
@@ -840,8 +840,12 @@ This substitutes values into the template without interactive prompts."
                     "%t"
                     (format-time-string "<%Y-%m-%d %a>" (current-time))
                     result t t)))
-    ;; Remove %? cursor marker
-    (setq result (replace-regexp-in-string "%\\?" "" result t t))
+    ;; Replace %? with Title value if present, otherwise remove it
+    (let ((title-value (cdr (assoc "Title" values))))
+      (setq result (replace-regexp-in-string
+                    "%\\?"
+                    (or title-value "")
+                    result t t)))
     result))
 
 (defun org-agenda-api--capture-with-template (template-key values)
