@@ -56,7 +56,7 @@
 
 ;;; Version
 
-(defconst org-agenda-api-version "0.3.0"
+(defconst org-agenda-api-version "0.4.1"
   "Version of org-agenda-api.")
 
 ;;; Logging
