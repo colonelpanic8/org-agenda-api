@@ -4,7 +4,7 @@
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 0.4.3
+;; Version: 0.5.0
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
@@ -987,15 +987,15 @@ Accepts optional query params:
     (insert (json-encode response)))
   (org-agenda-api--track-request))
 
-(defservlet templates application/json ()
+(defservlet capture-templates application/json ()
   "Endpoint: Return registered capture templates and their prompts."
   (condition-case err
       (let ((templates-data (org-agenda-api--get-all-templates-json)))
-        (message "[org-agenda-api] /templates: returning %d templates"
+        (message "[org-agenda-api] /capture-templates: returning %d templates"
                  (length templates-data))
         (insert (json-encode templates-data)))
     (error
-     (message "[org-agenda-api] /templates ERROR: %S" err)
+     (message "[org-agenda-api] /capture-templates ERROR: %S" err)
      (message "[org-agenda-api] org-agenda-api-capture-templates: %S"
               org-agenda-api-capture-templates)
      (insert (json-encode `(("status" . "error")
