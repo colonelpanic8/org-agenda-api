@@ -692,3 +692,23 @@ class TestAgendaIncludeOverdueParameter:
             f"Expected 'Task scheduled for today' in agenda. "
             f"Found titles: {titles}"
         )
+
+    def test_include_overdue_count_is_greater_or_equal(self, api, org_dir):
+        """include_overdue=true should return >= items than include_overdue=false.
+
+        Since include_overdue adds overdue items from previous days, the count
+        should never be LESS than without include_overdue.
+        """
+        # Get agenda with and without include_overdue
+        response_without = api.get_agenda(date=TEST_DATE, include_overdue=False)
+        response_with = api.get_agenda(date=TEST_DATE, include_overdue=True)
+
+        count_without = len(response_without.json()["entries"])
+        count_with = len(response_with.json()["entries"])
+
+        assert count_with >= count_without, (
+            f"BUG: include_overdue=true returns FEWER items than without.\n"
+            f"Without include_overdue: {count_without} items\n"
+            f"With include_overdue: {count_with} items\n"
+            f"include_overdue should only ADD items, never remove them."
+        )

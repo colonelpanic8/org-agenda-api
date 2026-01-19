@@ -274,3 +274,91 @@ class TestCaptureScheduledTimeProduction:
             f"Server date: {server_today}\n"
             f"Titles in agenda: {titles}"
         )
+
+    def test_captured_todo_with_past_time_appears_in_agenda(self, production_url, auth):
+        """Todo scheduled for today with a past time should still appear in agenda.
+
+        This test verifies that items scheduled for earlier today (e.g., 02:00)
+        still show up in the agenda even if that time has passed.
+        """
+        import time
+        unique_title = f"past-time-agenda-test-{int(time.time())}"
+
+        # Get today's date from the server
+        agenda_before = requests.get(
+            f"{production_url}/agenda",
+            params={"span": "day"},
+            auth=auth,
+        )
+        server_today = agenda_before.json()["date"]
+
+        # Capture a todo with a past time (02:00 is almost certainly past)
+        capture_response = requests.post(
+            f"{production_url}/capture",
+            json={
+                "template": "default",
+                "values": {"Title": unique_title, "scheduled": f"{server_today} 02:00"}
+            },
+            auth=auth,
+        )
+        assert capture_response.status_code == 200
+
+        # Check if it appears in today's agenda
+        agenda_after = requests.get(
+            f"{production_url}/agenda",
+            params={"span": "day", "date": server_today},
+            auth=auth,
+        )
+        agenda_data = agenda_after.json()
+
+        titles = [entry.get("title") for entry in agenda_data["entries"]]
+        assert unique_title in titles, (
+            f"BUG: Todo with past time '{unique_title}' does not appear in today's agenda.\n"
+            f"Server date: {server_today}\n"
+            f"Scheduled time: 02:00 (past)\n"
+            f"Titles in agenda: {titles}\n"
+            f"Items scheduled for past times should still show in agenda."
+        )
+
+    def test_captured_todo_with_future_time_appears_in_agenda(self, production_url, auth):
+        """Todo scheduled for today with a future time should appear in agenda.
+
+        This test verifies that items scheduled for later today show up.
+        """
+        import time
+        unique_title = f"future-time-agenda-test-{int(time.time())}"
+
+        # Get today's date from the server
+        agenda_before = requests.get(
+            f"{production_url}/agenda",
+            params={"span": "day"},
+            auth=auth,
+        )
+        server_today = agenda_before.json()["date"]
+
+        # Capture a todo with a future time (23:59 is almost certainly future)
+        capture_response = requests.post(
+            f"{production_url}/capture",
+            json={
+                "template": "default",
+                "values": {"Title": unique_title, "scheduled": f"{server_today} 23:59"}
+            },
+            auth=auth,
+        )
+        assert capture_response.status_code == 200
+
+        # Check if it appears in today's agenda
+        agenda_after = requests.get(
+            f"{production_url}/agenda",
+            params={"span": "day", "date": server_today},
+            auth=auth,
+        )
+        agenda_data = agenda_after.json()
+
+        titles = [entry.get("title") for entry in agenda_data["entries"]]
+        assert unique_title in titles, (
+            f"Todo with future time '{unique_title}' does not appear in today's agenda.\n"
+            f"Server date: {server_today}\n"
+            f"Scheduled time: 23:59 (future)\n"
+            f"Titles in agenda: {titles}"
+        )

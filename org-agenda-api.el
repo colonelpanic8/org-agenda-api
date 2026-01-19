@@ -324,6 +324,15 @@ Otherwise return date-only format."
         (format-time-string "%Y-%m-%dT%H:%M:%S" time)
       (format-time-string "%Y-%m-%d" time))))
 
+(defun org-agenda-api--extract-date (timestamp)
+  "Extract YYYY-MM-DD date portion from TIMESTAMP string.
+TIMESTAMP may be in formats like:
+  - \"2026-01-19\" (date only)
+  - \"2026-01-19T10:00:00\" (with time)
+Returns nil if TIMESTAMP is nil."
+  (when timestamp
+    (substring timestamp 0 (min 10 (length timestamp)))))
+
 (defun org-agenda-api--get-todo-elements-from-filepath (filepath)
   "Extract all TODO headline elements from FILEPATH.
 Uses `org-map-entries' for efficient traversal instead of
@@ -565,27 +574,33 @@ INCLUDE-OVERDUE when non-nil includes overdue items from previous days."
       ;; Filter entries based on their scheduled date
       ;; When include-overdue is true: keep items scheduled for query date OR earlier (overdue)
       ;; When include-overdue is false: keep only items scheduled for query date exactly
+      ;;
+      ;; IMPORTANT: Use org-agenda-api--extract-date to compare only the date portion.
+      ;; Without this, "2026-01-19T10:00:00" > "2026-01-19" due to string comparison of "T" vs end.
       (if include-overdue
-          ;; Include overdue: keep items where scheduled <= start-date
+          ;; Include overdue: keep items where scheduled date <= start-date
           (cl-remove-if-not
            (lambda (entry)
-             (let ((scheduled (cdr (assoc "scheduled" entry))))
-               ;; Keep entries with no scheduled date, or scheduled <= start-date
-               (or (null scheduled)
-                   (not (string-greaterp scheduled start-date)))))
+             (let ((scheduled-date (org-agenda-api--extract-date
+                                    (cdr (assoc "scheduled" entry)))))
+               ;; Keep entries with no scheduled date, or scheduled date <= start-date
+               (or (null scheduled-date)
+                   (not (string-greaterp scheduled-date start-date)))))
            all-entries)
         ;; Default: only items scheduled for the exact query date
         (cl-remove-if-not
          (lambda (entry)
-           (let ((scheduled (cdr (assoc "scheduled" entry)))
-                 (deadline (cdr (assoc "deadline" entry))))
+           (let ((scheduled-date (org-agenda-api--extract-date
+                                  (cdr (assoc "scheduled" entry))))
+                 (deadline-date (org-agenda-api--extract-date
+                                 (cdr (assoc "deadline" entry)))))
              ;; Keep entries that have either:
              ;; - scheduled date matching start-date
-             ;; - deadline matching start-date
+             ;; - deadline date matching start-date
              ;; - no scheduled/deadline (time grid items, etc.)
-             (or (and (null scheduled) (null deadline))
-                 (and scheduled (string-prefix-p start-date scheduled))
-                 (and deadline (string-prefix-p start-date deadline)))))
+             (or (and (null scheduled-date) (null deadline-date))
+                 (and scheduled-date (string= scheduled-date start-date))
+                 (and deadline-date (string= deadline-date start-date)))))
          all-entries)))))
 
 (defun org-agenda-api--list-custom-views ()
