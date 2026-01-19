@@ -1079,12 +1079,17 @@ which is set at build time by the Nix flake."
 
 (defun org-agenda-api--get-todo-states ()
   "Get all configured TODO states from `org-todo-keywords'.
-Returns an alist with 'active' (not-done) and 'done' states."
+Returns an alist with 'active' (not-done) and 'done' states.
+Handles both list and vector formats in org-todo-keywords."
   (let ((active-states nil)
         (done-states nil))
     (dolist (keyword-set org-todo-keywords)
-      (let ((in-done-section nil))
-        (dolist (keyword (cdr keyword-set))  ; Skip 'sequence or 'type at beginning
+      (let ((in-done-section nil)
+            ;; Convert to list if it's a vector, skip first element (sequence/type)
+            (keywords (cdr (if (vectorp keyword-set)
+                               (append keyword-set nil)
+                             keyword-set))))
+        (dolist (keyword keywords)
           (cond
            ((string= keyword "|")
             (setq in-done-section t))
