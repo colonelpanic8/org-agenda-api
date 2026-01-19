@@ -1200,6 +1200,41 @@ Returns todoStates, priorities, tags, and categories."
                             ("message" . ,(format "Server error: %S" err)))))))
   (org-agenda-api--track-request))
 
+(defservlet metadata application/json ()
+  "Endpoint: Return all app metadata in a single request.
+Returns templates, filterOptions, todoStates, customViews, and any errors."
+  (let ((result '())
+        (errors '()))
+    ;; Collect templates
+    (condition-case err
+        (push `("templates" . ,(org-agenda-api--get-all-templates-json)) result)
+      (error
+       (push (format "templates: %s" (error-message-string err)) errors)
+       (push '("templates" . nil) result)))
+    ;; Collect filter options
+    (condition-case err
+        (push `("filterOptions" . ,(org-agenda-api--get-filter-options)) result)
+      (error
+       (push (format "filterOptions: %s" (error-message-string err)) errors)
+       (push '("filterOptions" . nil) result)))
+    ;; Collect todo states
+    (condition-case err
+        (push `("todoStates" . ,(org-agenda-api--get-todo-states)) result)
+      (error
+       (push (format "todoStates: %s" (error-message-string err)) errors)
+       (push '("todoStates" . nil) result)))
+    ;; Collect custom views
+    (condition-case err
+        (let ((views (org-agenda-api--list-custom-views)))
+          (push `("customViews" . (("views" . ,(vconcat views)))) result))
+      (error
+       (push (format "customViews: %s" (error-message-string err)) errors)
+       (push '("customViews" . nil) result)))
+    ;; Add errors array
+    (push `("errors" . ,(vconcat (nreverse errors))) result)
+    (insert (json-encode (nreverse result))))
+  (org-agenda-api--track-request))
+
 (defservlet custom-view application/json (_path query)
   "Endpoint: Run a custom agenda view and return entries as JSON.
 Accepts query params:
