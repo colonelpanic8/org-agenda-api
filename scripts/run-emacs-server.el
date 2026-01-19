@@ -87,6 +87,13 @@
                     "* TODO %^{Title}\n"
                     :immediate-finish t)
          :prompts (("Title" :type string :required t)))
+        ;; Template with SCHEDULED: %t to test date-only behavior
+        ("scheduled-today"
+         :name "Scheduled Today"
+         :template ("s" "Scheduled Today" entry (file ,test-inbox)
+                    "* TODO %^{Title}\nSCHEDULED: %t\n"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)))
         ("scheduled-todo"
          :name "Scheduled Todo"
          :template ("s" "Scheduled" entry (file ,test-inbox)

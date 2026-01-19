@@ -797,26 +797,29 @@ This substitutes values into the template without interactive prompts."
                       (format "%%\\^{%s}" (regexp-quote name))
                       formatted-value
                       result t t))))
-    ;; Replace %U with inactive timestamp
-    (setq result (replace-regexp-in-string
-                  "%U"
-                  (format-time-string "[%Y-%m-%d %a %H:%M]" (current-time))
-                  result t t))
-    ;; Replace %u with inactive date (no time)
-    (setq result (replace-regexp-in-string
-                  "%u"
-                  (format-time-string "[%Y-%m-%d %a]" (current-time))
-                  result t t))
-    ;; Replace %T with active timestamp
-    (setq result (replace-regexp-in-string
-                  "%T"
-                  (format-time-string "<%Y-%m-%d %a %H:%M>" (current-time))
-                  result t t))
-    ;; Replace %t with active date
-    (setq result (replace-regexp-in-string
-                  "%t"
-                  (format-time-string "<%Y-%m-%d %a>" (current-time))
-                  result t t))
+    ;; Replace timestamp patterns - must be case-sensitive!
+    ;; Without this, %T would match %t due to case-fold-search defaulting to t
+    (let ((case-fold-search nil))
+      ;; Replace %U with inactive timestamp
+      (setq result (replace-regexp-in-string
+                    "%U"
+                    (format-time-string "[%Y-%m-%d %a %H:%M]" (current-time))
+                    result t t))
+      ;; Replace %u with inactive date (no time)
+      (setq result (replace-regexp-in-string
+                    "%u"
+                    (format-time-string "[%Y-%m-%d %a]" (current-time))
+                    result t t))
+      ;; Replace %T with active timestamp
+      (setq result (replace-regexp-in-string
+                    "%T"
+                    (format-time-string "<%Y-%m-%d %a %H:%M>" (current-time))
+                    result t t))
+      ;; Replace %t with active date
+      (setq result (replace-regexp-in-string
+                    "%t"
+                    (format-time-string "<%Y-%m-%d %a>" (current-time))
+                    result t t)))
     ;; Remove %? cursor marker
     (setq result (replace-regexp-in-string "%\\?" "" result t t))
     result))
