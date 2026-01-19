@@ -78,9 +78,16 @@ let
           proxy_read_timeout 5s;
         }
 
+        # Version endpoint - no auth required
+        location = /version {
+          proxy_pass http://emacs;
+          proxy_http_version 1.1;
+          add_header 'Access-Control-Allow-Origin' '*' always;
+        }
+
         # API endpoints - proxy to emacs with auth
         # Support both /endpoint and /api/endpoint paths for backwards compatibility
-        location ~ ^/(api/)?(version|agenda|agenda-files|get-all-todos|complete|update|todo-states|templates|capture|custom-views|custom-view|debug-config)$ {
+        location ~ ^/(api/)?(agenda|agenda-files|get-all-todos|complete|update|todo-states|templates|capture|custom-views|custom-view|debug-config)$ {
           include /tmp/nginx-auth.conf;
 
           # Clear WWW-Authenticate header to prevent browser's native auth popup
