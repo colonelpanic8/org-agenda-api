@@ -1138,8 +1138,8 @@ Returns an alist with todoStates, priorities, tags, and categories."
                      (push cat categories))))
                nil 'file)))
         (error nil)))  ; Silently skip files that cause errors
-    `(("todoStates" . ,(vconcat (append (cdr (assoc "active" todo-states))
-                                        (cdr (assoc "done" todo-states)))))
+    `(("todoStates" . ,(vconcat (cdr (assoc "active" todo-states))
+                                (cdr (assoc "done" todo-states))))
       ("priorities" . ,(vconcat priorities))
       ("tags" . ,(vconcat (sort tags #'string<)))
       ("categories" . ,(vconcat (sort categories #'string<))))))
