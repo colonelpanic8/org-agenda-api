@@ -376,9 +376,12 @@ class TestAgendaDateAccuracy:
         for entry in data["entries"]:
             scheduled = entry.get("scheduled")
             if scheduled:
+                # Extract just the date portion (YYYY-MM-DD) for comparison
+                # Scheduled dates may include time component (YYYY-MM-DDTHH:MM:SS)
+                scheduled_date = scheduled[:10]
                 # Scheduled date should be <= query date (today or overdue)
                 # It should NOT be > query date (that would be a future item)
-                assert scheduled <= TEST_DATE, (
+                assert scheduled_date <= TEST_DATE, (
                     f"Entry '{entry.get('title')}' has scheduled date {scheduled} "
                     f"which is AFTER the query date {TEST_DATE}. "
                     f"This indicates an off-by-one error - items from tomorrow "
@@ -549,6 +552,63 @@ class TestAgendaDateIsolation:
                     f"Same-day item '{entry.get('title')}' should not have overdue marker. "
                     f"Got: {agenda_line}"
                 )
+
+
+class TestAgendaScheduledItemsWithTime:
+    """Tests for scheduled items with specific times in the daily agenda.
+
+    Bug: Items with times like SCHEDULED: <2024-06-15 Sat 10:00> may not
+    appear in the daily agenda.
+
+    Test fixture 'today.org' contains:
+    - 'Task scheduled with specific time' SCHEDULED: <2024-06-15 Sat 10:00>
+    """
+
+    def test_scheduled_item_with_specific_time_appears_in_agenda(self, api):
+        """A scheduled item with a specific time should appear in daily agenda.
+
+        Bug: When an item has SCHEDULED: <2024-06-15 Sat 10:00> (with time),
+        it should appear in the agenda for 2024-06-15.
+        """
+        response = api.get_agenda(date=TEST_DATE)
+        data = response.json()
+
+        titles = [entry.get("title") for entry in data["entries"]]
+
+        # The item with time should appear
+        assert any("specific time" in (t or "").lower() for t in titles), (
+            f"Item 'Task scheduled with specific time' (SCHEDULED: <{TEST_DATE_ORG} 10:00>) "
+            f"should appear in agenda for {TEST_DATE}. Found titles: {titles}"
+        )
+
+    def test_scheduled_item_with_time_preserves_time_in_output(self, api):
+        """Scheduled items with times should include time in output."""
+        response = api.get_agenda(date=TEST_DATE)
+        data = response.json()
+
+        # Find the item with time
+        timed_entry = None
+        for entry in data["entries"]:
+            if "specific time" in (entry.get("title") or "").lower():
+                timed_entry = entry
+                break
+
+        if timed_entry is None:
+            pytest.fail(
+                f"Item 'Task scheduled with specific time' not found in agenda. "
+                f"Entries: {[e.get('title') for e in data['entries']]}"
+            )
+
+        scheduled = timed_entry.get("scheduled")
+        # Should have time component (T separator for ISO format)
+        assert "T" in (scheduled or ""), (
+            f"Scheduled field should include time (T separator). "
+            f"Got: {scheduled}"
+        )
+        assert "10:00" in (scheduled or ""), (
+            f"Scheduled field should include correct time (10:00). "
+            f"Got: {scheduled}"
+        )
 
 
 class TestAgendaIncludeOverdueParameter:
