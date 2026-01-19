@@ -41,7 +41,7 @@
 ;;   GET /get-todays-agenda - Returns scheduled/deadlined items for today
 ;;   GET /health - Health check endpoint for monitoring (nginx, supervisord)
 ;;   GET /agenda-files - Returns list of org-agenda-files
-;;   GET /templates - Returns available capture templates
+;;   GET /capture-templates - Returns available capture templates
 ;;   POST /capture - Create a new entry using a capture template
 
 ;;; Code:
