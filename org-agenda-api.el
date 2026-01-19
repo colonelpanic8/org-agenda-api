@@ -56,8 +56,13 @@
 
 ;;; Version
 
-(defconst org-agenda-api-version "0.4.1"
-  "Version of org-agenda-api.")
+(require 'lisp-mnt)
+
+(defconst org-agenda-api-version
+  (lm-version (or load-file-name
+                  (locate-library "org-agenda-api")
+                  buffer-file-name))
+  "Version of org-agenda-api, read from package header.")
 
 ;;; Logging
 
