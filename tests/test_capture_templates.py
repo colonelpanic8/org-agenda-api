@@ -3,22 +3,22 @@
 
 
 class TestGetTemplates:
-    """Tests for GET /templates endpoint."""
+    """Tests for GET /capture-templates endpoint."""
 
     def test_returns_200(self, api):
         """Endpoint should return 200 OK."""
-        response = api.get("/templates")
+        response = api.get("/capture-templates")
         assert response.status_code == 200
 
     def test_returns_json_object(self, api):
         """Endpoint should return a JSON object."""
-        response = api.get("/templates")
+        response = api.get("/capture-templates")
         data = response.json()
         assert isinstance(data, dict)
 
     def test_returns_registered_templates(self, api):
         """Should return templates that were registered for API use."""
-        response = api.get("/templates")
+        response = api.get("/capture-templates")
         data = response.json()
 
         # We configure a "todo" template in the test setup
@@ -30,7 +30,7 @@ class TestGetTemplates:
 
     def test_template_includes_prompt_info(self, api):
         """Template should list its interactive prompts with types."""
-        response = api.get("/templates")
+        response = api.get("/capture-templates")
         data = response.json()
 
         # The "todo" template has a Title prompt

@@ -192,18 +192,18 @@ class TestContainerAPI:
         assert any("Initial task" in t for t in titles)
 
     def test_create_todo(self, running_container):
-        """POST /create-todo should work in container."""
+        """POST /capture should work in container to create todos."""
         response = requests.post(
-            f"{running_container['url']}/create-todo",
-            json={"title": "Container test todo"}
+            f"{running_container['url']}/capture",
+            json={"template": "todo", "values": {"Title": "Container test todo"}}
         )
         assert response.status_code == 200
         data = response.json()
-        assert data.get("status") == "created"
+        assert data.get("status") == "captured"
 
     def test_templates_endpoint(self, running_container):
-        """GET /templates should return empty or configured templates."""
-        response = requests.get(f"{running_container['url']}/templates")
+        """GET /capture-templates should return empty or configured templates."""
+        response = requests.get(f"{running_container['url']}/capture-templates")
         assert response.status_code == 200
         # May be empty if no templates configured in container
 
@@ -223,8 +223,8 @@ class TestGitSync:
         # Create a new todo via API
         unique_title = f"Git sync test {time.time()}"
         response = requests.post(
-            f"{url}/create-todo",
-            json={"title": unique_title}
+            f"{url}/capture",
+            json={"template": "todo", "values": {"Title": unique_title}}
         )
         assert response.status_code == 200
 
@@ -256,7 +256,10 @@ class TestGitSync:
         # Create multiple todos
         todos = [f"Multi-sync test {i} - {time.time()}" for i in range(3)]
         for title in todos:
-            response = requests.post(f"{url}/create-todo", json={"title": title})
+            response = requests.post(
+                f"{url}/capture",
+                json={"template": "todo", "values": {"Title": title}}
+            )
             assert response.status_code == 200
 
         # Wait for sync

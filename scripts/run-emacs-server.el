@@ -65,6 +65,10 @@
 ;; Enable LOGBOOK drawer for state change logging
 (setq org-log-into-drawer t)
 
+;; Enable CLOSED timestamp when completing TODOs
+;; This is required for include_completed feature to work correctly
+(setq org-log-done 'time)
+
 ;; Configure custom agenda commands for testing
 (setq org-agenda-custom-commands
       '(("n" "Next actions" todo "NEXT")
