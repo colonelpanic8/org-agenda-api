@@ -1149,6 +1149,29 @@ Returns basic status information and capture readiness check."
     (unless healthy
       (httpd-error httpd-current-proc 503))))
 
+(defservlet habit-config application/json ()
+  "Endpoint: Return org-window-habit configuration including colors and settings."
+  (let ((enabled (and (boundp 'org-window-habit-mode) org-window-habit-mode)))
+    (if (not enabled)
+        (insert (json-encode `(("status" . "ok")
+                               ("enabled" . :json-false))))
+      (insert (json-encode
+               `(("status" . "ok")
+                 ("enabled" . t)
+                 ("colors" . (("conforming" . ,org-window-habit-conforming-color)
+                              ("notConforming" . ,org-window-habit-not-conforming-color)
+                              ("requiredCompletionForeground" . ,org-window-habit-required-completion-foreground-color)
+                              ("nonRequiredCompletionForeground" . ,org-window-habit-non-required-completion-foreground-color)
+                              ("requiredCompletionTodayForeground" . ,org-window-habit-required-completion-today-foreground-color)))
+                 ("display" . (("precedingIntervals" . ,org-window-habit-preceding-intervals)
+                               ("followingDays" . ,org-window-habit-following-days)
+                               ("completionNeededTodayGlyph" . ,(char-to-string org-window-habit-completion-needed-today-glyph))
+                               ("completedGlyph" . ,(char-to-string org-window-habit-completed-glyph))))
+                 ("behavior" . (("repeatToDeadline" . ,(if org-window-habit-repeat-to-deadline t :json-false))
+                                ("repeatToScheduled" . ,(if org-window-habit-repeat-to-scheduled t :json-false))
+                                ("nonConformingScale" . ,org-window-habit-non-conforming-scale))))))))
+  (org-agenda-api--track-request))
+
 (defservlet version application/json ()
   "Endpoint: Return version information including semantic version and git commit hash.
 The git commit is read from the ORG_AGENDA_API_GIT_COMMIT environment variable,
