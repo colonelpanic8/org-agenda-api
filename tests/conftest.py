@@ -126,8 +126,8 @@ class APIClient:
         return self.post("/create-todo", json={"title": title})
 
     def get_templates(self) -> requests.Response:
-        """GET /templates"""
-        return self.get("/templates")
+        """GET /capture-templates"""
+        return self.get("/capture-templates")
 
     def capture(self, template: str, values: dict) -> requests.Response:
         """POST /capture"""

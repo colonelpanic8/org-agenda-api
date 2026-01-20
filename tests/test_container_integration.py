@@ -202,8 +202,8 @@ class TestContainerAPI:
         assert data.get("status") == "created"
 
     def test_templates_endpoint(self, running_container):
-        """GET /templates should return empty or configured templates."""
-        response = requests.get(f"{running_container['url']}/templates")
+        """GET /capture-templates should return empty or configured templates."""
+        response = requests.get(f"{running_container['url']}/capture-templates")
         assert response.status_code == 200
         # May be empty if no templates configured in container
 
