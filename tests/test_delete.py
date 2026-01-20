@@ -58,3 +58,19 @@ class TestDeleteTodo:
         todos_after = api.get_all_todos().json()["todos"]
         found = next((t for t in todos_after if "Vanishing todo 12345" in t.get("title", "")), None)
         assert found is None, "Todo should have been deleted"
+
+    def test_delete_by_id(self, api):
+        """Should be able to delete by org-id."""
+        api.create_todo("Delete by ID test")
+
+        todos = api.get_all_todos().json()["todos"]
+        todo = next((t for t in todos if "Delete by ID test" in t.get("title", "")), None)
+        assert todo is not None
+
+        # Skip if no ID assigned
+        if not todo.get("id"):
+            pytest.skip("Todo has no org-id assigned")
+
+        response = api.post("/delete", json={"id": todo["id"]})
+        assert response.status_code == 200
+        assert response.json().get("deleted") is True
