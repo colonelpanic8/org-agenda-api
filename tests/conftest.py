@@ -219,6 +219,19 @@ def org_test_dir(tmp_path_factory):
 ** TODO Existing task in Beta
 """)
 
+    # Create file with parent/child structure for delete tests
+    hierarchy_org = test_dir / "hierarchy.org"
+    hierarchy_org.write_text("""\
+#+TITLE: Hierarchy Test
+
+* TODO Parent task
+** TODO Child task 1
+** TODO Child task 2
+** TODO Child task 3
+
+* TODO Standalone task
+""")
+
     return test_dir
 
 

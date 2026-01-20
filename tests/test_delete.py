@@ -93,3 +93,42 @@ class TestDeleteErrors:
         response = api.post("/delete", json={})
         data = response.json()
         assert "error" in data or data.get("status") == "error"
+
+
+class TestDeleteWithChildren:
+    """Tests for delete behavior with child items."""
+
+    def test_refuses_delete_with_children(self, api):
+        """Should refuse to delete item with children unless confirmed."""
+        todos = api.get_all_todos().json()["todos"]
+        parent = next((t for t in todos if "Parent task" in t.get("title", "")), None)
+
+        if parent is None:
+            pytest.skip("Parent task fixture not found")
+
+        response = api.post("/delete", json={
+            "file": parent["file"],
+            "position": parent["pos"]
+        })
+        data = response.json()
+
+        # Should return error about children
+        assert data.get("status") == "error" or "children" in data.get("message", "").lower() or "children" in data.get("error", "").lower()
+
+    def test_deletes_with_children_when_confirmed(self, api):
+        """Should delete subtree when include_children=true."""
+        todos = api.get_all_todos().json()["todos"]
+        parent = next((t for t in todos if "Parent task" in t.get("title", "")), None)
+
+        if parent is None:
+            pytest.skip("Parent task fixture not found")
+
+        response = api.post("/delete", json={
+            "file": parent["file"],
+            "position": parent["pos"],
+            "include_children": True
+        })
+        data = response.json()
+
+        assert data.get("deleted") is True
+        assert data.get("children_deleted", 0) > 0
