@@ -51,8 +51,9 @@
 ;; Now load org-agenda-api (after date overrides are in place)
 (require 'org-agenda-api)
 
-;; Load org-window-habit if available for testing habit endpoints
+;; Load the window-habit integration module if org-window-habit is available
 (when (require 'org-window-habit nil t)
+  (require 'org-agenda-api-window-habit)
   (org-window-habit-mode 1)
   (message "org-window-habit-mode enabled for testing"))
 
