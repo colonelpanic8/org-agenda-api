@@ -51,6 +51,11 @@
 ;; Now load org-agenda-api (after date overrides are in place)
 (require 'org-agenda-api)
 
+;; Load org-window-habit if available for testing habit endpoints
+(when (require 'org-window-habit nil t)
+  (org-window-habit-mode 1)
+  (message "org-window-habit-mode enabled for testing"))
+
 ;; Configure org-agenda-files to point to test directory
 ;; Expand directory to list of .org files since org-agenda-api
 ;; expects file paths, not directories

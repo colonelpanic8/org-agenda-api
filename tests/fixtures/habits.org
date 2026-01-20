@@ -1,0 +1,33 @@
+#+TITLE: Test Habits
+
+* TODO Exercise daily
+  DEADLINE: <2024-06-15 Sat .+1d>
+  :PROPERTIES:
+  :ID: habit-exercise-daily
+  :OWH_ASSESSMENT_INTERVAL: 1d
+  :OWH_WINDOW_DURATION: 7d
+  :OWH_REPETITIONS_REQUIRED: 5
+  :END:
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [2024-06-14 Fri 10:00]
+  - State "DONE"       from "TODO"       [2024-06-13 Thu 09:30]
+  - State "DONE"       from "TODO"       [2024-06-12 Wed 11:00]
+  - State "DONE"       from "TODO"       [2024-06-10 Mon 08:45]
+  :END:
+
+* TODO Meditate
+  DEADLINE: <2024-06-15 Sat .+1d>
+  :PROPERTIES:
+  :ID: habit-meditate
+  :OWH_ASSESSMENT_INTERVAL: 1d
+  :OWH_WINDOW_DURATION: 3d
+  :OWH_REPETITIONS_REQUIRED: 2
+  :END:
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [2024-06-14 Fri 07:00]
+  :END:
+
+* TODO Regular todo without habit
+  :PROPERTIES:
+  :ID: regular-todo-no-habit
+  :END:
