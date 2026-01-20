@@ -74,3 +74,22 @@ class TestDeleteTodo:
         response = api.post("/delete", json={"id": todo["id"]})
         assert response.status_code == 200
         assert response.json().get("deleted") is True
+
+
+class TestDeleteErrors:
+    """Tests for delete endpoint error handling."""
+
+    def test_error_on_not_found(self, api):
+        """Should return error for non-existent item."""
+        response = api.post("/delete", json={
+            "file": "/nonexistent/file.org",
+            "position": 1
+        })
+        data = response.json()
+        assert "error" in data or data.get("status") == "error"
+
+    def test_error_on_missing_params(self, api):
+        """Should return error if neither id nor file+position provided."""
+        response = api.post("/delete", json={})
+        data = response.json()
+        assert "error" in data or data.get("status") == "error"
