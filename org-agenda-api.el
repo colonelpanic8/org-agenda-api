@@ -370,6 +370,22 @@ Returns nil if TIMESTAMP is nil."
   (when timestamp
     (substring timestamp 0 (min 10 (length timestamp)))))
 
+(defun org-agenda-api--deduplicate-entries (entries)
+  "Remove duplicate entries that point to the same org headline.
+When an item has both SCHEDULED and DEADLINE on the same day,
+org-agenda shows it twice. This function deduplicates by (file, pos),
+keeping only one entry per unique headline location."
+  (let ((seen (make-hash-table :test 'equal))
+        (result nil))
+    (dolist (entry entries)
+      (let* ((file (cdr (assoc "file" entry)))
+             (pos (cdr (assoc "pos" entry)))
+             (key (cons file pos)))
+        (unless (gethash key seen)
+          (puthash key t seen)
+          (push entry result))))
+    (nreverse result)))
+
 (defun org-agenda-api--get-all-entry-properties ()
   "Get all properties for the entry at point as an alist.
 Returns an alist of (KEY . VALUE) pairs for all properties in the drawer."
@@ -630,31 +646,36 @@ INCLUDE-OVERDUE when non-nil includes overdue items from previous days."
       ;;
       ;; IMPORTANT: Use org-agenda-api--extract-date to compare only the date portion.
       ;; Without this, "2026-01-19T10:00:00" > "2026-01-19" due to string comparison of "T" vs end.
-      (if include-overdue
-          ;; Include overdue: keep items where scheduled date <= start-date
-          (cl-remove-if-not
-           (lambda (entry)
-             (let ((scheduled-date (org-agenda-api--extract-date
-                                    (cdr (assoc "scheduled" entry)))))
-               ;; Keep entries with no scheduled date, or scheduled date <= start-date
-               (or (null scheduled-date)
-                   (not (string-greaterp scheduled-date start-date)))))
-           all-entries)
-        ;; Default: only items scheduled for the exact query date
-        (cl-remove-if-not
-         (lambda (entry)
-           (let ((scheduled-date (org-agenda-api--extract-date
-                                  (cdr (assoc "scheduled" entry))))
-                 (deadline-date (org-agenda-api--extract-date
-                                 (cdr (assoc "deadline" entry)))))
-             ;; Keep entries that have either:
-             ;; - scheduled date matching start-date
-             ;; - deadline date matching start-date
-             ;; - no scheduled/deadline (time grid items, etc.)
-             (or (and (null scheduled-date) (null deadline-date))
-                 (and scheduled-date (string= scheduled-date start-date))
-                 (and deadline-date (string= deadline-date start-date)))))
-         all-entries)))))
+      (let ((filtered-entries
+             (if include-overdue
+                 ;; Include overdue: keep items where scheduled date <= start-date
+                 (cl-remove-if-not
+                  (lambda (entry)
+                    (let ((scheduled-date (org-agenda-api--extract-date
+                                           (cdr (assoc "scheduled" entry)))))
+                      ;; Keep entries with no scheduled date, or scheduled date <= start-date
+                      (or (null scheduled-date)
+                          (not (string-greaterp scheduled-date start-date)))))
+                  all-entries)
+               ;; Default: only items scheduled for the exact query date
+               (cl-remove-if-not
+                (lambda (entry)
+                  (let ((scheduled-date (org-agenda-api--extract-date
+                                         (cdr (assoc "scheduled" entry))))
+                        (deadline-date (org-agenda-api--extract-date
+                                        (cdr (assoc "deadline" entry)))))
+                    ;; Keep entries that have either:
+                    ;; - scheduled date matching start-date
+                    ;; - deadline date matching start-date
+                    ;; - no scheduled/deadline (time grid items, etc.)
+                    (or (and (null scheduled-date) (null deadline-date))
+                        (and scheduled-date (string= scheduled-date start-date))
+                        (and deadline-date (string= deadline-date start-date)))))
+                all-entries))))
+        ;; Deduplicate entries - when an item has both SCHEDULED and DEADLINE
+        ;; on the same day, org-agenda shows it twice. Keep only unique entries
+        ;; based on (file, pos).
+        (org-agenda-api--deduplicate-entries filtered-entries)))))
 
 (defun org-agenda-api--list-custom-views ()
   "Return a list of available custom agenda views.
@@ -697,7 +718,10 @@ Returns a list of entry alists extracted from the agenda buffer."
           (forward-line 1)))
       (kill-buffer "*Org Agenda*"))
     (org-agenda-api--log 'debug "run-custom-view: Total entries found: %d" (length entries))
-    (nreverse entries)))
+    ;; Deduplicate entries - when an item has both SCHEDULED and DEADLINE
+    ;; on the same day, org-agenda shows it twice. Keep only unique entries
+    ;; based on (file, pos).
+    (org-agenda-api--deduplicate-entries (nreverse entries))))
 
 (defun org-agenda-api--get-custom-view-name (key)
   "Get the name/description for the custom view with KEY."

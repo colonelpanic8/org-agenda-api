@@ -710,3 +710,99 @@ class TestAgendaIncludeOverdueParameter:
             f"With include_overdue: {count_with} items\n"
             f"include_overdue should only ADD items, never remove them."
         )
+
+
+class TestAgendaDeduplication:
+    """Tests that verify items with both SCHEDULED and DEADLINE appear only once.
+
+    When an org item has both SCHEDULED and DEADLINE on the same day, org-agenda
+    displays it twice (once for each). The API should deduplicate these entries
+    so the item only appears once in the response.
+
+    Test fixture 'today.org' contains:
+    - 'Task with both scheduled and deadline' with both SCHEDULED and DEADLINE on TEST_DATE
+    """
+
+    def test_item_with_both_scheduled_and_deadline_appears_once(self, api):
+        """An item with both SCHEDULED and DEADLINE on the same day should appear only once.
+
+        Bug: org-agenda shows such items twice. The API should deduplicate them.
+        """
+        response = api.get_agenda(date=TEST_DATE)
+        data = response.json()
+
+        # Find all entries matching "both scheduled and deadline"
+        matching_entries = [
+            entry for entry in data["entries"]
+            if "both scheduled and deadline" in (entry.get("title") or "").lower()
+        ]
+
+        # Should appear exactly once, not twice
+        assert len(matching_entries) == 1, (
+            f"Item 'Task with both scheduled and deadline' should appear exactly once "
+            f"in the agenda, but found {len(matching_entries)} occurrences. "
+            f"This indicates the API is not deduplicating entries that org-agenda "
+            f"displays twice (once for SCHEDULED, once for DEADLINE)."
+        )
+
+    def test_deduplicated_item_has_both_dates(self, api):
+        """A deduplicated item should have both scheduled and deadline dates."""
+        response = api.get_agenda(date=TEST_DATE)
+        data = response.json()
+
+        # Find the entry
+        entry = None
+        for e in data["entries"]:
+            if "both scheduled and deadline" in (e.get("title") or "").lower():
+                entry = e
+                break
+
+        if entry is None:
+            pytest.fail(
+                f"Could not find 'Task with both scheduled and deadline' in agenda. "
+                f"Entries: {[e.get('title') for e in data['entries']]}"
+            )
+
+        # Verify both dates are present
+        assert entry.get("scheduled") is not None, (
+            "Deduplicated entry should have scheduled date"
+        )
+        assert entry.get("deadline") is not None, (
+            "Deduplicated entry should have deadline date"
+        )
+
+    def test_no_duplicate_entries_by_file_and_pos(self, api):
+        """No two entries should have the same file and pos (same underlying item).
+
+        This is a general deduplication check - if two entries point to the same
+        location in the same file, they represent the same org item and should
+        be deduplicated.
+        """
+        response = api.get_agenda(date=TEST_DATE)
+        data = response.json()
+
+        # Group entries by (file, pos)
+        seen = {}
+        duplicates = []
+        for entry in data["entries"]:
+            key = (entry.get("file"), entry.get("pos"))
+            if key in seen:
+                duplicates.append({
+                    "title": entry.get("title"),
+                    "file": entry.get("file"),
+                    "pos": entry.get("pos"),
+                    "first_agenda_line": seen[key].get("agendaLine"),
+                    "duplicate_agenda_line": entry.get("agendaLine"),
+                })
+            else:
+                seen[key] = entry
+
+        assert len(duplicates) == 0, (
+            f"Found {len(duplicates)} duplicate entries (same file+pos):\n"
+            + "\n".join(
+                f"  - '{d['title']}' at {d['file']}:{d['pos']}\n"
+                f"    First: {d['first_agenda_line'][:50]}...\n"
+                f"    Dupe:  {d['duplicate_agenda_line'][:50]}..."
+                for d in duplicates
+            )
+        )
