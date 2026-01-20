@@ -115,6 +115,24 @@
                     :immediate-finish t)
          :prompts (("Title" :type string :required t)))))
 
+;; Set up test category strategy if org-category-capture is available
+(when (require 'org-category-capture nil t)
+  (require 'org-project-capture nil t)
+  ;; Create a simple single-file strategy for testing
+  (let ((projects-file (expand-file-name "projects.org" test-org-dir)))
+    ;; Create projects file if it doesn't exist
+    (unless (file-exists-p projects-file)
+      (with-temp-file projects-file
+        (insert "#+TITLE: Test Projects\n\n"
+                "* Project Alpha\n"
+                "* Project Beta\n")))
+    ;; Set up the strategy
+    (setq org-project-capture-projects-file projects-file)
+    (let ((test-strategy (make-instance 'org-project-capture-single-file-strategy)))
+      (setq org-agenda-api-category-strategies
+            `(("projects" . ,test-strategy)))
+      (message "Category strategy registered: projects -> %s" projects-file))))
+
 ;; Start the server
 (org-agenda-api-start)
 

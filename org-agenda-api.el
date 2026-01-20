@@ -52,6 +52,8 @@
 ;;   GET /category-tasks - Returns tasks for a category
 ;;       ?type=NAME - Required: the strategy type name
 ;;       ?category=CAT - Required: the category name
+;;   POST /category-capture - Capture a new entry to a category
+;;       JSON body: {type, category, title, todo?, scheduled?, deadline?, priority?, tags?, properties?}
 ;;
 ;; To register category strategies for the API:
 ;;   (setq org-agenda-api-category-strategies
@@ -1836,6 +1838,153 @@ Accepts query params:
                 (insert (json-encode response))))))))
     (error
      (org-agenda-api--log-error-with-backtrace "/category-tasks" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
+(defun org-agenda-api--build-category-capture-template (values)
+  "Build a capture template string from VALUES.
+VALUES is an alist with title, todo, scheduled, deadline, priority, tags, properties.
+Returns a template string with all values pre-filled (no interactive prompts)."
+  (let* ((title (or (cdr (assoc "title" values)) ""))
+         (todo-state (or (cdr (assoc "todo" values)) "TODO"))
+         (scheduled (cdr (assoc "scheduled" values)))
+         (deadline (cdr (assoc "deadline" values)))
+         (priority (cdr (assoc "priority" values)))
+         (tags (cdr (assoc "tags" values)))
+         (properties (cdr (assoc "properties" values)))
+         (parts nil))
+    ;; Build headline: * TODO [#A] Title :tag1:tag2:
+    (push (format "* %s " todo-state) parts)
+    (when (and priority (not (string-empty-p priority)))
+      (push (format "[#%s] " (upcase priority)) parts))
+    (push title parts)
+    (when (and tags (> (length tags) 0))
+      (let ((tag-list (if (vectorp tags) (append tags nil) tags)))
+        (push (format " :%s:" (mapconcat #'identity tag-list ":")) parts)))
+    (push "\n" parts)
+    ;; Add SCHEDULED/DEADLINE line if needed
+    (let ((planning-parts nil))
+      (when (and scheduled (not (string-empty-p scheduled)))
+        (let* ((has-time (org-agenda-api--datetime-has-time-p scheduled))
+               (time (org-agenda-api--parse-datetime scheduled))
+               (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+          (when org-ts
+            (push (format "SCHEDULED: %s" org-ts) planning-parts))))
+      (when (and deadline (not (string-empty-p deadline)))
+        (let* ((has-time (org-agenda-api--datetime-has-time-p deadline))
+               (time (org-agenda-api--parse-datetime deadline))
+               (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+          (when org-ts
+            (push (format "DEADLINE: %s" org-ts) planning-parts))))
+      (when planning-parts
+        (push (concat (mapconcat #'identity (nreverse planning-parts) " ") "\n") parts)))
+    ;; Add properties drawer
+    (push ":PROPERTIES:\n" parts)
+    (push (format ":CREATED: %s\n" (format-time-string "[%Y-%m-%d %a %H:%M]" (current-time))) parts)
+    (when properties
+      (dolist (prop properties)
+        (let ((prop-name (car prop))
+              (prop-value (cdr prop)))
+          (when (and prop-name prop-value (not (string-empty-p prop-value)))
+            (push (format ":%s: %s\n" (upcase prop-name) prop-value) parts)))))
+    (push ":END:\n" parts)
+    ;; Combine all parts
+    (apply #'concat (nreverse parts))))
+
+(defun org-agenda-api--capture-to-category (strategy category values)
+  "Capture a new entry to CATEGORY using STRATEGY.
+VALUES is an alist that may contain:
+  - title: The entry title (required)
+  - todo: TODO state (default: TODO)
+  - scheduled: ISO date/datetime string
+  - deadline: ISO date/datetime string
+  - priority: A, B, or C
+  - tags: list of tag strings
+  - properties: alist of property name/value pairs
+Returns an alist with status information.
+
+Uses occ-capture with :immediate-finish to leverage org-category-capture's
+logic for finding the correct capture location."
+  (unless (fboundp 'occ-capture)
+    (error "org-category-capture is not loaded"))
+  (let* ((title (or (cdr (assoc "title" values)) ""))
+         (template-string (org-agenda-api--build-category-capture-template values))
+         ;; Create occ-context with immediate-finish option
+         (context (make-instance 'occ-context
+                                 :category category
+                                 :template template-string
+                                 :strategy strategy
+                                 :options '(:immediate-finish t)))
+         ;; Get marker before capture to return file info
+         (marker (occ-get-capture-marker context))
+         (target-file (when marker (buffer-file-name (marker-buffer marker)))))
+    (unless marker
+      (error "Could not get capture marker for category: %s" category))
+    ;; Use occ-capture which handles all the positioning logic
+    (occ-capture context)
+    (org-agenda-api--invalidate-cache)
+    `(("status" . "created")
+      ("category" . ,category)
+      ("title" . ,title)
+      ("file" . ,target-file))))
+
+(defservlet category-capture application/json (_path _query headers)
+  "Endpoint: Capture a new entry to a specific category.
+Accepts JSON body with:
+  - type: The category strategy type name (required)
+  - category: The category name (required)
+  - title: Entry title (required)
+  - todo: TODO state (optional, default: TODO)
+  - scheduled: ISO date/datetime string (optional)
+  - deadline: ISO date/datetime string (optional)
+  - priority: A, B, or C (optional)
+  - tags: array of tag strings (optional)
+  - properties: object of property name/value pairs (optional)"
+  (condition-case err
+      (let* ((content-header (cadr (assoc "Content" headers)))
+             (json-data (json-parse-string content-header))
+             (type-name (gethash "type" json-data))
+             (category (gethash "category" json-data))
+             (title (gethash "title" json-data))
+             (todo-state (gethash "todo" json-data))
+             (scheduled (gethash "scheduled" json-data))
+             (deadline (gethash "deadline" json-data))
+             (priority (gethash "priority" json-data))
+             (tags (gethash "tags" json-data))
+             (properties-hash (gethash "properties" json-data))
+             ;; Convert properties hash to alist
+             (properties (when (hash-table-p properties-hash)
+                           (let (alist)
+                             (maphash (lambda (k v) (push (cons k v) alist)) properties-hash)
+                             alist)))
+             ;; Build values alist
+             (values `(("title" . ,title)
+                       ("todo" . ,todo-state)
+                       ("scheduled" . ,(unless (eq scheduled :null) scheduled))
+                       ("deadline" . ,(unless (eq deadline :null) deadline))
+                       ("priority" . ,(unless (eq priority :null) priority))
+                       ("tags" . ,(unless (eq tags :null) tags))
+                       ("properties" . ,properties))))
+        (cond
+         ((or (null type-name) (string= type-name ""))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required 'type' parameter")))))
+         ((or (null category) (string= category ""))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required 'category' parameter")))))
+         ((or (null title) (string= title ""))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required 'title' parameter")))))
+         (t
+          (let ((strategy (org-agenda-api--get-strategy type-name)))
+            (if (null strategy)
+                (insert (json-encode `(("status" . "error")
+                                       ("message" . ,(format "Unknown strategy type: %s" type-name)))))
+              (let ((result (org-agenda-api--capture-to-category strategy category values)))
+                (insert (json-encode result))))))))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/category-capture" err)
      (insert (json-encode `(("status" . "error")
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))

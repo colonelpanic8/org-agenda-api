@@ -207,6 +207,18 @@ def org_test_dir(tmp_path_factory):
   SCHEDULED: <{TEST_DATE_ORG}> DEADLINE: <{TEST_DATE_ORG}>
 """)
 
+    # Create projects file for category strategy tests
+    projects_org = test_dir / "projects.org"
+    projects_org.write_text("""\
+#+TITLE: Test Projects
+
+* Project Alpha
+** TODO Existing task in Alpha
+
+* Project Beta
+** TODO Existing task in Beta
+""")
+
     return test_dir
 
 
