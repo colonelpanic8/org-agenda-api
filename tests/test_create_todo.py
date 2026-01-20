@@ -1,6 +1,5 @@
 """Integration tests for POST /create-todo endpoint."""
 
-import pytest
 
 
 class TestCreateTodo:

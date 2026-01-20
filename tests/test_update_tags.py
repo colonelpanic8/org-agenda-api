@@ -1,6 +1,5 @@
 """Integration tests for POST /update endpoint - tags functionality."""
 
-import pytest
 import uuid
 
 

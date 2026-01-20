@@ -98,7 +98,7 @@ class TestCompleteTodo:
 
         # Complete with CANCELLED state
         response = api.complete_todo(todo, state="CANCELLED")
-        data = response.json()
+        response.json()
 
         # Note: This will only work if CANCELLED is a valid done state
         # in the org-todo-keywords configuration

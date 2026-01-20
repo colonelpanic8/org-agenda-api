@@ -1,6 +1,5 @@
 """Tests for custom agenda views endpoints."""
 
-import pytest
 
 
 class TestCustomViews:

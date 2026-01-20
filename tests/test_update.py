@@ -1,6 +1,5 @@
 """Integration tests for POST /update endpoint."""
 
-import pytest
 
 
 class TestUpdateTodo:

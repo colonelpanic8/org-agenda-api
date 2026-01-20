@@ -53,7 +53,7 @@ class TestCaptureScheduledTimeLocal:
         %t should expand to <YYYY-MM-DD Day> without time.
         The resulting scheduled field should be date-only (YYYY-MM-DD).
         """
-        unique_title = f"scheduled-t-local-test-12345"
+        unique_title = "scheduled-t-local-test-12345"
 
         # Capture using scheduled-today template
         capture_response = api.post("/capture", json={
@@ -91,7 +91,7 @@ class TestCaptureScheduledTimeLocal:
 
     def test_file_content_has_date_only_timestamp(self, api, org_dir):
         """The org file should contain date-only timestamp from %t template."""
-        unique_title = f"file-content-check-67890"
+        unique_title = "file-content-check-67890"
 
         # Capture using scheduled-today template
         api.post("/capture", json={

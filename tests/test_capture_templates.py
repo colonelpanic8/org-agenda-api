@@ -1,6 +1,5 @@
 """Integration tests for capture template API."""
 
-import pytest
 
 
 class TestGetTemplates:

@@ -1,6 +1,5 @@
 """Integration tests for GET endpoints."""
 
-import pytest
 
 
 class TestGetAllTodos:
@@ -77,7 +76,7 @@ class TestGetAllTodos:
         todos = response.json()["todos"]
 
         # The "Write tests" item is DONE in sample.org
-        done_items = [item for item in todos if item.get("todo") == "DONE"]
+        [item for item in todos if item.get("todo") == "DONE"]
         # Note: The current implementation does include DONE items
         # This test documents current behavior - adjust if intended behavior differs
 

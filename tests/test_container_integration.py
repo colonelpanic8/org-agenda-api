@@ -10,11 +10,9 @@ Run with: pytest tests/test_container_integration.py -v -s
 Skip with: pytest tests/ --ignore=tests/test_container_integration.py
 """
 
-import json
 import os
 import shutil
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 
@@ -281,7 +279,7 @@ class TestContainerRestart:
     def test_restart_endpoint(self, running_container):
         """POST /restart should trigger container restart via supervisor."""
         url = running_container["url"]
-        name = running_container["name"]
+        running_container["name"]
 
         # Call restart
         response = requests.post(f"{url}/restart")

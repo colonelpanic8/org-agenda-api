@@ -6,8 +6,6 @@ from conftest import (
     TEST_DATE_NEXT_DAY,
     TEST_DATE_PREV_DAY,
     TEST_DATE_ORG,
-    TEST_DATE_NEXT_DAY_ORG,
-    TEST_DATE_PREV_DAY_ORG,
 )
 
 

@@ -12,7 +12,6 @@ To run these tests, we need a separate fixture that doesn't set the fake date.
 """
 
 import os
-import shutil
 import signal
 import subprocess
 import time
