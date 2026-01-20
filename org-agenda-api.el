@@ -189,20 +189,32 @@ seconds, checked after each request completes."
 
 (defcustom org-agenda-api-category-strategies nil
   "Category strategies registered for API use.
-Each entry is a cons (NAME . STRATEGY) where:
+Each entry can be either:
+  (NAME . STRATEGY) - simple form using default template
+  (NAME :strategy STRATEGY :template TEMPLATE) - with custom capture template
+
+Where:
   NAME     - A string identifying the strategy type
   STRATEGY - An instance of an occ-strategy subclass (from org-category-capture)
+  TEMPLATE - Optional capture template string (default: \"* TODO %?\\n\")
 
 These strategies expose categories through the API.  When org-category-capture
 or org-project-capture is loaded, you can register strategies like:
 
+  ;; Simple form (uses default template):
   (setq org-agenda-api-category-strategies
         \\='((\"projects\" . org-project-capture-strategy)))
 
+  ;; With custom template:
+  (setq org-agenda-api-category-strategies
+        \\=`((\"projects\" :strategy ,org-project-capture-strategy
+                       :template ,org-project-capture-capture-template)))
+
 The API will then expose endpoints:
-  GET /category-types - list registered strategy types
+  GET /category-types - list registered strategy types (includes template info)
   GET /categories?type=NAME - get categories for a strategy
-  GET /category-tasks?type=NAME&category=CAT - get tasks in a category"
+  GET /category-tasks?type=NAME&category=CAT - get tasks in a category
+  POST /category-capture - capture a new entry to a category"
   :type '(alist :key-type string :value-type sexp)
   :group 'org-agenda-api)
 
@@ -1682,10 +1694,36 @@ Accepts JSON body with:
 
 ;;; Category Strategy Support
 
+(defun org-agenda-api--parse-strategy-entry (entry)
+  "Parse a strategy ENTRY from `org-agenda-api-category-strategies'.
+Returns a plist with :strategy and :template keys.
+Handles both simple form (NAME . STRATEGY) and plist form
+\(NAME :strategy STRATEGY :template TEMPLATE)."
+  (let ((value (cdr entry)))
+    (cond
+     ;; Plist form: (NAME :strategy STRATEGY :template TEMPLATE)
+     ((and (listp value) (plist-get value :strategy))
+      (list :strategy (plist-get value :strategy)
+            :template (or (plist-get value :template) "* TODO %?\n")))
+     ;; Simple form: (NAME . STRATEGY)
+     (t
+      (list :strategy value
+            :template "* TODO %?\n")))))
+
 (defun org-agenda-api--get-strategy (type-name)
   "Get the strategy registered under TYPE-NAME.
 Returns the strategy object or nil if not found."
-  (cdr (assoc type-name org-agenda-api-category-strategies)))
+  (let ((entry (assoc type-name org-agenda-api-category-strategies)))
+    (when entry
+      (plist-get (org-agenda-api--parse-strategy-entry entry) :strategy))))
+
+(defun org-agenda-api--get-strategy-template (type-name)
+  "Get the capture template for strategy TYPE-NAME.
+Returns the template string or default if not specified."
+  (let ((entry (assoc type-name org-agenda-api-category-strategies)))
+    (if entry
+        (plist-get (org-agenda-api--parse-strategy-entry entry) :template)
+      "* TODO %?\n")))
 
 (defun org-agenda-api--list-category-types ()
   "Return a list of registered category type names."
@@ -1763,16 +1801,18 @@ Uses occ-map-entries-for-category to traverse entries."
 
 (defservlet category-types application/json ()
   "Endpoint: Return list of registered category strategy types.
-Returns an array of type names that can be used with /categories endpoint."
+Returns an array of type objects with name, hasCategories, and captureTemplate."
   (condition-case err
       (let* ((types (org-agenda-api--list-category-types))
              (type-info (mapcar
                          (lambda (type)
-                           (let ((strategy (org-agenda-api--get-strategy type)))
+                           (let ((strategy (org-agenda-api--get-strategy type))
+                                 (template (org-agenda-api--get-strategy-template type)))
                              `(("name" . ,type)
                                ("hasCategories" . ,(if (and strategy
                                                             (org-agenda-api--get-categories-for-strategy strategy))
-                                                       t :json-false)))))
+                                                       t :json-false))
+                               ("captureTemplate" . ,template))))
                          types))
              (response `(("types" . ,(vconcat type-info)))))
         (insert (json-encode response)))
