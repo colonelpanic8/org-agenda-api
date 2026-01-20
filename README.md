@@ -59,7 +59,6 @@ pytest tests/ -v        # Verbose output
 
 | Endpoint | Description |
 |----------|-------------|
-| `/create-todo` | Creates new TODO item |
 | `/capture` | Uses registered capture templates |
 
 ### Modification Endpoints (POST)

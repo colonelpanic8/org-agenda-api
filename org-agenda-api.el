@@ -35,7 +35,7 @@
 ;; Endpoints:
 ;;   GET /get-all-todos - Returns all TODO items from agenda files
 ;;       ?refresh=true - Git pull repos containing agenda files first
-;;   GET /agenda - Returns org-agenda entries
+;;   GET /agenda - Returns org-agenda entriesg
 ;;       ?span=day|week - Agenda span (default: day)
 ;;       ?refresh=true - Git pull repos containing agenda files first
 ;;   GET /get-todays-agenda - Returns scheduled/deadlined items for today
@@ -539,6 +539,23 @@ Uses caching to avoid re-processing unchanged files."
               (org-agenda-api--get-scheduled-or-deadlined day filepath))
             org-agenda-files)))
 
+(defun org-agenda-api--get-closed-timestamp ()
+  "Get the CLOSED timestamp at point if present.
+Returns ISO format timestamp string or nil."
+  (save-excursion
+    ;; Move to the beginning of the entry to find planning line
+    (org-back-to-heading t)
+    (forward-line 1)
+    (when (looking-at org-planning-line-re)
+      (let ((line (buffer-substring-no-properties (point) (line-end-position))))
+        ;; Look for CLOSED: [timestamp]
+        (when (string-match "CLOSED: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)[^]]*\\( [0-9]\\{2\\}:[0-9]\\{2\\}\\)?\\]" line)
+          (let ((date-part (match-string 1 line))
+                (time-part (match-string 2 line)))
+            (if time-part
+                (format "%sT%s:00" date-part (string-trim time-part))
+              date-part)))))))
+
 (defun org-agenda-api--extract-entry-data (marker agenda-line)
   "Extract todo data from the org entry at MARKER.
 AGENDA-LINE is the raw agenda display text for reference."
@@ -564,7 +581,9 @@ AGENDA-LINE is the raw agenda display text for reference."
                  (notify-before (org-agenda-api--parse-notify-before
                                  (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
                  (category (org-get-category))
-                 (all-properties (org-agenda-api--get-all-entry-properties)))
+                 (all-properties (org-agenda-api--get-all-entry-properties))
+                 ;; Extract CLOSED timestamp directly from the org entry
+                 (completed-at (org-agenda-api--get-closed-timestamp)))
             `(("todo" . ,todo)
               ("title" . ,title)
               ("tags" . ,(if tags (vconcat tags) nil))
@@ -579,13 +598,15 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
               ("category" . ,category)
               ("agendaLine" . ,(substring-no-properties agenda-line))
-              ("properties" . ,all-properties))))))))
+              ("properties" . ,all-properties)
+              ("completedAt" . ,completed-at))))))))
 
-(defun org-agenda-api--run-agenda (span &optional start-date include-overdue)
+(defun org-agenda-api--run-agenda (span &optional start-date include-overdue include-completed)
   "Run org-agenda and return entries as a list of JSON-encodable alists.
 SPAN should be `day' or `week'.
 START-DATE is an optional date string in YYYY-MM-DD format.
-INCLUDE-OVERDUE when non-nil includes overdue items from previous days."
+INCLUDE-OVERDUE when non-nil includes overdue items from previous days.
+INCLUDE-COMPLETED when non-nil includes items completed on the query date."
   (let* ((org-agenda-span span)
          (org-agenda-use-time-grid t)
          (org-agenda-start-on-weekday nil)
@@ -612,25 +633,38 @@ INCLUDE-OVERDUE when non-nil includes overdue items from previous days."
     (org-agenda-api--log 'debug "run-agenda: org-today=%S" (org-today))
     (org-agenda-api--log 'debug "run-agenda: parsed-date=%S span=%S absolute-day=%S" parsed-date span absolute-day)
     (org-agenda-api--log 'debug "run-agenda: org-agenda-files=%S" org-agenda-files)
-    ;; Override org-today and calendar-current-date using fset for robust override
-    ;; that works with byte-compiled code. cl-letf may not work reliably with
-    ;; byte-compiled org-mode in production.
-    (unwind-protect
-        (progn
-          ;; Override functions globally using fset
-          (fset 'org-today (lambda () absolute-day))
-          (fset 'calendar-current-date
-                (lambda (&optional offset)
-                  (if offset
-                      (calendar-gregorian-from-absolute (+ absolute-day offset))
-                    parsed-date)))
-          ;; Debug: verify overrides are in effect
-          (org-agenda-api--log 'debug "run-agenda: AFTER OVERRIDE org-today=%S calendar-current-date=%S"
-                               (org-today) (calendar-current-date))
-          ;; Prepare buffers INSIDE the override scope
-          (org-agenda-prepare-buffers org-agenda-files)
-          (save-window-excursion
-            (org-agenda-list nil start-date (if (eq span 'day) 1 7))
+    (org-agenda-api--log 'debug "run-agenda: org-agenda-show-log=%S org-agenda-log-mode-items=%S"
+                         org-agenda-show-log org-agenda-log-mode-items)
+    ;; Store original values for restoration
+    (let ((orig-org-agenda-show-log org-agenda-show-log)
+          (orig-org-agenda-log-mode-items org-agenda-log-mode-items)
+          (orig-org-agenda-start-with-log-mode org-agenda-start-with-log-mode))
+      ;; Set log mode globally if include-completed is requested
+      ;; (let-binding doesn't work reliably with org-agenda)
+      (when include-completed
+        (setq org-agenda-show-log t
+              org-agenda-start-with-log-mode t
+              org-agenda-log-mode-items '(closed state)))
+      ;; Override org-today and calendar-current-date using fset for robust override
+      ;; that works with byte-compiled code. cl-letf may not work reliably with
+      ;; byte-compiled org-mode in production.
+      (unwind-protect
+          (progn
+            ;; Override functions globally using fset
+            (fset 'org-today (lambda () absolute-day))
+            (fset 'calendar-current-date
+                  (lambda (&optional offset)
+                    (if offset
+                        (calendar-gregorian-from-absolute (+ absolute-day offset))
+                      parsed-date)))
+            ;; Debug: verify overrides are in effect
+            (org-agenda-api--log 'debug "run-agenda: AFTER OVERRIDE org-today=%S calendar-current-date=%S"
+                                 (org-today) (calendar-current-date))
+            (org-agenda-api--log 'debug "run-agenda: org-agenda-show-log=%S" org-agenda-show-log)
+            ;; Prepare buffers INSIDE the override scope
+            (org-agenda-prepare-buffers org-agenda-files)
+            (save-window-excursion
+              (org-agenda-list nil start-date (if (eq span 'day) 1 7))
             (with-current-buffer "*Org Agenda*"
               ;; Debug: log the agenda buffer contents
               (org-agenda-api--log 'debug "run-agenda: agenda buffer:\n%s" (buffer-string))
@@ -654,9 +688,13 @@ INCLUDE-OVERDUE when non-nil includes overdue items from previous days."
                         (push entry-data entries)))))
                 (forward-line 1)))
             (kill-buffer "*Org Agenda*")))
-      ;; Restore original functions
-      (fset 'org-today orig-org-today)
-      (fset 'calendar-current-date orig-calendar-current-date))
+        ;; Restore original functions
+        (fset 'org-today orig-org-today)
+        (fset 'calendar-current-date orig-calendar-current-date)
+        ;; Restore log mode settings
+        (setq org-agenda-show-log orig-org-agenda-show-log
+              org-agenda-start-with-log-mode orig-org-agenda-start-with-log-mode
+              org-agenda-log-mode-items orig-org-agenda-log-mode-items)))
     (org-agenda-api--log 'debug "run-agenda: Total entries found: %d" (length entries))
     (let ((all-entries (nreverse entries)))
       ;; Filter entries based on their scheduled date
@@ -671,10 +709,14 @@ INCLUDE-OVERDUE when non-nil includes overdue items from previous days."
                  (cl-remove-if-not
                   (lambda (entry)
                     (let ((scheduled-date (org-agenda-api--extract-date
-                                           (cdr (assoc "scheduled" entry)))))
-                      ;; Keep entries with no scheduled date, or scheduled date <= start-date
+                                           (cdr (assoc "scheduled" entry))))
+                          (completed-at-date (org-agenda-api--extract-date
+                                              (cdr (assoc "completedAt" entry)))))
+                      ;; Keep entries with no scheduled date, scheduled date <= start-date,
+                      ;; or completed on the query date
                       (or (null scheduled-date)
-                          (not (string-greaterp scheduled-date start-date)))))
+                          (not (string-greaterp scheduled-date start-date))
+                          (and completed-at-date (string= completed-at-date start-date)))))
                   all-entries)
                ;; Default: only items scheduled for the exact query date
                (cl-remove-if-not
@@ -682,14 +724,18 @@ INCLUDE-OVERDUE when non-nil includes overdue items from previous days."
                   (let ((scheduled-date (org-agenda-api--extract-date
                                          (cdr (assoc "scheduled" entry))))
                         (deadline-date (org-agenda-api--extract-date
-                                        (cdr (assoc "deadline" entry)))))
+                                        (cdr (assoc "deadline" entry))))
+                        (completed-at-date (org-agenda-api--extract-date
+                                            (cdr (assoc "completedAt" entry)))))
                     ;; Keep entries that have either:
                     ;; - scheduled date matching start-date
                     ;; - deadline date matching start-date
+                    ;; - completed at date matching start-date (log entries)
                     ;; - no scheduled/deadline (time grid items, etc.)
                     (or (and (null scheduled-date) (null deadline-date))
                         (and scheduled-date (string= scheduled-date start-date))
-                        (and deadline-date (string= deadline-date start-date)))))
+                        (and deadline-date (string= deadline-date start-date))
+                        (and completed-at-date (string= completed-at-date start-date)))))
                 all-entries))))
         ;; Deduplicate entries - when an item has both SCHEDULED and DEADLINE
         ;; on the same day, org-agenda shows it twice. Keep only unique entries
@@ -1057,20 +1103,23 @@ Accepts optional query params:
   - 'span' (day or week, defaults to day)
   - 'date' (YYYY-MM-DD format, defaults to today)
   - 'include_overdue' (true/1) to include overdue items from previous days (default: false)
+  - 'include_completed' (true/1) to include items completed on this date (default: false)
   - 'refresh' (true/1) to git pull repos first."
   (let* ((span-param (cadr (assoc "span" query)))
          (date-param (cadr (assoc "date" query)))
          (include-overdue-param (cadr (assoc "include_overdue" query)))
+         (include-completed-param (cadr (assoc "include_completed" query)))
          (refresh-param (cadr (assoc "refresh" query)))
          (git-results (when (member refresh-param '("true" "1"))
                         (org-agenda-api--git-refresh-all)))
          (span (if (string= span-param "week") 'week 'day))
          (include-overdue (member include-overdue-param '("true" "1")))
+         (include-completed (member include-completed-param '("true" "1")))
          ;; Use requested date or default to today (using calendar-current-date for testability)
          (today (calendar-current-date))
          (today-str (format "%04d-%02d-%02d" (nth 2 today) (nth 0 today) (nth 1 today)))
          (effective-date (or date-param today-str))
-         (entries (org-agenda-api--run-agenda span effective-date include-overdue))
+         (entries (org-agenda-api--run-agenda span effective-date include-overdue include-completed))
          (response `(("span" . ,(symbol-name span))
                      ("date" . ,effective-date)
                      ("entries" . ,(vconcat entries)))))

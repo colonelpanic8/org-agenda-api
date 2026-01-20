@@ -131,7 +131,7 @@ The test Emacs configuration (`scripts/run-emacs-server.el`) already has:
 ### Test Implementation
 
 Tests will:
-1. Create tasks via `/capture` or `/create-todo`
+1. Create tasks via `/capture`
 2. Complete them via `/complete` endpoint (which creates LOGBOOK entries)
 3. Query `/agenda` with `include_completed=true`
 4. Verify completed items appear with correct `completedAt` timestamps

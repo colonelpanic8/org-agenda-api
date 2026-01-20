@@ -122,8 +122,8 @@ class APIClient:
         return self.get(f"/agenda{params}")
 
     def create_todo(self, title: str) -> requests.Response:
-        """POST /create-todo"""
-        return self.post("/create-todo", json={"title": title})
+        """Create a todo using the capture endpoint with 'todo' template."""
+        return self.capture("todo", {"Title": title})
 
     def get_templates(self) -> requests.Response:
         """GET /capture-templates"""
