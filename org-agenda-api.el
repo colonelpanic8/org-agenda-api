@@ -741,12 +741,21 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
                   (lambda (entry)
                     (let ((scheduled-date (org-agenda-api--extract-date
                                            (cdr (assoc "scheduled" entry))))
+                          (deadline-date (org-agenda-api--extract-date
+                                          (cdr (assoc "deadline" entry))))
                           (completed-at-date (org-agenda-api--extract-date
                                               (cdr (assoc "completedAt" entry)))))
-                      ;; Keep entries with no scheduled date, scheduled date <= start-date,
-                      ;; or completed on the query date
-                      (or (null scheduled-date)
-                          (not (string-greaterp scheduled-date start-date))
+                      ;; Keep entries with:
+                      ;; - scheduled date <= start-date (includes overdue)
+                      ;; - deadline date <= start-date
+                      ;; - completed on the query date
+                      ;; - no scheduled/deadline ONLY when not in log mode
+                      ;;   (When include-completed is true, log mode shows state change entries
+                      ;;   that have no scheduled/deadline - these should only be kept if they
+                      ;;   have a completedAt matching the query date)
+                      (or (and (null scheduled-date) (null deadline-date) (not include-completed))
+                          (and scheduled-date (not (string-greaterp scheduled-date start-date)))
+                          (and deadline-date (not (string-greaterp deadline-date start-date)))
                           (and completed-at-date (string= completed-at-date start-date)))))
                   all-entries)
                ;; Default: only items scheduled for the exact query date
@@ -762,8 +771,11 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
                     ;; - scheduled date matching start-date
                     ;; - deadline date matching start-date
                     ;; - completed at date matching start-date (log entries)
-                    ;; - no scheduled/deadline (time grid items, etc.)
-                    (or (and (null scheduled-date) (null deadline-date))
+                    ;; - no scheduled/deadline (time grid items) ONLY when not in log mode
+                    ;;   (When include-completed is true, log mode shows state change entries
+                    ;;   that have no scheduled/deadline - these should only be kept if they
+                    ;;   have a completedAt matching the query date)
+                    (or (and (null scheduled-date) (null deadline-date) (not include-completed))
                         (and scheduled-date (string= scheduled-date start-date))
                         (and deadline-date (string= deadline-date start-date))
                         (and completed-at-date (string= completed-at-date start-date)))))

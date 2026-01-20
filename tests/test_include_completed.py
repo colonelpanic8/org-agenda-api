@@ -3,7 +3,7 @@
 import re
 from datetime import date
 
-from conftest import TEST_DATE, TEST_DATE_NEXT_DAY
+from conftest import TEST_DATE, TEST_DATE_NEXT_DAY, TEST_DATE_ORG
 
 
 def get_today_str():
@@ -22,14 +22,21 @@ class TestIncludeCompleted:
     def test_completed_item_appears_with_flag(self, api):
         """Completed todo should appear in agenda when include_completed=true."""
         # Get an active todo to complete
+        # IMPORTANT: Exclude habits (items with repeating deadlines) because
+        # org-mode removes CLOSED timestamp when repeating tasks reset to TODO
         todos_response = api.get_all_todos()
         todos = todos_response.json()
 
         active_todo = next(
-            (t for t in todos["todos"] if t.get("todo") == "TODO"),
+            (t for t in todos["todos"]
+             if t.get("todo") == "TODO"
+             and not t.get("isWindowHabit", False)  # Exclude window habits
+             and "habit" not in t.get("title", "").lower()  # Exclude other habits by name
+             and "Exercise" not in t.get("title", "")  # Exclude specific habit fixtures
+             and "Meditate" not in t.get("title", "")),
             None,
         )
-        assert active_todo is not None, "Need an active TODO to test"
+        assert active_todo is not None, "Need an active non-habit TODO to test"
 
         original_title = active_todo["title"]
 
@@ -137,15 +144,20 @@ class TestIncludeCompleted:
 
     def test_completed_at_field_populated(self, api):
         """Completed items should have completedAt timestamp."""
-        # Get an active todo
+        # Get an active todo (exclude habits - they don't keep CLOSED after reset)
         todos_response = api.get_all_todos()
         todos = todos_response.json()
 
         active_todo = next(
-            (t for t in todos["todos"] if t.get("todo") == "TODO"),
+            (t for t in todos["todos"]
+             if t.get("todo") == "TODO"
+             and not t.get("isWindowHabit", False)
+             and "habit" not in t.get("title", "").lower()
+             and "Exercise" not in t.get("title", "")
+             and "Meditate" not in t.get("title", "")),
             None,
         )
-        assert active_todo is not None
+        assert active_todo is not None, "Need an active non-habit TODO to test"
 
         # Complete it
         api.complete_todo(active_todo)
@@ -179,14 +191,21 @@ class TestIncludeCompleted:
 
     def test_multiple_completions_same_day(self, api):
         """Multiple items completed on same day should all appear."""
-        # Get multiple active todos
+        # Get multiple active todos (exclude habits - they don't keep CLOSED after reset)
         todos_response = api.get_all_todos()
         todos = todos_response.json()
 
-        active_todos = [t for t in todos["todos"] if t.get("todo") == "TODO"][:3]
+        active_todos = [
+            t for t in todos["todos"]
+            if t.get("todo") == "TODO"
+            and not t.get("isWindowHabit", False)
+            and "habit" not in t.get("title", "").lower()
+            and "Exercise" not in t.get("title", "")
+            and "Meditate" not in t.get("title", "")
+        ][:3]
         if len(active_todos) < 2:
             import pytest
-            pytest.skip("Need at least 2 active TODOs for this test")
+            pytest.skip("Need at least 2 active non-habit TODOs for this test")
 
         # Complete them all
         completed_titles = []
@@ -258,6 +277,183 @@ class TestIncludeCompleted:
         assert len(completed_entries) == 0, (
             f"Re-opened task should not appear as DONE. Found: {completed_entries}"
         )
+
+
+class TestStateChangeLogBug:
+    """Tests for bug where state change log entries appear incorrectly.
+
+    Bug: When include_completed=true, entries with state change logs but no
+    CLOSED timestamp (completedAt) are incorrectly included because the filter
+    allows entries with null scheduled AND null deadline to pass through.
+
+    The filter should only include entries when:
+    - scheduled date matches the query date, OR
+    - deadline date matches the query date, OR
+    - completedAt date matches the query date
+
+    Entries with null scheduled/deadline/completedAt should NOT appear.
+    """
+
+    def test_done_without_closed_not_shown_as_completed(self, api):
+        """DONE items without CLOSED timestamp should NOT appear with include_completed.
+
+        This tests the bug where items that are DONE but have no CLOSED timestamp
+        (completedAt is null) appear in the agenda when include_completed=true
+        because the filter allows entries with null scheduled AND null deadline
+        to pass through.
+
+        The test fixture state_change_bug.org contains:
+        - A DONE item with LOGBOOK state change for TEST_DATE but no CLOSED timestamp
+        - A DONE item without any logging
+
+        The key scenario: an item has a state change log entry for the query date
+        (so org-agenda shows it in log mode), but has no CLOSED timestamp.
+        This can happen when:
+        1. org-log-done is nil but state change logging is enabled
+        2. The CLOSED timestamp was manually removed
+        3. The item was marked DONE via external means
+        """
+        # Query with include_completed for the test date
+        agenda_response = api.get(f"/agenda?date={TEST_DATE}&include_completed=true")
+        assert agenda_response.status_code == 200
+
+        entries = agenda_response.json().get("entries", [])
+
+        # Debug: print all entries
+        entry_info = [(e.get("title"), e.get("todo"), e.get("completedAt"), e.get("scheduled")) for e in entries]
+
+        # The DONE items from state_change_bug.org should NOT appear because:
+        # - They have no CLOSED timestamp (completedAt is null)
+        # - They have no scheduled/deadline for the test date
+        # They may appear in org-agenda due to LOGBOOK state change, but should be
+        # filtered out because completedAt doesn't match the query date.
+        bug_entries = [
+            e for e in entries
+            if "Task with state change log but no CLOSED" in e.get("title", "")
+               or "Task done without any logging" in e.get("title", "")
+        ]
+        assert len(bug_entries) == 0, (
+            f"DONE items without CLOSED timestamp should not appear with include_completed. "
+            f"Found entries: {bug_entries}. All entries: {entry_info}"
+        )
+
+    def test_state_change_only_with_matching_closed_appears(self, api, org_dir):
+        """State change log entries should only appear if completedAt matches query date.
+
+        When org-agenda log mode shows state changes, entries should only pass
+        the filter if they have:
+        1. A scheduled date matching the query date, OR
+        2. A deadline date matching the query date, OR
+        3. A completedAt (CLOSED) date matching the query date
+
+        Entries that appear solely due to state change logs (no CLOSED or
+        CLOSED on different date) should be filtered out.
+        """
+        from pathlib import Path
+
+        # Create an item, complete it (adds CLOSED), then query
+        # First get an active todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        active_todo = next(
+            (t for t in todos["todos"]
+             if t.get("todo") == "TODO"
+             and not t.get("scheduled")  # No scheduled
+             and not t.get("deadline")),  # No deadline
+            None,
+        )
+
+        if active_todo is None:
+            # Create one without scheduled/deadline
+            capture_response = api.capture("todo", {"Title": "Temp task for state change test"})
+            assert capture_response.status_code == 200
+
+            # Re-fetch to get the new todo
+            todos_response = api.get_all_todos()
+            todos = todos_response.json()
+            active_todo = next(
+                (t for t in todos["todos"]
+                 if "Temp task for state change test" in t.get("title", "")),
+                None,
+            )
+            assert active_todo is not None, "Could not create test todo"
+
+        original_title = active_todo["title"]
+
+        # Complete it - this adds CLOSED timestamp for today
+        complete_response = api.complete_todo(active_todo)
+        assert complete_response.status_code == 200
+
+        # Query for TODAY's date with include_completed=true
+        today = get_today_str()
+        agenda_response = api.get(f"/agenda?date={today}&include_completed=true")
+        entries = agenda_response.json().get("entries", [])
+
+        # Find the completed item
+        completed_entry = next(
+            (e for e in entries if original_title in e.get("title", "")),
+            None,
+        )
+
+        # If found, it MUST have completedAt matching today (or scheduled/deadline for today)
+        if completed_entry:
+            completed_at = completed_entry.get("completedAt")
+            scheduled = completed_entry.get("scheduled")
+            deadline = completed_entry.get("deadline")
+
+            # At least one of these should match today for the entry to be valid
+            has_valid_date = (
+                (completed_at and today in completed_at) or
+                (scheduled and today in scheduled) or
+                (deadline and today in deadline)
+            )
+            assert has_valid_date, (
+                f"Entry appeared without matching date. "
+                f"completedAt={completed_at}, scheduled={scheduled}, deadline={deadline}, "
+                f"query_date={today}"
+            )
+
+    def test_entries_without_any_date_not_shown(self, api):
+        """Entries with null scheduled/deadline/completedAt should NOT appear.
+
+        This is the core of the bug: the filter condition
+        (and (null scheduled-date) (null deadline-date)) allows entries
+        through even when they have no completedAt.
+
+        With include_completed=true, ONLY entries with a matching date should appear:
+        - scheduled matching query date
+        - deadline matching query date
+        - completedAt matching query date
+
+        An entry with all three as null should NEVER appear.
+        """
+        # Query with include_completed
+        query_date = TEST_DATE
+        agenda_response = api.get(f"/agenda?date={query_date}&include_completed=true")
+        entries = agenda_response.json().get("entries", [])
+
+        # Check all entries - none should have all nulls
+        for entry in entries:
+            scheduled = entry.get("scheduled")
+            deadline = entry.get("deadline")
+            completed_at = entry.get("completedAt")
+
+            # Extract just the date portion for comparison
+            scheduled_date = scheduled[:10] if scheduled else None
+            deadline_date = deadline[:10] if deadline else None
+            completed_at_date = completed_at[:10] if completed_at else None
+
+            has_matching_date = (
+                scheduled_date == query_date or
+                deadline_date == query_date or
+                completed_at_date == query_date
+            )
+            assert has_matching_date, (
+                f"Entry has no date matching {query_date}: "
+                f"title={entry.get('title')}, "
+                f"scheduled={scheduled}, deadline={deadline}, completedAt={completed_at}"
+            )
 
 
 class TestIncludeCompletedParameter:

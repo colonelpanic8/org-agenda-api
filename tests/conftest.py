@@ -253,6 +253,27 @@ def org_test_dir(tmp_path_factory):
 * TODO Standalone task
 """)
 
+    # Create file for testing include_completed bug
+    # This file contains items that should NOT appear with include_completed:
+    # - DONE items with LOGBOOK state change but no CLOSED timestamp
+    # Bug: the filter passes items with null scheduled/deadline through,
+    # even when they have no completedAt.
+    state_change_bug_org = test_dir / "state_change_bug.org"
+    state_change_bug_org.write_text(f"""\
+#+TITLE: State Change Bug Test
+
+* DONE Task with state change log but no CLOSED
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [{TEST_DATE_ORG} 10:00]
+  :END:
+  This task has a state change log for TEST_DATE but no CLOSED timestamp.
+  With include_completed=true, this should NOT appear because completedAt is null.
+
+* DONE Task done without any logging
+  This is DONE but has no CLOSED, no LOGBOOK, no scheduled, no deadline.
+  It should never appear in any agenda.
+""")
+
     return test_dir
 
 
