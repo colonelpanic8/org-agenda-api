@@ -77,6 +77,20 @@ pytest tests/ -v        # Verbose output
 | `/debug-config` | Returns org configuration for debugging |
 | `/restart` | Graceful restart for process managers |
 
+### Habit Endpoints (requires org-window-habit)
+
+These endpoints are available when `org-window-habit-mode` is enabled:
+
+| Endpoint | Description |
+|----------|-------------|
+| `/habit-config` | Returns org-window-habit configuration (colors, display settings, behavior) |
+| `/habit-status?id=<org-id>&preceding=N&following=N` | Returns detailed habit status with graph data |
+
+Additionally, when org-window-habit is enabled:
+- `/get-all-todos` entries include `isWindowHabit` and `habitSummary` fields
+- `/agenda` entries include `isWindowHabit` and `habitSummary` fields
+- `/complete` response includes `habitSummary` when completing a window-habit
+
 ## Environment Variables
 
 | Variable | Description |
