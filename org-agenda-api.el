@@ -344,6 +344,45 @@ Must be called with point at an org heading."
        (or (org-entry-get nil (org-window-habit-property "ASSESSMENT_INTERVAL") t)
            (org-entry-get nil (org-window-habit-property "WINDOW_SPECS") t))))
 
+(defun org-agenda-api--plist-to-alist (plist)
+  "Convert PLIST to an alist for JSON encoding.
+Converts :key to \"key\" string."
+  (let ((result nil))
+    (while plist
+      (let ((key (substring (symbol-name (car plist)) 1))  ; Remove leading :
+            (value (cadr plist)))
+        (push (cons key value) result))
+      (setq plist (cddr plist)))
+    (nreverse result)))
+
+(defun org-agenda-api--get-habit-summary ()
+  "Get habit summary for the entry at point.
+Returns an alist suitable for JSON encoding, or nil if not a window-habit."
+  (when (org-agenda-api--is-window-habit-p)
+    (condition-case err
+        (let* ((habit (org-window-habit-create-instance-from-heading-at-point))
+               (window-specs (oref habit window-specs))
+               (first-spec (car window-specs))
+               (iterator (org-window-habit-iterator-from-time first-spec))
+               (conforming-ratio (org-window-habit-conforming-ratio iterator))
+               (next-required (org-window-habit-get-next-required-interval habit))
+               (window (oref iterator window))
+               (start-index (oref iterator start-index))
+               (end-index (oref iterator end-index))
+               (completions-in-window (- end-index start-index))
+               (target-reps (oref first-spec target-repetitions))
+               (now (current-time))
+               (completion-needed-today
+                (org-window-habit-time-falls-in-assessment-interval window next-required)))
+          `(("conformingRatio" . ,conforming-ratio)
+            ("completionNeededToday" . ,(if completion-needed-today t :json-false))
+            ("nextRequiredInterval" . ,(format-time-string "%Y-%m-%d" next-required))
+            ("completionsInWindow" . ,completions-in-window)
+            ("targetRepetitions" . ,target-reps)))
+      (error
+       (org-agenda-api--log 'warn "Failed to get habit summary: %s" (error-message-string err))
+       nil))))
+
 ;;; Internal Functions
 
 (defun org-agenda-api--parse-notify-before (value)
