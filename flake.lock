@@ -143,13 +143,30 @@
         "type": "github"
       }
     },
+    "org-window-habit": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1768911516,
+        "narHash": "sha256-FiALLe/qjmiawIBC2/l/oaGR4cGBxVoMOPTcRBWvRsI=",
+        "owner": "colonelpanic8",
+        "repo": "org-window-habit",
+        "rev": "4f28842b361ee4640319aa15303301abf2ee497e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "colonelpanic8",
+        "repo": "org-window-habit",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "emacs-overlay": "emacs-overlay",
         "flake-utils": "flake-utils",
         "git-sync-rs": "git-sync-rs",
         "mova": "mova",
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs_2",
+        "org-window-habit": "org-window-habit"
       }
     },
     "rust-overlay": {
