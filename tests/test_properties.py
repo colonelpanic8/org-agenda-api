@@ -207,3 +207,42 @@ class TestUpdateProperties:
         assert properties["PROP_A"] == "value-a"
         assert properties["PROP_B"] == "value-b"
         assert properties["PROP_C"] == "value-c"
+
+    def test_can_add_property_to_item_without_drawer(self, api):
+        """Should be able to add a property to an item that has no PROPERTIES drawer.
+
+        org-entry-put should create the drawer automatically.
+        """
+        response = api.get_all_todos()
+        todos = response.json()["todos"]
+
+        # Find an item without a properties drawer (Buy groceries has none)
+        simple_item = next(
+            (item for item in todos if "Buy groceries" in item.get("title", "")),
+            None,
+        )
+        assert simple_item is not None, "Should find 'Buy groceries' item"
+
+        # Verify it has minimal/no custom properties initially
+        initial_props = simple_item.get("properties", {})
+        assert "TEST_NEW_PROP" not in initial_props
+
+        # Add a property - this should create the PROPERTIES drawer
+        update_response = api.update_todo(simple_item, {
+            "properties": {"TEST_NEW_PROP": "created-drawer"}
+        })
+        assert update_response.status_code == 200
+        result = update_response.json()
+        assert result.get("status") == "updated"
+
+        # Verify the property was set and drawer was created
+        response = api.get_all_todos()
+        todos = response.json()["todos"]
+        updated_item = next(
+            (item for item in todos if "Buy groceries" in item.get("title", "")),
+            None,
+        )
+        assert updated_item is not None
+        properties = updated_item.get("properties", {})
+        assert "TEST_NEW_PROP" in properties
+        assert properties["TEST_NEW_PROP"] == "created-drawer"
