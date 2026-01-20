@@ -20,9 +20,13 @@
       url = "github:colonelpanic8/org-window-habit";
       flake = false;
     };
+    org-project-capture = {
+      url = "github:colonelpanic8/org-project-capture";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova, org-window-habit }:
+  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova, org-window-habit, org-project-capture }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -46,11 +50,30 @@
           buildInputs = [ pkgs.emacs-nox.pkgs.org ];
         };
 
+        # org-category-capture package (part of org-project-capture repo)
+        # Skip byte-compilation to avoid dependency issues, just install the .el file
+        orgCategoryCapturePkg = pkgs.runCommand "emacs-org-category-capture" {} ''
+          mkdir -p $out/share/emacs/site-lisp
+          cp ${org-project-capture}/org-category-capture.el $out/share/emacs/site-lisp/
+        '';
+
+        # org-project-capture package built from flake input
+        # Skip byte-compilation to avoid dependency issues, just install the .el files
+        orgProjectCapturePkg = pkgs.runCommand "emacs-org-project-capture" {} ''
+          mkdir -p $out/share/emacs/site-lisp
+          cp ${org-project-capture}/org-project-capture.el $out/share/emacs/site-lisp/
+          cp ${org-project-capture}/org-project-capture-backend.el $out/share/emacs/site-lisp/
+        '';
+
         # Emacs with required packages (base packages from nix)
         emacsWithPackages = pkgs.emacs-nox.pkgs.withPackages (epkgs: [
           epkgs.simple-httpd
           epkgs.org
+          epkgs.dash
+          epkgs.s
           orgWindowHabitPkg
+          orgCategoryCapturePkg
+          orgProjectCapturePkg
         ]);
 
         # Python with test dependencies
