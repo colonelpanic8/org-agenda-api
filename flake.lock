@@ -82,11 +82,11 @@
     "mova": {
       "flake": false,
       "locked": {
-        "lastModified": 1768866645,
-        "narHash": "sha256-XVTnYL9bHIUzn+hzvU/EaUMW6r/btsyfRvEyIoMlcCA=",
+        "lastModified": 1768889073,
+        "narHash": "sha256-12IMM2BGvZbz9gJmT2gZ1dBcRXlva7IFPtpIn2vKWyU=",
         "ref": "refs/heads/master",
-        "rev": "5dcd0169ccd61cd18113fc121460bfab58d3140f",
-        "revCount": 175,
+        "rev": "9dc23dba87e861dcb25b678632a4c3a06ef74a76",
+        "revCount": 180,
         "type": "git",
         "url": "ssh://git@github.com/colonelpanic8/mova"
       },
