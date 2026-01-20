@@ -12,6 +12,7 @@ Integrate org-window-habit with org-agenda-api to expose habit status, graph dat
 1. **Habit status endpoint** - Query current status of window-habits (conforming ratio, next due date, completion history)
 2. **Habit graph data** - Expose semantic graph data as JSON for frontend visualization
 3. **Habit completion tracking** - Existing `/complete` endpoint triggers org-window-habit rescheduling
+4. **Habit configuration endpoint** - Expose org-window-habit colors and settings for frontend theming
 
 ## Data Model
 
@@ -42,6 +43,52 @@ Duration/interval plists from Emacs (`:days 7`) become JSON objects (`{"days": 7
 **Detection logic:** An entry is a window-habit if:
 - `org-window-habit-mode` is enabled, AND
 - The entry has the `OWH_ASSESSMENT_INTERVAL` property OR `OWH_WINDOW_SPECS` property
+
+## New Endpoint: `/habit-config`
+
+Returns global org-window-habit configuration including colors and display settings.
+
+### Request
+
+```
+GET /habit-config
+```
+
+### Response
+
+```json
+{
+  "status": "ok",
+  "enabled": true,
+  "colors": {
+    "conforming": "#4d7085",
+    "notConforming": "#d40d0d",
+    "requiredCompletionForeground": "#000000",
+    "nonRequiredCompletionForeground": "#FFFFFF",
+    "requiredCompletionTodayForeground": "#00FF00"
+  },
+  "display": {
+    "precedingIntervals": 21,
+    "followingDays": 4,
+    "completionNeededTodayGlyph": "☐",
+    "completedGlyph": "✓"
+  },
+  "behavior": {
+    "repeatToDeadline": true,
+    "repeatToScheduled": false,
+    "nonConformingScale": 1.0
+  }
+}
+```
+
+When `org-window-habit-mode` is not enabled:
+
+```json
+{
+  "status": "ok",
+  "enabled": false
+}
+```
 
 ## New Endpoint: `/habit-status`
 
