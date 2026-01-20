@@ -27,6 +27,22 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova, org-window-habit, org-project-capture }:
+    {
+      # System-independent outputs
+      nixOnDroidModules.default = import ./android.nix;
+      nixOnDroidModules.org-agenda-api = import ./android.nix;
+
+      # Home-manager module (same as nix-on-droid, works for both)
+      homeManagerModules.default = import ./android.nix;
+      homeManagerModules.org-agenda-api = import ./android.nix;
+
+      # Overlay that provides git-sync-rs (for use with the android module)
+      overlays.default = final: prev: {
+        git-sync-rs = git-sync-rs.packages.${prev.system}.default.overrideAttrs (old: {
+          doCheck = false;
+        });
+      };
+    } //
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
