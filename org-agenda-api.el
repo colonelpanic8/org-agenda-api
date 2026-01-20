@@ -190,28 +190,33 @@ seconds, checked after each request completes."
 (defcustom org-agenda-api-category-strategies nil
   "Category strategies registered for API use.
 Each entry can be either:
-  (NAME . STRATEGY) - simple form using default template
-  (NAME :strategy STRATEGY :template TEMPLATE) - with custom capture template
+  (NAME . STRATEGY) - simple form using default template and prompts
+  (NAME :strategy STRATEGY :template TEMPLATE :prompts PROMPTS) - full form
 
 Where:
   NAME     - A string identifying the strategy type
   STRATEGY - An instance of an occ-strategy subclass (from org-category-capture)
   TEMPLATE - Optional capture template string (default: \"* TODO %?\\n\")
+  PROMPTS  - Optional list of prompt definitions for API parameters
+             Each prompt is (NAME :type TYPE :required BOOL)
+             Types: string, date, tags
 
 These strategies expose categories through the API.  When org-category-capture
 or org-project-capture is loaded, you can register strategies like:
 
-  ;; Simple form (uses default template):
+  ;; Simple form (uses default template and prompts):
   (setq org-agenda-api-category-strategies
         \\='((\"projects\" . org-project-capture-strategy)))
 
-  ;; With custom template:
+  ;; With custom template and prompts:
   (setq org-agenda-api-category-strategies
         \\=`((\"projects\" :strategy ,org-project-capture-strategy
-                       :template ,org-project-capture-capture-template)))
+                       :template ,org-project-capture-capture-template
+                       :prompts ((\"Title\" :type string :required t)
+                                 (\"Scheduled\" :type date :required nil)))))
 
 The API will then expose endpoints:
-  GET /category-types - list registered strategy types (includes template info)
+  GET /category-types - list registered strategy types (includes prompts)
   GET /categories?type=NAME - get categories for a strategy
   GET /category-tasks?type=NAME&category=CAT - get tasks in a category
   POST /category-capture - capture a new entry to a category"
@@ -1694,21 +1699,32 @@ Accepts JSON body with:
 
 ;;; Category Strategy Support
 
+(defvar org-agenda-api--default-category-prompts
+  '(("Title" :type string :required t)
+    ("Scheduled" :type date :required nil)
+    ("Deadline" :type date :required nil)
+    ("Priority" :type string :required nil)
+    ("Tags" :type tags :required nil))
+  "Default prompts for category capture when none are specified.")
+
 (defun org-agenda-api--parse-strategy-entry (entry)
   "Parse a strategy ENTRY from `org-agenda-api-category-strategies'.
-Returns a plist with :strategy and :template keys.
+Returns a plist with :strategy, :template, and :prompts keys.
 Handles both simple form (NAME . STRATEGY) and plist form
-\(NAME :strategy STRATEGY :template TEMPLATE)."
+\(NAME :strategy STRATEGY :template TEMPLATE :prompts PROMPTS)."
   (let ((value (cdr entry)))
     (cond
-     ;; Plist form: (NAME :strategy STRATEGY :template TEMPLATE)
+     ;; Plist form: (NAME :strategy STRATEGY :template TEMPLATE :prompts PROMPTS)
      ((and (listp value) (plist-get value :strategy))
       (list :strategy (plist-get value :strategy)
-            :template (or (plist-get value :template) "* TODO %?\n")))
+            :template (or (plist-get value :template) "* TODO %?\n")
+            :prompts (or (plist-get value :prompts)
+                         org-agenda-api--default-category-prompts)))
      ;; Simple form: (NAME . STRATEGY)
      (t
       (list :strategy value
-            :template "* TODO %?\n")))))
+            :template "* TODO %?\n"
+            :prompts org-agenda-api--default-category-prompts)))))
 
 (defun org-agenda-api--get-strategy (type-name)
   "Get the strategy registered under TYPE-NAME.
@@ -1724,6 +1740,14 @@ Returns the template string or default if not specified."
     (if entry
         (plist-get (org-agenda-api--parse-strategy-entry entry) :template)
       "* TODO %?\n")))
+
+(defun org-agenda-api--get-strategy-prompts (type-name)
+  "Get the prompts for strategy TYPE-NAME.
+Returns the prompts list or default prompts if not specified."
+  (let ((entry (assoc type-name org-agenda-api-category-strategies)))
+    (if entry
+        (plist-get (org-agenda-api--parse-strategy-entry entry) :prompts)
+      org-agenda-api--default-category-prompts)))
 
 (defun org-agenda-api--list-category-types ()
   "Return a list of registered category type names."
@@ -1807,12 +1831,22 @@ Returns an array of type objects with name, hasCategories, and captureTemplate."
              (type-info (mapcar
                          (lambda (type)
                            (let ((strategy (org-agenda-api--get-strategy type))
-                                 (template (org-agenda-api--get-strategy-template type)))
+                                 (template (org-agenda-api--get-strategy-template type))
+                                 (prompts (org-agenda-api--get-strategy-prompts type)))
                              `(("name" . ,type)
                                ("hasCategories" . ,(if (and strategy
                                                             (org-agenda-api--get-categories-for-strategy strategy))
                                                        t :json-false))
-                               ("captureTemplate" . ,template))))
+                               ("captureTemplate" . ,template)
+                               ("prompts" . ,(vconcat
+                                              (mapcar
+                                               (lambda (prompt)
+                                                 (let ((name (car prompt))
+                                                       (plist (cdr prompt)))
+                                                   `(("name" . ,name)
+                                                     ("type" . ,(symbol-name (plist-get plist :type)))
+                                                     ("required" . ,(if (plist-get plist :required) t :json-false)))))
+                                               prompts))))))
                          types))
              (response `(("types" . ,(vconcat type-info)))))
         (insert (json-encode response)))
