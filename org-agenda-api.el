@@ -457,7 +457,13 @@ expensive `org-element-at-point' calls."
               (olpath (org-get-outline-path t))  ; include current heading
               (notify-before (org-agenda-api--parse-notify-before
                               (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
-              (all-properties (org-agenda-api--get-all-entry-properties)))
+              (all-properties (org-agenda-api--get-all-entry-properties))
+              ;; Habit detection - only if the window-habit module is loaded
+              (is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
+                                    (org-agenda-api--is-window-habit-p)))
+              (habit-summary (when (and is-window-habit
+                                        (fboundp 'org-agenda-api--get-habit-summary))
+                               (org-agenda-api--get-habit-summary))))
          ;; Return an alist directly for JSON encoding (skip org-element overhead)
          `(("todo" . ,todo)
            ("title" . ,title)
@@ -471,7 +477,10 @@ expensive `org-element-at-point' calls."
            ("olpath" . ,(if olpath (vconcat olpath) nil))
            ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
            ("priority" . ,priority)
-           ("properties" . ,all-properties))))
+           ("properties" . ,all-properties)
+           ("isWindowHabit" . ,(if is-window-habit t :json-false))
+           ,@(when habit-summary
+               `(("habitSummary" . ,habit-summary))))))
      "/!"  ; MATCH: "/!" matches all entries with any TODO keyword
      'file)))
 

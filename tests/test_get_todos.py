@@ -140,3 +140,38 @@ class TestGetTodaysAgenda:
             assert "title" in item
             assert "scheduled" in item
             # todo and tags may be None for some items
+
+
+class TestGetAllTodosHabitFields:
+    """Tests for habit-related fields in /get-all-todos."""
+
+    def test_entries_have_is_window_habit_field(self, api):
+        """Each entry has isWindowHabit field."""
+        response = api.get_all_todos()
+        data = response.json()
+        todos = data.get("todos", [])
+        for todo in todos:
+            assert "isWindowHabit" in todo
+
+    def test_habit_entry_has_habit_summary(self, api):
+        """Habit entries have habitSummary field."""
+        response = api.get_all_todos()
+        data = response.json()
+        todos = data.get("todos", [])
+        habit_todos = [t for t in todos if t.get("isWindowHabit")]
+        assert len(habit_todos) > 0, "Should have at least one habit in test data"
+        for todo in habit_todos:
+            assert "habitSummary" in todo
+            summary = todo["habitSummary"]
+            assert "conformingRatio" in summary
+            assert "completionNeededToday" in summary
+
+    def test_non_habit_entry_has_no_habit_summary(self, api):
+        """Non-habit entries do not have habitSummary field."""
+        response = api.get_all_todos()
+        data = response.json()
+        todos = data.get("todos", [])
+        non_habit_todos = [t for t in todos if not t.get("isWindowHabit")]
+        assert len(non_habit_todos) > 0, "Should have non-habit todos"
+        for todo in non_habit_todos:
+            assert "habitSummary" not in todo
