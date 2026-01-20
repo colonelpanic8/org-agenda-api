@@ -330,6 +330,20 @@ Call this at the end of each servlet."
   (cl-incf org-agenda-api--request-count)
   (org-agenda-api--check-worker-lifecycle))
 
+;;; Window Habit Support
+
+(defun org-agenda-api--window-habit-available-p ()
+  "Return non-nil if org-window-habit is loaded and enabled."
+  (and (featurep 'org-window-habit)
+       (bound-and-true-p org-window-habit-mode)))
+
+(defun org-agenda-api--is-window-habit-p ()
+  "Return non-nil if entry at point is an org-window-habit.
+Must be called with point at an org heading."
+  (and (org-agenda-api--window-habit-available-p)
+       (or (org-entry-get nil (org-window-habit-property "ASSESSMENT_INTERVAL") t)
+           (org-entry-get nil (org-window-habit-property "WINDOW_SPECS") t))))
+
 ;;; Internal Functions
 
 (defun org-agenda-api--parse-notify-before (value)
