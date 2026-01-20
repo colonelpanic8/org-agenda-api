@@ -43,6 +43,19 @@
 ;;   GET /agenda-files - Returns list of org-agenda-files
 ;;   GET /capture-templates - Returns available capture templates
 ;;   POST /capture - Create a new entry using a capture template
+;;
+;; Category Strategy Endpoints (requires org-category-capture):
+;;   GET /category-types - Returns list of registered category strategy types
+;;   GET /categories - Returns categories for a strategy type
+;;       ?type=NAME - Required: the strategy type name
+;;       ?existing_only=true - Only return categories with capture locations
+;;   GET /category-tasks - Returns tasks for a category
+;;       ?type=NAME - Required: the strategy type name
+;;       ?category=CAT - Required: the category name
+;;
+;; To register category strategies for the API:
+;;   (setq org-agenda-api-category-strategies
+;;         '(("projects" . my-project-capture-strategy)))
 
 ;;; Code:
 
@@ -170,6 +183,25 @@ Set to nil to disable. When set, worker will exit after this many
 seconds, checked after each request completes."
   :type '(choice (const :tag "Disabled" nil)
                  (integer :tag "Max seconds"))
+  :group 'org-agenda-api)
+
+(defcustom org-agenda-api-category-strategies nil
+  "Category strategies registered for API use.
+Each entry is a cons (NAME . STRATEGY) where:
+  NAME     - A string identifying the strategy type
+  STRATEGY - An instance of an occ-strategy subclass (from org-category-capture)
+
+These strategies expose categories through the API.  When org-category-capture
+or org-project-capture is loaded, you can register strategies like:
+
+  (setq org-agenda-api-category-strategies
+        \\='((\"projects\" . org-project-capture-strategy)))
+
+The API will then expose endpoints:
+  GET /category-types - list registered strategy types
+  GET /categories?type=NAME - get categories for a strategy
+  GET /category-tasks?type=NAME&category=CAT - get tasks in a category"
+  :type '(alist :key-type string :value-type sexp)
   :group 'org-agenda-api)
 
 ;;; Worker Lifecycle
@@ -1618,6 +1650,168 @@ Accepts JSON body with:
                                  ("message" . "Todo not found"))))))
     (error
      (org-agenda-api--log-error-with-backtrace "/complete" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
+;;; Category Strategy Support
+
+(defun org-agenda-api--get-strategy (type-name)
+  "Get the strategy registered under TYPE-NAME.
+Returns the strategy object or nil if not found."
+  (cdr (assoc type-name org-agenda-api-category-strategies)))
+
+(defun org-agenda-api--list-category-types ()
+  "Return a list of registered category type names."
+  (mapcar #'car org-agenda-api-category-strategies))
+
+(defun org-agenda-api--get-categories-for-strategy (strategy)
+  "Get all categories from STRATEGY.
+Returns a list of category strings."
+  (when (and strategy (fboundp 'occ-get-categories))
+    (occ-get-categories strategy)))
+
+(defun org-agenda-api--get-existing-categories-for-strategy (strategy)
+  "Get existing categories from STRATEGY (those with capture locations).
+Returns a list of category strings."
+  (when (and strategy (fboundp 'occ-get-existing-categories))
+    (occ-get-existing-categories strategy)))
+
+(defun org-agenda-api--get-todo-files-for-strategy (strategy)
+  "Get TODO files associated with STRATEGY.
+Returns a list of file paths."
+  (when (and strategy (fboundp 'occ-get-todo-files))
+    (occ-get-todo-files strategy)))
+
+(defun org-agenda-api--get-tasks-for-category (strategy category)
+  "Get all TODO items under CATEGORY using STRATEGY.
+Uses occ-map-entries-for-category to traverse entries."
+  (when (and strategy category (fboundp 'occ-get-todo-files))
+    (let ((todo-files (occ-get-todo-files strategy))
+          (tasks nil))
+      (dolist (file todo-files)
+        (when (file-exists-p file)
+          (with-current-buffer (find-file-noselect file)
+            ;; Map over entries for this category
+            (when (fboundp 'occ-map-entries-for-category)
+              (let ((category-tasks
+                     (condition-case nil
+                         (occ-map-entries-for-category
+                          category
+                          (lambda ()
+                            (let* ((todo (org-get-todo-state))
+                                   (title (org-get-heading t t t t))
+                                   (tags (org-get-tags))
+                                   (level (org-current-level))
+                                   (planning (org-agenda-api--get-planning-info))
+                                   (scheduled-time (alist-get 'scheduled-time planning))
+                                   (scheduled-has-time (alist-get 'scheduled-has-time planning))
+                                   (deadline-time (alist-get 'deadline-time planning))
+                                   (deadline-has-time (alist-get 'deadline-has-time planning))
+                                   (pos (point))
+                                   (org-id (org-entry-get (point) "ID"))
+                                   (olpath (org-get-outline-path t))
+                                   (priority (org-entry-get (point) "PRIORITY"))
+                                   (all-properties (org-agenda-api--get-all-entry-properties)))
+                              `(("todo" . ,todo)
+                                ("title" . ,title)
+                                ("tags" . ,(if tags (vconcat tags) nil))
+                                ("level" . ,level)
+                                ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+                                ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
+                                ("file" . ,file)
+                                ("pos" . ,pos)
+                                ("id" . ,org-id)
+                                ("category" . ,category)
+                                ("olpath" . ,(if olpath (vconcat olpath) nil))
+                                ("priority" . ,priority)
+                                ("properties" . ,all-properties))))
+                          :get-category-from-element
+                          (if (fboundp 'org-project-capture-get-category-from-heading)
+                              'org-project-capture-get-category-from-heading
+                            'org-get-heading))
+                       (error nil))))
+                (when category-tasks
+                  (setq tasks (nconc tasks category-tasks))))))))
+      tasks)))
+
+(defservlet category-types application/json ()
+  "Endpoint: Return list of registered category strategy types.
+Returns an array of type names that can be used with /categories endpoint."
+  (condition-case err
+      (let* ((types (org-agenda-api--list-category-types))
+             (type-info (mapcar
+                         (lambda (type)
+                           (let ((strategy (org-agenda-api--get-strategy type)))
+                             `(("name" . ,type)
+                               ("hasCategories" . ,(if (and strategy
+                                                            (org-agenda-api--get-categories-for-strategy strategy))
+                                                       t :json-false)))))
+                         types))
+             (response `(("types" . ,(vconcat type-info)))))
+        (insert (json-encode response)))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/category-types" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
+(defservlet categories application/json (_path query)
+  "Endpoint: Return categories for a given strategy type.
+Accepts query params:
+  - 'type' (required): The category strategy type name
+  - 'existing_only' (optional): If 'true', only return categories with capture locations"
+  (condition-case err
+      (let* ((type-name (cadr (assoc "type" query)))
+             (existing-only (member (cadr (assoc "existing_only" query)) '("true" "1"))))
+        (if (or (null type-name) (string= type-name ""))
+            (insert (json-encode `(("status" . "error")
+                                   ("message" . "Missing required 'type' parameter"))))
+          (let ((strategy (org-agenda-api--get-strategy type-name)))
+            (if (null strategy)
+                (insert (json-encode `(("status" . "error")
+                                       ("message" . ,(format "Unknown strategy type: %s" type-name)))))
+              (let* ((categories (if existing-only
+                                     (org-agenda-api--get-existing-categories-for-strategy strategy)
+                                   (org-agenda-api--get-categories-for-strategy strategy)))
+                     (todo-files (org-agenda-api--get-todo-files-for-strategy strategy))
+                     (response `(("type" . ,type-name)
+                                 ("categories" . ,(vconcat categories))
+                                 ("todoFiles" . ,(vconcat todo-files)))))
+                (insert (json-encode response)))))))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/categories" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
+(defservlet category-tasks application/json (_path query)
+  "Endpoint: Return tasks for a specific category and strategy type.
+Accepts query params:
+  - 'type' (required): The category strategy type name
+  - 'category' (required): The category name"
+  (condition-case err
+      (let* ((type-name (cadr (assoc "type" query)))
+             (category (cadr (assoc "category" query))))
+        (cond
+         ((or (null type-name) (string= type-name ""))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required 'type' parameter")))))
+         ((or (null category) (string= category ""))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required 'category' parameter")))))
+         (t
+          (let ((strategy (org-agenda-api--get-strategy type-name)))
+            (if (null strategy)
+                (insert (json-encode `(("status" . "error")
+                                       ("message" . ,(format "Unknown strategy type: %s" type-name)))))
+              (let* ((tasks (org-agenda-api--get-tasks-for-category strategy category))
+                     (response `(("type" . ,type-name)
+                                 ("category" . ,category)
+                                 ("tasks" . ,(vconcat tasks)))))
+                (insert (json-encode response))))))))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/category-tasks" err)
      (insert (json-encode `(("status" . "error")
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))
