@@ -186,20 +186,22 @@ class TestContainerAPI:
         response = requests.get(f"{running_container['url']}/get-all-todos")
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
+        assert isinstance(data, dict)
+        assert "todos" in data
         # Should have the initial task from fixture
-        titles = [item.get("title", "") for item in data]
+        todos = data.get("todos", [])
+        titles = [item.get("title", "") for item in todos]
         assert any("Initial task" in t for t in titles)
 
-    def test_create_todo(self, running_container):
-        """POST /capture should work in container to create todos."""
+    def test_capture(self, running_container):
+        """POST /capture should work in container."""
         response = requests.post(
             f"{running_container['url']}/capture",
             json={"template": "todo", "values": {"Title": "Container test todo"}}
         )
         assert response.status_code == 200
         data = response.json()
-        assert data.get("status") == "captured"
+        assert data.get("status") == "created"
 
     def test_templates_endpoint(self, running_container):
         """GET /capture-templates should return empty or configured templates."""

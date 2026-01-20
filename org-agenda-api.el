@@ -1746,6 +1746,90 @@ Accepts JSON body with:
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))
 
+(defun org-agenda-api--delete-item (id file position include-children)
+  "Delete an org item identified by ID or FILE+POSITION.
+If INCLUDE-CHILDREN is nil and item has children, return error.
+Returns alist with deletion result."
+  ;; Locate the item
+  (let* ((location (cond
+                    (id (org-id-find id))
+                    ((and file position) (cons file position))
+                    (t (error "Must provide either 'id' or 'file' and 'position'"))))
+         (target-file (car location))
+         (target-pos (cdr location)))
+
+    (unless location
+      (error "Item not found"))
+
+    (unless (file-exists-p target-file)
+      (error "File not found: %s" target-file))
+
+    ;; Verify file is in agenda files (security check)
+    (unless (member target-file (org-agenda-files))
+      (error "File is not an agenda file: %s" target-file))
+
+    ;; Open file and navigate to position
+    (with-current-buffer (find-file-noselect target-file)
+      (widen)
+      (goto-char target-pos)
+
+      ;; Verify we're at a heading
+      (unless (org-at-heading-p)
+        (error "Position is not at a headline"))
+
+      ;; Get title before deletion
+      (let ((title (org-get-heading t t t t))
+            (children-count 0))
+
+        ;; Count direct children
+        (save-excursion
+          (when (org-goto-first-child)
+            (setq children-count 1)
+            (while (org-get-next-sibling)
+              (setq children-count (1+ children-count)))))
+
+        ;; Check if we need confirmation for children
+        (when (and (> children-count 0) (not include-children))
+          (error "Item has %d children. Set include_children=true to delete subtree."
+                 children-count))
+
+        ;; Delete the subtree
+        (org-cut-subtree)
+        (save-buffer)
+
+        ;; Invalidate cache
+        (org-agenda-api--invalidate-cache)
+
+        ;; Return result
+        (if (> children-count 0)
+            `(("deleted" . t)
+              ("title" . ,title)
+              ("children_deleted" . ,children-count))
+          `(("deleted" . t)
+            ("title" . ,title)))))))
+
+(defservlet delete application/json (_path _query headers)
+  "Endpoint: Delete an org item permanently.
+Accepts JSON body with either:
+  - id: org-id to locate the item
+  - file + position: direct file location
+Optional:
+  - include_children: if true, delete subtree even if item has children"
+  (condition-case err
+      (let* ((content-header (cadr (assoc "Content" headers)))
+             (json-data (json-parse-string content-header))
+             (id (gethash "id" json-data))
+             (file (gethash "file" json-data))
+             (position (gethash "position" json-data))
+             (include-children (eq (gethash "include_children" json-data) t))
+             (result (org-agenda-api--delete-item id file position include-children)))
+        (insert (json-encode result)))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/delete" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
 ;;; Category Strategy Support
 
 (defvar org-agenda-api--default-category-prompts

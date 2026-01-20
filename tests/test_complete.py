@@ -47,17 +47,21 @@ class TestCompleteTodo:
         """Completed todo should have DONE state in subsequent queries."""
         # Create a unique todo to complete
         unique_title = "Complete test todo 98765"
-        api.create_todo(unique_title)
+        create_resp = api.create_todo(unique_title)
+        assert create_resp.status_code == 200, f"create_todo failed: {create_resp.status_code} - {create_resp.text}"
+        create_data = create_resp.json()
+        assert create_data.get("status") == "created", f"capture didn't succeed: {create_data}"
 
         # Find it in the list
         todos_response = api.get_all_todos()
         todos = todos_response.json()
+        all_titles = [t.get("title", "NO TITLE") for t in todos.get("todos", [])]
 
         todo_to_complete = next(
             (t for t in todos["todos"] if unique_title in t.get("title", "")),
             None,
         )
-        assert todo_to_complete is not None, f"Created todo not found: {unique_title}"
+        assert todo_to_complete is not None, f"Created todo not found: {unique_title}. All todos: {all_titles}"
 
         # Complete it
         complete_response = api.complete_todo(todo_to_complete)

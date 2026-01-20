@@ -119,11 +119,38 @@ Searches for .org files in:
               (message "Auto-set inbox file to: %s" inbox-candidate))))
       (message "Warning: No org files found in /data"))))
 
+;; === Default Capture Templates ===
+;; Set up default capture templates if not already configured
+(unless org-agenda-api-capture-templates
+  (setq org-agenda-api-capture-templates
+        `(("todo"
+           :name "Todo"
+           :template ("t" "Todo" entry (file ,org-agenda-api-inbox-file)
+                      "* TODO %^{Title}\n"
+                      :immediate-finish t)
+           :prompts (("Title" :type string :required t)))
+          ("scheduled-todo"
+           :name "Scheduled Todo"
+           :template ("s" "Scheduled" entry (file ,org-agenda-api-inbox-file)
+                      "* TODO %^{Title}\nSCHEDULED: %^{When}t\n"
+                      :immediate-finish t)
+           :prompts (("Title" :type string :required t)
+                     ("When" :type date :required t)))
+          ("deadline-todo"
+           :name "Deadline Todo"
+           :template ("d" "Deadline" entry (file ,org-agenda-api-inbox-file)
+                      "* TODO %^{Title}\nDEADLINE: %^{When}t\n"
+                      :immediate-finish t)
+           :prompts (("Title" :type string :required t)
+                     ("When" :type date :required t)))))
+  (message "Configured %d default capture templates" (length org-agenda-api-capture-templates)))
+
 ;; Log configuration summary
 (message "org-agenda-api configuration:")
 (message "  org-agenda-files: %s" org-agenda-files)
 (message "  inbox-file: %s" org-agenda-api-inbox-file)
 (message "  port: %d" org-agenda-api-port)
+(message "  capture-templates: %s" (mapcar #'car org-agenda-api-capture-templates))
 
 ;; Start the API server
 (message "Starting org-agenda-api server...")

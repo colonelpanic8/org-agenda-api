@@ -122,7 +122,7 @@ class APIClient:
         return self.get(f"/agenda{params}")
 
     def create_todo(self, title: str) -> requests.Response:
-        """Create a todo using the capture endpoint with 'todo' template."""
+        """Create a todo using capture with the 'todo' template."""
         return self.capture("todo", {"Title": title})
 
     def get_templates(self) -> requests.Response:
@@ -152,6 +152,18 @@ class APIClient:
             "title": todo.get("title"),
             **updates,
         })
+
+    def delete_todo(self, todo: dict, include_children: bool = False) -> requests.Response:
+        """POST /delete"""
+        payload = {
+            "file": todo.get("file"),
+            "position": todo.get("pos"),
+        }
+        if todo.get("id"):
+            payload["id"] = todo["id"]
+        if include_children:
+            payload["include_children"] = True
+        return self.post("/delete", json=payload)
 
     def get_custom_views(self) -> requests.Response:
         """GET /custom-views"""
@@ -217,6 +229,19 @@ def org_test_dir(tmp_path_factory):
 
 * Project Beta
 ** TODO Existing task in Beta
+""")
+
+    # Create file with parent/child structure for delete tests
+    hierarchy_org = test_dir / "hierarchy.org"
+    hierarchy_org.write_text("""\
+#+TITLE: Hierarchy Test
+
+* TODO Parent task
+** TODO Child task 1
+** TODO Child task 2
+** TODO Child task 3
+
+* TODO Standalone task
 """)
 
     return test_dir
