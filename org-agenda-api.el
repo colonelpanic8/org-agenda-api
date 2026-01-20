@@ -1,10 +1,10 @@
 ;;; org-agenda-api.el --- JSON HTTP API for org-agenda -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2024 Ivan Malison
+;; Copyright (C) 2026 Ivan Malison
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 2.0.0
+;; Version: 2.0.1
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
