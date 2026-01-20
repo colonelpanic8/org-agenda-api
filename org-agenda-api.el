@@ -1502,10 +1502,18 @@ Returns alist with status and details."
               (run-hooks 'post-command-hook)
               (save-buffer)
               (org-agenda-api--invalidate-cache)
-              `(("status" . "completed")
-                ("title" . ,title)
-                ("oldState" . ,old-state)
-                ("newState" . ,new-state)))
+              ;; Check if this is a window-habit and get summary if so
+              (let* ((is-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
+                                    (org-agenda-api--is-window-habit-p)))
+                     (habit-summary (when (and is-habit
+                                               (fboundp 'org-agenda-api--get-habit-summary))
+                                      (org-agenda-api--get-habit-summary))))
+                `(("status" . "completed")
+                  ("title" . ,title)
+                  ("oldState" . ,old-state)
+                  ("newState" . ,new-state)
+                  ,@(when habit-summary
+                      `(("habitSummary" . ,habit-summary))))))
           `(("status" . "error")
             ("message" . "No heading found at position")))))))
 

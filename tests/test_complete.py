@@ -182,3 +182,29 @@ class TestCompleteTodo:
             f"Expected LOGBOOK entry with state change not found in file.\n"
             f"File content:\n{content}"
         )
+
+
+class TestCompleteHabitResponse:
+    """Tests for habit-related fields in /complete response."""
+
+    def test_completing_habit_returns_habit_summary(self, api):
+        """Completing a window-habit returns habitSummary in response."""
+        import pytest
+
+        # First get a habit todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json().get("todos", [])
+        habit_todos = [t for t in todos if t.get("isWindowHabit") and t.get("todo") == "TODO"]
+
+        if not habit_todos:
+            pytest.skip("No uncompleted habits in test data")
+
+        habit = habit_todos[0]
+        response = api.complete_todo(habit)
+        data = response.json()
+
+        assert data.get("status") == "completed"
+        assert "habitSummary" in data
+        summary = data["habitSummary"]
+        assert "conformingRatio" in summary
+        assert "nextRequiredInterval" in summary
