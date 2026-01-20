@@ -12,8 +12,10 @@ Skip with: pytest tests/ --ignore=tests/test_container_integration.py
 
 import os
 import shutil
+import socket
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,30 @@ pytestmark = pytest.mark.skipif(
 )
 
 PROJECT_ROOT = Path(__file__).parent.parent
+CONTAINER_NAME_PREFIX = "org-api-test"
+
+
+def find_free_port() -> int:
+    """Find a free port to use for testing."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
+def cleanup_stale_containers():
+    """Remove any stale test containers from previous runs."""
+    result = subprocess.run(
+        ["docker", "ps", "-a", "--filter", f"name={CONTAINER_NAME_PREFIX}",
+         "--format", "{{.Names}}"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        for container_name in result.stdout.strip().split("\n"):
+            if container_name:
+                subprocess.run(
+                    ["docker", "rm", "-f", container_name],
+                    capture_output=True
+                )
 
 
 def wait_for_server(url: str, timeout: float = 60.0, interval: float = 1.0) -> bool:
@@ -135,8 +161,13 @@ def git_repo(tmp_path):
 @pytest.fixture
 def running_container(container_image, git_repo, tmp_path):
     """Start a container for testing."""
-    container_name = f"org-api-test-{os.getpid()}"
-    port = 18080  # Use a high port to avoid conflicts
+    # Clean up any stale containers from previous runs
+    cleanup_stale_containers()
+
+    # Use unique name with UUID to avoid conflicts
+    container_name = f"{CONTAINER_NAME_PREFIX}-{uuid.uuid4().hex[:8]}"
+    # Use dynamic port to avoid "port already allocated" errors
+    port = find_free_port()
 
     repo_path = git_repo["repo"]
     bare_path = git_repo["bare"]
