@@ -248,17 +248,24 @@
             pythonWithPackages
             pkgs.curl
             pkgs.jq
+            pkgs.ruff
           ];
 
           shellHook = ''
             echo "org-agenda-api dev shell"
             echo "  emacs: $(emacs --version | head -1)"
             echo "  python: $(python --version)"
+            echo "  ruff: $(ruff --version)"
             echo ""
             echo "Commands:"
             echo "  pytest tests/          # Run integration tests"
             echo "  pytest tests/ -v       # Verbose output"
             echo "  pytest tests/ -x       # Stop on first failure"
+            echo ""
+            echo "Linting:"
+            echo "  ruff check tests/      # Lint Python test files"
+            echo "  ruff format --check tests/  # Check Python formatting"
+            echo "  emacs --batch -f batch-byte-compile org-agenda-api.el  # Byte-compile elisp"
             echo ""
             echo "Container (minimal):"
             echo "  nix build .#container  # Build container image"
