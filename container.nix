@@ -87,7 +87,7 @@ let
 
         # API endpoints - proxy to emacs with auth
         # Support both /endpoint and /api/endpoint paths for backwards compatibility
-        location ~ ^/(api/)?(agenda|agenda-files|get-all-todos|complete|update|todo-states|capture-templates|capture|custom-views|custom-view|debug-config|filter-options|restart)$ {
+        location ~ ^/(api/)?(agenda|agenda-files|get-all-todos|complete|update|todo-states|capture-templates|capture|custom-views|custom-view|debug-config|filter-options|metadata|restart)$ {
           include /tmp/nginx-auth.conf;
 
           # Clear WWW-Authenticate header to prevent browser's native auth popup
