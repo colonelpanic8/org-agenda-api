@@ -806,3 +806,25 @@ class TestAgendaDeduplication:
                 for d in duplicates
             )
         )
+
+
+class TestAgendaHabitFields:
+    """Tests for habit-related fields in /agenda."""
+
+    def test_entries_have_is_window_habit_field(self, api):
+        """Each entry has isWindowHabit field."""
+        response = api.get_agenda()
+        data = response.json()
+        entries = data.get("entries", [])
+        for entry in entries:
+            assert "isWindowHabit" in entry
+
+    def test_habit_entry_has_habit_summary(self, api):
+        """Habit entries have habitSummary field."""
+        response = api.get_agenda()
+        data = response.json()
+        entries = data.get("entries", [])
+        habit_entries = [e for e in entries if e.get("isWindowHabit")]
+        # May or may not have habits scheduled for today
+        for entry in habit_entries:
+            assert "habitSummary" in entry

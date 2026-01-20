@@ -16,9 +16,13 @@
       url = "git+ssh://git@github.com/colonelpanic8/mova";
       flake = false;
     };
+    org-window-habit = {
+      url = "github:colonelpanic8/org-window-habit";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova }:
+  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova, org-window-habit }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -33,9 +37,20 @@
         # Mova git commit from flake input
         movaGitCommit = mova.rev or "unknown";
 
+        # org-window-habit package built from flake input
+        orgWindowHabitPkg = pkgs.emacs-nox.pkgs.trivialBuild {
+          pname = "org-window-habit";
+          version = "0.1.0";
+          src = org-window-habit;
+          # org-window-habit depends on org
+          buildInputs = [ pkgs.emacs-nox.pkgs.org ];
+        };
+
         # Emacs with required packages (base packages from nix)
         emacsWithPackages = pkgs.emacs-nox.pkgs.withPackages (epkgs: [
           epkgs.simple-httpd
+          epkgs.org
+          orgWindowHabitPkg
         ]);
 
         # Python with test dependencies

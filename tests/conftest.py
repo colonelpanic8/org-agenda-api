@@ -173,6 +173,15 @@ class APIClient:
         """GET /custom-view with key parameter."""
         return self.get(f"/custom-view?key={key}")
 
+    def get_habit_status(self, org_id: str, preceding: int = None, following: int = None) -> requests.Response:
+        """GET /habit-status with id and optional range parameters."""
+        params = f"?id={org_id}"
+        if preceding is not None:
+            params += f"&preceding={preceding}"
+        if following is not None:
+            params += f"&following={following}"
+        return self.get(f"/habit-status{params}")
+
 
 def find_free_port() -> int:
     """Find a free port to use for testing."""
