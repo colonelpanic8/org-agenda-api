@@ -605,7 +605,13 @@ AGENDA-LINE is the raw agenda display text for reference."
                  (category (org-get-category))
                  (all-properties (org-agenda-api--get-all-entry-properties))
                  ;; Extract CLOSED timestamp directly from the org entry
-                 (completed-at (org-agenda-api--get-closed-timestamp)))
+                 (completed-at (org-agenda-api--get-closed-timestamp))
+                 ;; Habit detection - only if the window-habit module is loaded
+                 (is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
+                                       (org-agenda-api--is-window-habit-p)))
+                 (habit-summary (when (and is-window-habit
+                                           (fboundp 'org-agenda-api--get-habit-summary))
+                                  (org-agenda-api--get-habit-summary))))
             `(("todo" . ,todo)
               ("title" . ,title)
               ("tags" . ,(if tags (vconcat tags) nil))
@@ -621,7 +627,10 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("category" . ,category)
               ("agendaLine" . ,(substring-no-properties agenda-line))
               ("properties" . ,all-properties)
-              ("completedAt" . ,completed-at))))))))
+              ("completedAt" . ,completed-at)
+              ("isWindowHabit" . ,(if is-window-habit t :json-false))
+              ,@(when habit-summary
+                  `(("habitSummary" . ,habit-summary))))))))))
 
 (defun org-agenda-api--run-agenda (span &optional start-date include-overdue include-completed)
   "Run org-agenda and return entries as a list of JSON-encodable alists.
