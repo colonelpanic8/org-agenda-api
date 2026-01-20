@@ -153,6 +153,18 @@ class APIClient:
             **updates,
         })
 
+    def delete_todo(self, todo: dict, include_children: bool = False) -> requests.Response:
+        """POST /delete"""
+        payload = {
+            "file": todo.get("file"),
+            "position": todo.get("pos"),
+        }
+        if todo.get("id"):
+            payload["id"] = todo["id"]
+        if include_children:
+            payload["include_children"] = True
+        return self.post("/delete", json=payload)
+
     def get_custom_views(self) -> requests.Response:
         """GET /custom-views"""
         return self.get("/custom-views")
