@@ -22,3 +22,12 @@
 * NEXT Update documentation
 
 * STARTED Working on tests :work:
+
+* TODO Task with custom properties :custom:
+  :PROPERTIES:
+  :CUSTOM_FIELD: my-custom-value
+  :EFFORT: 2:00
+  :ENERGY: high
+  :CONTEXT: @computer
+  :CATEGORY: testing
+  :END:

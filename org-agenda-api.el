@@ -4,7 +4,7 @@
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 0.6.0
+;; Version: 0.7.0
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
@@ -292,8 +292,9 @@ VALUE can be space or comma separated minutes, e.g., \"10 30 60\" or \"10,30,60\
                         parts)))))
 
 (defun org-agenda-api--get-planning-info ()
-  "Get scheduled and deadline info at point, including whether they have times.
-Returns alist with scheduled-time, scheduled-has-time, deadline-time, deadline-has-time."
+  "Get scheduled and deadline info at point.
+Return alist with scheduled-time, scheduled-has-time,
+deadline-time, deadline-has-time."
   (save-excursion
     (let ((scheduled-time (org-get-scheduled-time (point)))
           (deadline-time (org-get-deadline-time (point)))
@@ -301,20 +302,19 @@ Returns alist with scheduled-time, scheduled-has-time, deadline-time, deadline-h
           (deadline-has-time nil))
       ;; Check the planning line for time components
       (when (or scheduled-time deadline-time)
-        (let ((end (save-excursion (outline-next-heading) (point))))
-          (forward-line 1)
-          (when (looking-at org-planning-line-re)
-            (let ((line (buffer-substring-no-properties (point) (line-end-position))))
-              ;; Check SCHEDULED timestamp for time
-              (when (and scheduled-time
-                         (string-match "SCHEDULED: <[^>]+>" line))
-                (let ((ts (match-string 0 line)))
-                  (setq scheduled-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))))
-              ;; Check DEADLINE timestamp for time
-              (when (and deadline-time
-                         (string-match "DEADLINE: <[^>]+>" line))
-                (let ((ts (match-string 0 line)))
-                  (setq deadline-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))))))))
+        (forward-line 1)
+        (when (looking-at org-planning-line-re)
+          (let ((line (buffer-substring-no-properties (point) (line-end-position))))
+            ;; Check SCHEDULED timestamp for time
+            (when (and scheduled-time
+                       (string-match "SCHEDULED: <[^>]+>" line))
+              (let ((ts (match-string 0 line)))
+                (setq scheduled-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))))
+            ;; Check DEADLINE timestamp for time
+            (when (and deadline-time
+                       (string-match "DEADLINE: <[^>]+>" line))
+              (let ((ts (match-string 0 line)))
+                (setq deadline-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts)))))))
       `((scheduled-time . ,scheduled-time)
         (scheduled-has-time . ,scheduled-has-time)
         (deadline-time . ,deadline-time)
@@ -337,6 +337,18 @@ TIMESTAMP may be in formats like:
 Returns nil if TIMESTAMP is nil."
   (when timestamp
     (substring timestamp 0 (min 10 (length timestamp)))))
+
+(defun org-agenda-api--get-all-entry-properties ()
+  "Get all properties for the entry at point as an alist.
+Returns an alist of (KEY . VALUE) pairs for all properties in the drawer."
+  (let ((props (org-entry-properties nil 'standard))
+        (result nil))
+    (dolist (prop props)
+      (let ((key (car prop))
+            (value (cdr prop)))
+        ;; Include all properties - caller can filter if needed
+        (push (cons key value) result)))
+    (nreverse result)))
 
 (defun org-agenda-api--get-todo-elements-from-filepath (filepath)
   "Extract all TODO headline elements from FILEPATH.
@@ -364,7 +376,8 @@ expensive `org-element-at-point' calls."
               (org-id (org-entry-get (point) "ID"))
               (olpath (org-get-outline-path t))  ; include current heading
               (notify-before (org-agenda-api--parse-notify-before
-                              (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE"))))
+                              (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
+              (all-properties (org-agenda-api--get-all-entry-properties)))
          ;; Return an alist directly for JSON encoding (skip org-element overhead)
          `(("todo" . ,todo)
            ("title" . ,title)
@@ -377,7 +390,8 @@ expensive `org-element-at-point' calls."
            ("id" . ,org-id)
            ("olpath" . ,(if olpath (vconcat olpath) nil))
            ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
-           ("priority" . ,priority))))
+           ("priority" . ,priority)
+           ("properties" . ,all-properties))))
      "/!"  ; MATCH: "/!" matches all entries with any TODO keyword
      'file)))
 
@@ -482,7 +496,8 @@ AGENDA-LINE is the raw agenda display text for reference."
                  (priority (org-entry-get (point) "PRIORITY"))
                  (notify-before (org-agenda-api--parse-notify-before
                                  (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
-                 (category (org-get-category)))
+                 (category (org-get-category))
+                 (all-properties (org-agenda-api--get-all-entry-properties)))
             `(("todo" . ,todo)
               ("title" . ,title)
               ("tags" . ,(if tags (vconcat tags) nil))
@@ -496,7 +511,8 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("priority" . ,priority)
               ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
               ("category" . ,category)
-              ("agendaLine" . ,(substring-no-properties agenda-line)))))))))
+              ("agendaLine" . ,(substring-no-properties agenda-line))
+              ("properties" . ,all-properties))))))))
 
 (defun org-agenda-api--run-agenda (span &optional start-date include-overdue)
   "Run org-agenda and return entries as a list of JSON-encodable alists.
@@ -610,7 +626,7 @@ INCLUDE-OVERDUE when non-nil includes overdue items from previous days."
 
 (defun org-agenda-api--list-custom-views ()
   "Return a list of available custom agenda views.
-Each view is an alist with 'key' and 'name' entries."
+Each view is an alist with \"key\" and \"name\" entries."
   (let ((views nil))
     (dolist (cmd org-agenda-custom-commands)
       (let ((key (car cmd))
@@ -727,7 +743,8 @@ returns the built-in default template."
 
 (defun org-agenda-api--get-all-templates-json ()
   "Get all registered templates as a JSON-encodable alist.
-Includes the built-in default template if no user template with key \"default\" exists."
+Include the built-in default template if no user template with
+key \"default\" exists."
   (let ((user-templates (mapcar #'org-agenda-api--template-to-json
                                 org-agenda-api-capture-templates)))
     ;; Add default template if not already defined by user
@@ -1079,8 +1096,8 @@ which is set at build time by the Nix flake."
 
 (defun org-agenda-api--get-todo-states ()
   "Get all configured TODO states from `org-todo-keywords'.
-Returns an alist with 'active' (not-done) and 'done' states.
-Handles both list and vector formats in org-todo-keywords."
+Return alist with \"active\" (not-done) and \"done\" states.
+Handles both list and vector formats in `org-todo-keywords'."
   (let ((active-states nil)
         (done-states nil))
     (dolist (keyword-set org-todo-keywords)
@@ -1371,7 +1388,7 @@ If HAS-TIME is non-nil, include the time component."
 
 (defun org-agenda-api--update-todo-at (file pos updates)
   "Update the TODO at FILE and POS with UPDATES alist.
-UPDATES can contain: scheduled, deadline, priority, tags.
+UPDATES can contain: scheduled, deadline, priority, tags, properties.
 Returns alist with status, details, and new position."
   (with-current-buffer (find-file-noselect file)
     (save-excursion
@@ -1437,6 +1454,28 @@ Returns alist with status, details, and new position."
                                     tags-value)))
                     (org-set-tags tag-list)
                     (push `("tags" . ,(vconcat tag-list)) applied-updates)))))
+            ;; Handle arbitrary properties
+            (when (assoc "properties" updates)
+              (let ((properties-value (cdr (assoc "properties" updates)))
+                    (applied-props nil))
+                ;; properties-value should be an alist of (KEY . VALUE) pairs
+                (when (and properties-value
+                           (not (eq properties-value :json-null)))
+                  (dolist (prop properties-value)
+                    (let ((prop-name (car prop))
+                          (prop-value (cdr prop)))
+                      ;; Convert property name to uppercase for org-mode convention
+                      (let ((prop-name-upper (upcase prop-name)))
+                        (if (or (null prop-value) (string-empty-p prop-value))
+                            ;; Remove property if value is empty
+                            (progn
+                              (org-entry-delete (point) prop-name-upper)
+                              (push (cons prop-name-upper nil) applied-props))
+                          ;; Set property
+                          (org-entry-put (point) prop-name-upper prop-value)
+                          (push (cons prop-name-upper prop-value) applied-props)))))
+                  (when applied-props
+                    (push `("properties" . ,applied-props) applied-updates)))))
             ;; Run post-command-hook to trigger any deferred logging (e.g., reschedule/redeadline)
             (run-hooks 'post-command-hook)
             (save-buffer)
@@ -1453,7 +1492,7 @@ Returns alist with status, details, and new position."
           ("message" . "No heading found at position"))))))
 
 (defservlet update application/json (_path _query headers)
-  "Endpoint: Update a TODO's scheduled date, deadline, priority, or tags.
+  "Endpoint: Update a TODO's scheduled date, deadline, priority, tags, or properties.
 Accepts JSON body with:
   - id: org-id of the todo (preferred)
   - file: file path (fallback)
@@ -1463,6 +1502,7 @@ Accepts JSON body with:
   - deadline: ISO date/datetime string or null to clear
   - priority: A, B, C, or null to clear
   - tags: array of tag strings to set, or empty array to clear
+  - properties: object of property name/value pairs to set/update
 Returns updated todo with new file and pos for cache update."
   (condition-case err
       (catch 'done
@@ -1476,13 +1516,14 @@ Returns updated todo with new file and pos for cache update."
                (deadline (gethash "deadline" json-data))
                (priority (gethash "priority" json-data))
                (tags (gethash "tags" json-data))
+               (properties (gethash "properties" json-data))
                (location nil)
                (updates nil))
           ;; Log incoming request for debugging
         (message "[/update] Request: id=%s file=%s pos=%s title=%s scheduled=%s deadline=%s priority=%s"
                  id file pos title scheduled deadline priority)
         ;; Check for unrecognized fields
-        (let ((allowed-fields '("id" "file" "pos" "title" "scheduled" "deadline" "priority" "tags"))
+        (let ((allowed-fields '("id" "file" "pos" "title" "scheduled" "deadline" "priority" "tags" "properties"))
               (unrecognized nil))
           (maphash (lambda (key _value)
                      (unless (member key allowed-fields)
@@ -1504,6 +1545,14 @@ Returns updated todo with new file and pos for cache update."
           (push (cons "priority" (if (eq priority :null) nil priority)) updates))
         (unless (eq (gethash "tags" json-data :not-found) :not-found)
           (push (cons "tags" (if (eq tags :null) nil tags)) updates))
+        ;; Handle properties - convert hash-table to alist
+        (unless (eq (gethash "properties" json-data :not-found) :not-found)
+          (let ((props-alist nil))
+            (when (and properties (hash-table-p properties))
+              (maphash (lambda (k v)
+                         (push (cons k (if (eq v :null) nil v)) props-alist))
+                       properties))
+            (push (cons "properties" props-alist) updates)))
         (message "[/update] Updates to apply: %S" updates)
         ;; Try to find by ID first
         (setq location (org-agenda-api--find-todo-by-id id))
