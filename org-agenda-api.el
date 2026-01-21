@@ -355,34 +355,87 @@ VALUE can be space or comma separated minutes, e.g., \"10 30 60\" or \"10,30,60\
                             (when (> n 0) n)))
                         parts)))))
 
+(defun org-agenda-api--timestamp-to-time (ts-element)
+  "Convert org-element timestamp TS-ELEMENT start to Emacs time.
+Returns nil if TS-ELEMENT is nil."
+  (when ts-element
+    (let ((year (org-element-property :year-start ts-element))
+          (month (org-element-property :month-start ts-element))
+          (day (org-element-property :day-start ts-element))
+          (hour (or (org-element-property :hour-start ts-element) 0))
+          (minute (or (org-element-property :minute-start ts-element) 0)))
+      (encode-time 0 minute hour day month year))))
+
+(defun org-agenda-api--timestamp-end-to-time (ts-element)
+  "Convert org-element timestamp TS-ELEMENT end to Emacs time.
+Returns nil if TS-ELEMENT is nil or has no end date."
+  (when (and ts-element (org-element-property :year-end ts-element))
+    (let ((year (org-element-property :year-end ts-element))
+          (month (org-element-property :month-end ts-element))
+          (day (org-element-property :day-end ts-element))
+          (hour (or (org-element-property :hour-end ts-element) 0))
+          (minute (or (org-element-property :minute-end ts-element) 0)))
+      (encode-time 0 minute hour day month year))))
+
 (defun org-agenda-api--get-planning-info ()
   "Get scheduled and deadline info at point.
-Return alist with scheduled-time, scheduled-has-time,
-deadline-time, deadline-has-time."
+Return alist with scheduled-time, scheduled-has-time, scheduled-end-time,
+scheduled-end-has-time, deadline-time, deadline-has-time, deadline-end-time,
+deadline-end-has-time.  Supports ranged timestamps like <2024-06-15>--<2024-06-20>."
   (save-excursion
     (let ((scheduled-time (org-get-scheduled-time (point)))
           (deadline-time (org-get-deadline-time (point)))
           (scheduled-has-time nil)
-          (deadline-has-time nil))
-      ;; Check the planning line for time components
+          (deadline-has-time nil)
+          (scheduled-end-time nil)
+          (scheduled-end-has-time nil)
+          (deadline-end-time nil)
+          (deadline-end-has-time nil))
+      ;; Check the planning line for time components and ranges
       (when (or scheduled-time deadline-time)
         (forward-line 1)
         (when (looking-at org-planning-line-re)
           (let ((line (buffer-substring-no-properties (point) (line-end-position))))
-            ;; Check SCHEDULED timestamp for time
+            ;; Check SCHEDULED timestamp for time and range
             (when (and scheduled-time
-                       (string-match "SCHEDULED: <[^>]+>" line))
+                       (string-match "SCHEDULED: <[^>]+>\\(--<[^>]+>\\)?" line))
               (let ((ts (match-string 0 line)))
-                (setq scheduled-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))))
-            ;; Check DEADLINE timestamp for time
+                (setq scheduled-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))
+                ;; Check for range (--<date>)
+                (when (string-match-p "--<" ts)
+                  ;; Use org-element to parse the timestamp for accurate end date
+                  (save-excursion
+                    (goto-char (+ (point) (string-match "SCHEDULED:" line)))
+                    (when (re-search-forward "<[^>]+>\\(--<[^>]+>\\)?" (line-end-position) t)
+                      (let ((ts-elem (org-element-context)))
+                        (when (eq (org-element-type ts-elem) 'timestamp)
+                          (setq scheduled-end-time (org-agenda-api--timestamp-end-to-time ts-elem))
+                          (setq scheduled-end-has-time
+                                (not (null (org-element-property :hour-end ts-elem)))))))))))
+            ;; Check DEADLINE timestamp for time and range
             (when (and deadline-time
-                       (string-match "DEADLINE: <[^>]+>" line))
+                       (string-match "DEADLINE: <[^>]+>\\(--<[^>]+>\\)?" line))
               (let ((ts (match-string 0 line)))
-                (setq deadline-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts)))))))
+                (setq deadline-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))
+                ;; Check for range (--<date>)
+                (when (string-match-p "--<" ts)
+                  ;; Use org-element to parse the timestamp for accurate end date
+                  (save-excursion
+                    (goto-char (+ (point) (string-match "DEADLINE:" line)))
+                    (when (re-search-forward "<[^>]+>\\(--<[^>]+>\\)?" (line-end-position) t)
+                      (let ((ts-elem (org-element-context)))
+                        (when (eq (org-element-type ts-elem) 'timestamp)
+                          (setq deadline-end-time (org-agenda-api--timestamp-end-to-time ts-elem))
+                          (setq deadline-end-has-time
+                                (not (null (org-element-property :hour-end ts-elem))))))))))))))
       `((scheduled-time . ,scheduled-time)
         (scheduled-has-time . ,scheduled-has-time)
+        (scheduled-end-time . ,scheduled-end-time)
+        (scheduled-end-has-time . ,scheduled-end-has-time)
         (deadline-time . ,deadline-time)
-        (deadline-has-time . ,deadline-has-time)))))
+        (deadline-has-time . ,deadline-has-time)
+        (deadline-end-time . ,deadline-end-time)
+        (deadline-end-has-time . ,deadline-end-has-time)))))
 
 (defun org-agenda-api--format-timestamp (time has-time)
   "Format TIME as ISO string.
@@ -430,6 +483,59 @@ Returns an alist of (KEY . VALUE) pairs for all properties in the drawer."
         (push (cons key value) result)))
     (nreverse result)))
 
+(defun org-agenda-api--format-timestamp-element (ts-elem)
+  "Format org-element timestamp TS-ELEM as an alist for JSON.
+Returns alist with start, end (if range), hasTime, type, and raw fields."
+  (when ts-elem
+    (let* ((ts-type (org-element-property :type ts-elem))
+           (is-range (memq ts-type '(active-range inactive-range)))
+           (has-time-start (not (null (org-element-property :hour-start ts-elem))))
+           (has-time-end (not (null (org-element-property :hour-end ts-elem))))
+           (start-time (org-agenda-api--timestamp-to-time ts-elem))
+           (end-time (when is-range (org-agenda-api--timestamp-end-to-time ts-elem)))
+           (raw (org-element-property :raw-value ts-elem))
+           (type-str (pcase ts-type
+                       ('active "active")
+                       ('active-range "active-range")
+                       ('inactive "inactive")
+                       ('inactive-range "inactive-range")
+                       (_ "unknown"))))
+      `(("start" . ,(org-agenda-api--format-timestamp start-time has-time-start))
+        ("end" . ,(when end-time (org-agenda-api--format-timestamp end-time has-time-end)))
+        ("hasTime" . ,(if has-time-start t :json-false))
+        ("type" . ,type-str)
+        ("raw" . ,raw)))))
+
+(defun org-agenda-api--get-entry-timestamps ()
+  "Get plain timestamps from the current entry body.
+Returns a list of timestamp alists, excluding SCHEDULED/DEADLINE/CLOSED.
+Each alist has: start, end (if range), hasTime, type, raw."
+  (save-excursion
+    (let ((entry-end (save-excursion (org-end-of-subtree t t)))
+          (timestamps nil))
+      ;; Move past the headline
+      (forward-line 1)
+      ;; Skip planning line if present
+      (when (looking-at org-planning-line-re)
+        (forward-line 1))
+      ;; Skip property drawer if present
+      (when (looking-at org-property-drawer-re)
+        (re-search-forward ":END:" entry-end t)
+        (forward-line 1))
+      ;; Now scan the body for timestamps
+      (while (re-search-forward org-ts-regexp entry-end t)
+        (let* ((ts-elem (org-element-context))
+               (ts-type (org-element-type ts-elem)))
+          ;; Only include actual timestamps (not part of SCHEDULED/DEADLINE/CLOSED)
+          (when (eq ts-type 'timestamp)
+            (let ((parent (org-element-property :parent ts-elem)))
+              ;; Exclude if parent is a planning element
+              (unless (and parent (eq (org-element-type parent) 'planning))
+                (let ((formatted (org-agenda-api--format-timestamp-element ts-elem)))
+                  (when formatted
+                    (push formatted timestamps))))))))
+      (nreverse timestamps))))
+
 (defun org-agenda-api--get-todo-elements-from-filepath (filepath)
   "Extract all TODO headline elements from FILEPATH.
 Uses `org-map-entries' for efficient traversal instead of
@@ -450,14 +556,20 @@ expensive `org-element-at-point' calls."
               (planning (org-agenda-api--get-planning-info))
               (scheduled-time (alist-get 'scheduled-time planning))
               (scheduled-has-time (alist-get 'scheduled-has-time planning))
+              (scheduled-end-time (alist-get 'scheduled-end-time planning))
+              (scheduled-end-has-time (alist-get 'scheduled-end-has-time planning))
               (deadline-time (alist-get 'deadline-time planning))
               (deadline-has-time (alist-get 'deadline-has-time planning))
+              (deadline-end-time (alist-get 'deadline-end-time planning))
+              (deadline-end-has-time (alist-get 'deadline-end-has-time planning))
               (pos (point))
               (org-id (org-entry-get (point) "ID"))
               (olpath (org-get-outline-path t))  ; include current heading
               (notify-before (org-agenda-api--parse-notify-before
                               (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
               (all-properties (org-agenda-api--get-all-entry-properties))
+              ;; Get plain timestamps from entry body
+              (timestamps (org-agenda-api--get-entry-timestamps))
               ;; Habit detection - only if the window-habit module is loaded
               (is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
                                     (org-agenda-api--is-window-habit-p)))
@@ -470,7 +582,13 @@ expensive `org-element-at-point' calls."
            ("tags" . ,(if tags (vconcat tags) nil))
            ("level" . ,level)
            ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+           ,@(when scheduled-end-time
+               `(("scheduledEnd" . ,(org-agenda-api--format-timestamp scheduled-end-time scheduled-end-has-time))))
            ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
+           ,@(when deadline-end-time
+               `(("deadlineEnd" . ,(org-agenda-api--format-timestamp deadline-end-time deadline-end-has-time))))
+           ,@(when timestamps
+               `(("timestamps" . ,(vconcat timestamps))))
            ("file" . ,filepath)
            ("pos" . ,pos)
            ("id" . ,org-id)
@@ -593,8 +711,12 @@ AGENDA-LINE is the raw agenda display text for reference."
                  (planning (org-agenda-api--get-planning-info))
                  (scheduled-time (alist-get 'scheduled-time planning))
                  (scheduled-has-time (alist-get 'scheduled-has-time planning))
+                 (scheduled-end-time (alist-get 'scheduled-end-time planning))
+                 (scheduled-end-has-time (alist-get 'scheduled-end-has-time planning))
                  (deadline-time (alist-get 'deadline-time planning))
                  (deadline-has-time (alist-get 'deadline-has-time planning))
+                 (deadline-end-time (alist-get 'deadline-end-time planning))
+                 (deadline-end-has-time (alist-get 'deadline-end-has-time planning))
                  (pos (point))
                  (filepath (buffer-file-name))
                  (org-id (org-entry-get (point) "ID"))
@@ -604,6 +726,8 @@ AGENDA-LINE is the raw agenda display text for reference."
                                  (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
                  (category (org-get-category))
                  (all-properties (org-agenda-api--get-all-entry-properties))
+                 ;; Get plain timestamps from entry body
+                 (timestamps (org-agenda-api--get-entry-timestamps))
                  ;; Extract CLOSED timestamp directly from the org entry
                  (completed-at (org-agenda-api--get-closed-timestamp))
                  ;; Habit detection - only if the window-habit module is loaded
@@ -617,7 +741,13 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("tags" . ,(if tags (vconcat tags) nil))
               ("level" . ,level)
               ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+              ,@(when scheduled-end-time
+                  `(("scheduledEnd" . ,(org-agenda-api--format-timestamp scheduled-end-time scheduled-end-has-time))))
               ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
+              ,@(when deadline-end-time
+                  `(("deadlineEnd" . ,(org-agenda-api--format-timestamp deadline-end-time deadline-end-has-time))))
+              ,@(when timestamps
+                  `(("timestamps" . ,(vconcat timestamps))))
               ("file" . ,filepath)
               ("pos" . ,pos)
               ("id" . ,org-id)
@@ -1854,27 +1984,52 @@ Accepts JSON body with:
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))
 
+(defun org-agenda-api--delete-error (code message &rest format-args)
+  "Signal a delete error with CODE and MESSAGE.
+FORMAT-ARGS are passed to `format' with MESSAGE."
+  (signal 'org-agenda-api-delete-error
+          (list code (apply #'format message format-args))))
+
+(define-error 'org-agenda-api-delete-error "org-agenda-api delete error")
+
 (defun org-agenda-api--delete-item (id file position include-children)
   "Delete an org item identified by ID or FILE+POSITION.
 If INCLUDE-CHILDREN is nil and item has children, return error.
 Returns alist with deletion result."
+  ;; Validate input parameters
+  (unless (or id (and file position))
+    (org-agenda-api--delete-error
+     "MISSING_PARAMS"
+     "Must provide either 'id' or both 'file' and 'pos'. Got: id=%S, file=%S, pos=%S"
+     id file position))
+
   ;; Locate the item
   (let* ((location (cond
-                    (id (org-id-find id))
-                    ((and file position) (cons file position))
-                    (t (error "Must provide either 'id' or 'file' and 'position'"))))
+                    (id
+                     (let ((found (org-id-find id)))
+                       (unless found
+                         (org-agenda-api--delete-error
+                          "ID_NOT_FOUND"
+                          "No item found with org-id '%s'. The ID may have been deleted or changed."
+                          id))
+                       found))
+                    ((and file position)
+                     (cons file position))))
          (target-file (car location))
          (target-pos (cdr location)))
 
-    (unless location
-      (error "Item not found"))
-
     (unless (file-exists-p target-file)
-      (error "File not found: %s" target-file))
+      (org-agenda-api--delete-error
+       "FILE_NOT_FOUND"
+       "File does not exist: %s"
+       target-file))
 
     ;; Verify file is in agenda files (security check)
     (unless (member target-file (org-agenda-files))
-      (error "File is not an agenda file: %s" target-file))
+      (org-agenda-api--delete-error
+       "FILE_NOT_IN_AGENDA"
+       "File '%s' is not in org-agenda-files. Only items in agenda files can be deleted."
+       target-file))
 
     ;; Open file and navigate to position
     (with-current-buffer (find-file-noselect target-file)
@@ -1883,7 +2038,13 @@ Returns alist with deletion result."
 
       ;; Verify we're at a heading
       (unless (org-at-heading-p)
-        (error "Position is not at a headline"))
+        (let ((actual-content (buffer-substring-no-properties
+                               (line-beginning-position)
+                               (min (+ (line-beginning-position) 80) (line-end-position)))))
+          (org-agenda-api--delete-error
+           "INVALID_POSITION"
+           "Position %d in file '%s' is not at a headline. Content at position: '%s'"
+           target-pos target-file actual-content)))
 
       ;; Get title before deletion
       (let ((title (org-get-heading t t t t))
@@ -1898,12 +2059,21 @@ Returns alist with deletion result."
 
         ;; Check if we need confirmation for children
         (when (and (> children-count 0) (not include-children))
-          (error "Item has %d children. Set include_children=true to delete subtree."
-                 children-count))
+          (org-agenda-api--delete-error
+           "HAS_CHILDREN"
+           "Item '%s' has %d child heading(s). Set include_children=true to delete the entire subtree, or delete children first."
+           title children-count))
 
         ;; Delete the subtree
-        (org-cut-subtree)
-        (save-buffer)
+        (condition-case err
+            (progn
+              (org-cut-subtree)
+              (save-buffer))
+          (error
+           (org-agenda-api--delete-error
+            "DELETE_FAILED"
+            "Failed to delete subtree for '%s': %s"
+            title (error-message-string err))))
 
         ;; Invalidate cache
         (org-agenda-api--invalidate-cache)
@@ -1923,19 +2093,53 @@ Accepts JSON body with either:
   - file + pos: direct file location
 Optional:
   - include_children: if true, delete subtree even if item has children"
-  (condition-case err
-      (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (json-parse-string content-header))
-             (id (gethash "id" json-data))
-             (file (gethash "file" json-data))
-             (position (gethash "pos" json-data))
-             (include-children (eq (gethash "include_children" json-data) t))
-             (result (org-agenda-api--delete-item id file position include-children)))
-        (insert (json-encode result)))
-    (error
-     (org-agenda-api--log-error-with-backtrace "/delete" err)
-     (insert (json-encode `(("status" . "error")
-                            ("message" . ,(error-message-string err)))))))
+  (let* ((content-header (cadr (assoc "Content" headers)))
+         (json-data (condition-case parse-err
+                        (json-parse-string content-header)
+                      (error
+                       (org-agenda-api--log 'error "/delete: Failed to parse JSON body: %s (raw: %s)"
+                                            (error-message-string parse-err) content-header)
+                       nil)))
+         (id (and json-data (gethash "id" json-data)))
+         (file (and json-data (gethash "file" json-data)))
+         (position (and json-data (gethash "pos" json-data)))
+         (include-children (and json-data (eq (gethash "include_children" json-data) t))))
+    ;; Log the incoming request parameters
+    (org-agenda-api--log 'info "/delete: Request params - id=%S, file=%S, pos=%S, include_children=%S"
+                         id file position include-children)
+    (condition-case err
+        (if (null json-data)
+            (insert (json-encode `(("status" . "error")
+                                   ("code" . "INVALID_JSON")
+                                   ("message" . "Failed to parse request body as JSON"))))
+          (let ((result (org-agenda-api--delete-item id file position include-children)))
+            (org-agenda-api--log 'info "/delete: Success - deleted '%s'" (cdr (assoc "title" result)))
+            (insert (json-encode result))))
+      (org-agenda-api-delete-error
+       (let* ((error-data (cdr err))
+              (code (car error-data))
+              (message (cadr error-data)))
+         (org-agenda-api--log 'error "/delete: %s - %s (id=%S, file=%S, pos=%S)"
+                              code message id file position)
+         (org-agenda-api--log 'error "/delete: Backtrace:\n%s" (org-agenda-api--capture-backtrace))
+         (insert (json-encode `(("status" . "error")
+                                ("code" . ,code)
+                                ("message" . ,message)
+                                ("request" . (("id" . ,(or id :json-null))
+                                              ("file" . ,(or file :json-null))
+                                              ("pos" . ,(or position :json-null))
+                                              ("include_children" . ,(if include-children t :json-false)))))))))
+      (error
+       (org-agenda-api--log-error-with-backtrace "/delete" err)
+       (org-agenda-api--log 'error "/delete: Request was - id=%S, file=%S, pos=%S, include_children=%S"
+                            id file position include-children)
+       (insert (json-encode `(("status" . "error")
+                              ("code" . "INTERNAL_ERROR")
+                              ("message" . ,(error-message-string err))
+                              ("request" . (("id" . ,(or id :json-null))
+                                            ("file" . ,(or file :json-null))
+                                            ("pos" . ,(or position :json-null))
+                                            ("include_children" . ,(if include-children t :json-false))))))))))
   (org-agenda-api--track-request))
 
 ;;; Category Strategy Support
@@ -2035,19 +2239,30 @@ Uses occ-map-entries-for-category to traverse entries."
                                    (planning (org-agenda-api--get-planning-info))
                                    (scheduled-time (alist-get 'scheduled-time planning))
                                    (scheduled-has-time (alist-get 'scheduled-has-time planning))
+                                   (scheduled-end-time (alist-get 'scheduled-end-time planning))
+                                   (scheduled-end-has-time (alist-get 'scheduled-end-has-time planning))
                                    (deadline-time (alist-get 'deadline-time planning))
                                    (deadline-has-time (alist-get 'deadline-has-time planning))
+                                   (deadline-end-time (alist-get 'deadline-end-time planning))
+                                   (deadline-end-has-time (alist-get 'deadline-end-has-time planning))
                                    (pos (point))
                                    (org-id (org-entry-get (point) "ID"))
                                    (olpath (org-get-outline-path t))
                                    (priority (org-entry-get (point) "PRIORITY"))
-                                   (all-properties (org-agenda-api--get-all-entry-properties)))
+                                   (all-properties (org-agenda-api--get-all-entry-properties))
+                                   (timestamps (org-agenda-api--get-entry-timestamps)))
                               `(("todo" . ,todo)
                                 ("title" . ,title)
                                 ("tags" . ,(if tags (vconcat tags) nil))
                                 ("level" . ,level)
                                 ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+                                ,@(when scheduled-end-time
+                                    `(("scheduledEnd" . ,(org-agenda-api--format-timestamp scheduled-end-time scheduled-end-has-time))))
                                 ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
+                                ,@(when deadline-end-time
+                                    `(("deadlineEnd" . ,(org-agenda-api--format-timestamp deadline-end-time deadline-end-has-time))))
+                                ,@(when timestamps
+                                    `(("timestamps" . ,(vconcat timestamps))))
                                 ("file" . ,file)
                                 ("pos" . ,pos)
                                 ("id" . ,org-id)
