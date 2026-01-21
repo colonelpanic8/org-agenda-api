@@ -286,6 +286,7 @@
             pythonWithPackages
             pkgs.curl
             pkgs.jq
+            pkgs.just
             pkgs.ruff
           ];
 

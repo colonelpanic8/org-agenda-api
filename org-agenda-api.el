@@ -4,7 +4,7 @@
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 2.1.2
+;; Version: 2.2.0
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
@@ -464,6 +464,94 @@ Returns an alist of (KEY . VALUE) pairs for all properties in the drawer."
         (push (cons key value) result)))
     (nreverse result)))
 
+(defun org-agenda-api--get-logbook-entries ()
+  "Get LOGBOOK entries for the entry at point.
+Returns a list of alists, each containing type, timestamp, and details.
+Parses state changes and notes from the LOGBOOK drawer.
+Uses patterns similar to `org-habit-parse-todo' for robust parsing."
+  (save-excursion
+    (let ((entries nil)
+          (drawer-name (cond
+                        ((and (boundp 'org-log-into-drawer)
+                              (stringp org-log-into-drawer))
+                         org-log-into-drawer)
+                        (t "LOGBOOK")))
+          (end-of-subtree (save-excursion (org-end-of-subtree t) (point)))
+          ;; Use org's built-in inactive timestamp regex for robust matching
+          (ts-re org-ts-regexp-inactive))
+      ;; Find the LOGBOOK drawer
+      (when (re-search-forward
+             (format "^[ \t]*:%s:[ \t]*$" (regexp-quote drawer-name))
+             end-of-subtree t)
+        (let ((drawer-end (save-excursion
+                           (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t))))
+          (when drawer-end
+            ;; Parse entries within the drawer
+            (while (re-search-forward "^[ \t]*- " drawer-end t)
+              (let ((line-start (point))
+                    (line-end (line-end-position)))
+                (cond
+                 ;; State change: - State "NEW" from "OLD" [timestamp]
+                 ;; Pattern based on org-habit-parse-todo
+                 ((looking-at (concat "State \"\\([^\"]+\\)\"\\(?: from \"\\([^\"]*\\)\"\\)?[ \t]+" ts-re))
+                  (let* ((new-state (match-string 1))
+                         (old-state (match-string 2))
+                         (timestamp-str (match-string 3))
+                         (timestamp (org-agenda-api--parse-inactive-timestamp timestamp-str)))
+                    (push `(("type" . "state-change")
+                            ("to" . ,new-state)
+                            ("from" . ,old-state)
+                            ("timestamp" . ,timestamp)
+                            ("raw" . ,(buffer-substring line-start line-end)))
+                          entries)))
+                 ;; Note: - Note taken on [timestamp]
+                 ((looking-at (concat "Note taken on " ts-re))
+                  (let* ((timestamp-str (match-string 1))
+                         (timestamp (org-agenda-api--parse-inactive-timestamp timestamp-str))
+                         ;; Get note content (may span multiple lines)
+                         (note-content
+                          (save-excursion
+                            (forward-line 1)
+                            (let ((content-lines nil))
+                              (while (and (< (point) drawer-end)
+                                          (looking-at "^[ \t]+\\([^ \t-]\\|$\\)"))
+                                (push (string-trim (buffer-substring
+                                                    (line-beginning-position)
+                                                    (line-end-position)))
+                                      content-lines)
+                                (forward-line 1))
+                              (when content-lines
+                                (string-join (nreverse content-lines) "\n"))))))
+                    (push `(("type" . "note")
+                            ("timestamp" . ,timestamp)
+                            ("content" . ,note-content)
+                            ("raw" . ,(buffer-substring line-start line-end)))
+                          entries)))
+                 ;; Clock entry: CLOCK: [timestamp]--[timestamp] => duration
+                 ((looking-at (concat "CLOCK: " ts-re "\\(?:--" ts-re "\\)?\\(?: =>.*\\)?"))
+                  nil) ;; Skip clock entries for now, they're not usually needed
+                 ;; Other log entry - capture as generic
+                 (t
+                  (push `(("type" . "other")
+                          ("raw" . ,(buffer-substring line-start line-end)))
+                        entries))))))))
+      (nreverse entries))))
+
+(defun org-agenda-api--parse-inactive-timestamp (ts-string)
+  "Parse inactive timestamp TS-STRING to ISO format.
+Handles timestamps like 2026-01-21 Wed 10:30 (content from org-ts-regexp-inactive capture)."
+  (when ts-string
+    ;; org-ts-regexp-inactive captures: YYYY-MM-DD followed by optional day/time
+    ;; e.g., "2026-01-21 Wed 10:30" or "2026-01-21 Wed"
+    (let ((date (if (string-match "^\\([0-9]+-[0-9]+-[0-9]+\\)" ts-string)
+                    (match-string 1 ts-string)))
+          (time (if (string-match "\\([0-9]+:[0-9]+\\)" ts-string)
+                    (match-string 1 ts-string))))
+      (when date
+        (if time
+            (format "%sT%s:00" date time)
+          date)))))
+
 (defun org-agenda-api--format-timestamp-element (ts-elem)
   "Format org-element timestamp TS-ELEM as an alist for JSON.
 Returns alist with start, end (if range), hasTime, type, and raw fields."
@@ -556,7 +644,9 @@ expensive `org-element-at-point' calls."
                                     (org-agenda-api--is-window-habit-p)))
               (habit-summary (when (and is-window-habit
                                         (fboundp 'org-agenda-api--get-habit-summary))
-                               (org-agenda-api--get-habit-summary))))
+                               (org-agenda-api--get-habit-summary)))
+              ;; Get logbook entries
+              (logbook (org-agenda-api--get-logbook-entries)))
          ;; Return an alist directly for JSON encoding (skip org-element overhead)
          `(("todo" . ,todo)
            ("title" . ,title)
@@ -579,7 +669,9 @@ expensive `org-element-at-point' calls."
            ("properties" . ,all-properties)
            ("isWindowHabit" . ,(if is-window-habit t :json-false))
            ,@(when habit-summary
-               `(("habitSummary" . ,habit-summary))))))
+               `(("habitSummary" . ,habit-summary)))
+           ,@(when logbook
+               `(("logbook" . ,(vconcat logbook)))))))
      "/!"  ; MATCH: "/!" matches all entries with any TODO keyword
      'file)))
 

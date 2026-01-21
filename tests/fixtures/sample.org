@@ -5,6 +5,24 @@
 
 * DONE Write tests
   CLOSED: [2024-01-10 Wed 14:00]
+  :LOGBOOK:
+  - State "DONE"       from "STARTED"    [2024-01-10 Wed 14:00]
+  - State "STARTED"    from "TODO"       [2024-01-10 Wed 10:00]
+  :END:
+
+* TODO Task with logbook notes
+  :LOGBOOK:
+  - Note taken on [2024-01-09 Tue 15:30] \\
+    This is a test note in the logbook.
+  - State "TODO"       from ""           [2024-01-08 Mon 09:00]
+  :END:
+
+* STARTED Task with state changes :work:
+  :LOGBOOK:
+  - State "STARTED"    from "TODO"       [2024-01-10 Wed 10:00]
+  - State "TODO"       from "WAITING"    [2024-01-09 Tue 14:00]
+  - State "WAITING"    from "TODO"       [2024-01-08 Mon 11:00]
+  :END:
 
 * TODO Call dentist
   DEADLINE: <2024-01-20 Sat>
