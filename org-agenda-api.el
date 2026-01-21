@@ -4,7 +4,7 @@
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 2.0.2
+;; Version: 2.0.3
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
@@ -1863,7 +1863,7 @@ Returns alist with deletion result."
   "Endpoint: Delete an org item permanently.
 Accepts JSON body with either:
   - id: org-id to locate the item
-  - file + position: direct file location
+  - file + pos: direct file location
 Optional:
   - include_children: if true, delete subtree even if item has children"
   (condition-case err
@@ -1871,7 +1871,7 @@ Optional:
              (json-data (json-parse-string content-header))
              (id (gethash "id" json-data))
              (file (gethash "file" json-data))
-             (position (gethash "position" json-data))
+             (position (gethash "pos" json-data))
              (include-children (eq (gethash "include_children" json-data) t))
              (result (org-agenda-api--delete-item id file position include-children)))
         (insert (json-encode result)))

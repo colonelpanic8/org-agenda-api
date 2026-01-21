@@ -19,7 +19,7 @@ class TestDeleteTodo:
         # Delete it
         response = api.post("/delete", json={
             "file": todo["file"],
-            "position": todo["pos"]
+            "pos": todo["pos"]
         })
         assert response.status_code == 200
 
@@ -33,7 +33,7 @@ class TestDeleteTodo:
 
         response = api.post("/delete", json={
             "file": todo["file"],
-            "position": todo["pos"]
+            "pos": todo["pos"]
         })
         data = response.json()
 
@@ -51,7 +51,7 @@ class TestDeleteTodo:
         # Delete it
         api.post("/delete", json={
             "file": todo["file"],
-            "position": todo["pos"]
+            "pos": todo["pos"]
         })
 
         # Verify it's gone
@@ -83,13 +83,13 @@ class TestDeleteErrors:
         """Should return error for non-existent item."""
         response = api.post("/delete", json={
             "file": "/nonexistent/file.org",
-            "position": 1
+            "pos": 1
         })
         data = response.json()
         assert "error" in data or data.get("status") == "error"
 
     def test_error_on_missing_params(self, api):
-        """Should return error if neither id nor file+position provided."""
+        """Should return error if neither id nor file+pos provided."""
         response = api.post("/delete", json={})
         data = response.json()
         assert "error" in data or data.get("status") == "error"
@@ -108,7 +108,7 @@ class TestDeleteWithChildren:
 
         response = api.post("/delete", json={
             "file": parent["file"],
-            "position": parent["pos"]
+            "pos": parent["pos"]
         })
         data = response.json()
 
@@ -125,7 +125,7 @@ class TestDeleteWithChildren:
 
         response = api.post("/delete", json={
             "file": parent["file"],
-            "position": parent["pos"],
+            "pos": parent["pos"],
             "include_children": True
         })
         data = response.json()
