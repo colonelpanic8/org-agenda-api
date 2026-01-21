@@ -4,7 +4,7 @@
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 2.0.3
+;; Version: 2.1.0
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
@@ -1563,7 +1563,7 @@ If HAS-TIME is non-nil, include the time component."
 
 (defun org-agenda-api--update-todo-at (file pos updates)
   "Update the TODO at FILE and POS with UPDATES alist.
-UPDATES can contain: scheduled, deadline, priority, tags, properties.
+UPDATES can contain: new_title, scheduled, deadline, priority, tags, properties.
 Returns alist with status, details, and new position."
   (with-current-buffer (find-file-noselect file)
     (save-excursion
@@ -1572,6 +1572,13 @@ Returns alist with status, details, and new position."
           (let ((title (org-get-heading t t t t))
                 (applied-updates nil)
                 (new-pos nil))
+            ;; Handle title update (must be done first as it changes heading structure)
+            (when (assoc "new_title" updates)
+              (let ((new-title-value (cdr (assoc "new_title" updates))))
+                (when (and new-title-value (not (string-empty-p new-title-value)))
+                  (org-edit-headline new-title-value)
+                  (setq title new-title-value)  ; Update title for response
+                  (push `("new_title" . ,new-title-value) applied-updates))))
             ;; Handle scheduled
             (when (assoc "scheduled" updates)
               (let ((scheduled-value (cdr (assoc "scheduled" updates))))
@@ -1667,12 +1674,13 @@ Returns alist with status, details, and new position."
           ("message" . "No heading found at position"))))))
 
 (defservlet update application/json (_path _query headers)
-  "Endpoint: Update a TODO's scheduled date, deadline, priority, tags, or properties.
+  "Endpoint: Update a TODO's title, scheduled date, deadline, priority, tags, or properties.
 Accepts JSON body with:
   - id: org-id of the todo (preferred)
   - file: file path (fallback)
   - pos: position in file (fallback)
   - title: heading title (can match by title alone or with file)
+  - new_title: new title to set for the heading
   - scheduled: ISO date/datetime string or null to clear
   - deadline: ISO date/datetime string or null to clear
   - priority: A, B, C, or null to clear
@@ -1687,6 +1695,7 @@ Returns updated todo with new file and pos for cache update."
                (file (gethash "file" json-data))
                (pos (gethash "pos" json-data))
                (title (gethash "title" json-data))
+               (new-title (gethash "new_title" json-data))
                (scheduled (gethash "scheduled" json-data))
                (deadline (gethash "deadline" json-data))
                (priority (gethash "priority" json-data))
@@ -1695,10 +1704,10 @@ Returns updated todo with new file and pos for cache update."
                (location nil)
                (updates nil))
           ;; Log incoming request for debugging
-        (message "[/update] Request: id=%s file=%s pos=%s title=%s scheduled=%s deadline=%s priority=%s"
-                 id file pos title scheduled deadline priority)
+        (message "[/update] Request: id=%s file=%s pos=%s title=%s new_title=%s scheduled=%s deadline=%s priority=%s"
+                 id file pos title new-title scheduled deadline priority)
         ;; Check for unrecognized fields
-        (let ((allowed-fields '("id" "file" "pos" "title" "scheduled" "deadline" "priority" "tags" "properties"))
+        (let ((allowed-fields '("id" "file" "pos" "title" "new_title" "scheduled" "deadline" "priority" "tags" "properties"))
               (unrecognized nil))
           (maphash (lambda (key _value)
                      (unless (member key allowed-fields)
@@ -1712,6 +1721,8 @@ Returns updated todo with new file and pos for cache update."
             (throw 'done nil)))
         ;; Build updates alist (include keys even if value is nil, to signal clearing)
         ;; Use :not-found sentinel to properly detect if key exists in JSON
+        (unless (eq (gethash "new_title" json-data :not-found) :not-found)
+          (push (cons "new_title" (if (eq new-title :null) nil new-title)) updates))
         (unless (eq (gethash "scheduled" json-data :not-found) :not-found)
           (push (cons "scheduled" (if (eq scheduled :null) nil scheduled)) updates))
         (unless (eq (gethash "deadline" json-data :not-found) :not-found)

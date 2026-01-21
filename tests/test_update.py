@@ -321,6 +321,82 @@ class TestUpdateMultipleFields:
         assert len(data.get("updates", [])) >= 1
 
 
+class TestUpdateTitle:
+    """Tests for updating todo title."""
+
+    def test_update_title(self, api):
+        """Should be able to update the title of a todo."""
+        unique_title = "Original title for update test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        new_title = "Updated title for test"
+        response = api.update_todo(todo, {"new_title": new_title})
+        data = response.json()
+
+        assert data.get("status") == "updated"
+        assert data.get("title") == new_title
+
+    def test_title_persists_after_update(self, api):
+        """Updated title should persist when re-fetching todos."""
+        unique_title = "Persistence title test 12345"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        new_title = "Persisted new title 67890"
+        api.update_todo(todo, {"new_title": new_title})
+
+        # Re-fetch and verify
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        updated_todo = next(
+            (t for t in todos["todos"] if new_title in t.get("title", "")),
+            None,
+        )
+        assert updated_todo is not None, f"Updated title not found in todos"
+
+    def test_update_title_with_other_fields(self, api):
+        """Should be able to update title along with other fields."""
+        unique_title = "Multi-field title test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        new_title = "New title with priority"
+        response = api.update_todo(todo, {
+            "new_title": new_title,
+            "priority": "A",
+        })
+        data = response.json()
+
+        assert data.get("status") == "updated"
+        assert data.get("title") == new_title
+
+
 class TestUpdateErrors:
     """Tests for update error handling."""
 
