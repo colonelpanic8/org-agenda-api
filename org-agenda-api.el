@@ -1448,6 +1448,27 @@ Exits gracefully, allowing supervisord to restart the process."
   ;; Use run-at-time to allow the response to be sent before exiting
   (run-at-time 0.1 nil #'kill-emacs 0))
 
+;;; Lenient heading matching helpers
+
+(defun org-agenda-api--normalize-string (s)
+  "Normalize string S for lenient comparison.
+Trims whitespace, collapses multiple spaces, and normalizes unicode."
+  (when s
+    (let* ((trimmed (string-trim s))
+           ;; Collapse multiple whitespace into single space
+           (collapsed (replace-regexp-in-string "[ \t\n\r]+" " " trimmed)))
+      ;; Normalize unicode if ucs-normalize is available
+      (if (fboundp 'ucs-normalize-NFC-string)
+          (ucs-normalize-NFC-string collapsed)
+        collapsed))))
+
+(defun org-agenda-api--string-match-lenient (s1 s2)
+  "Compare S1 and S2 leniently after normalization.
+Returns t if normalized versions are equal."
+  (when (and s1 s2)
+    (string= (org-agenda-api--normalize-string s1)
+             (org-agenda-api--normalize-string s2))))
+
 (defun org-agenda-api--find-todo-by-id (id)
   "Find a TODO entry by its org ID.
 Returns (file . pos) cons or nil if not found."
@@ -1459,6 +1480,7 @@ Returns (file . pos) cons or nil if not found."
 (defun org-agenda-api--find-todo-by-file-pos-title (file pos title)
   "Find a TODO entry by FILE, POS, and TITLE.
 Verifies the title matches at the given position.
+Uses lenient matching as fallback if strict match fails.
 Returns (file . pos) cons or nil if not found."
   (when (and file pos (file-exists-p file))
     (with-current-buffer (find-file-noselect file)
@@ -1466,34 +1488,42 @@ Returns (file . pos) cons or nil if not found."
         (goto-char pos)
         (when (org-at-heading-p)
           (let ((heading (org-get-heading t t t t)))
-            (when (or (not title) (string= heading title))
+            ;; Try strict match first, then lenient
+            (when (or (not title)
+                      (string= heading title)
+                      (org-agenda-api--string-match-lenient heading title))
               (cons file pos))))))))
 
-(defun org-agenda-api--find-todo-by-file-title (file title)
+(defun org-agenda-api--find-todo-by-file-title (file title &optional lenient)
   "Find a TODO entry by FILE and TITLE only.
 Searches the file for a heading matching TITLE.
+If LENIENT is non-nil, uses lenient matching (whitespace/unicode normalized).
 Returns (file . pos) cons or nil if not found."
   (when (and file title (file-exists-p file))
     (with-current-buffer (find-file-noselect file)
       (save-excursion
         (goto-char (point-min))
-        (let ((found nil))
+        (let ((found nil)
+              (match-fn (if lenient
+                            #'org-agenda-api--string-match-lenient
+                          #'string=)))
           (while (and (not found) (re-search-forward org-heading-regexp nil t))
             (when (org-at-heading-p)
               (let ((heading (org-get-heading t t t t)))
-                (when (string= heading title)
+                (when (funcall match-fn heading title)
                   (setq found (cons file (line-beginning-position)))))))
           found)))))
 
-(defun org-agenda-api--find-todo-by-title (title)
+(defun org-agenda-api--find-todo-by-title (title &optional lenient)
   "Find a TODO entry by TITLE across all agenda files.
 Searches all org-agenda-files for a heading matching TITLE.
+If LENIENT is non-nil, uses lenient matching (whitespace/unicode normalized).
 Returns (file . pos) cons or nil if not found."
   (when title
     (let ((found nil))
       (dolist (file org-agenda-files)
         (when (and (not found) (file-exists-p file))
-          (setq found (org-agenda-api--find-todo-by-file-title file title))))
+          (setq found (org-agenda-api--find-todo-by-file-title file title lenient))))
       found)))
 
 (defun org-agenda-api--complete-todo-at (file pos &optional new-state)
@@ -1743,18 +1773,26 @@ Returns updated todo with new file and pos for cache update."
         ;; Try to find by ID first
         (setq location (org-agenda-api--find-todo-by-id id))
         (when location (message "[/update] Found by ID"))
-        ;; Fall back to file+pos+title
+        ;; Fall back to file+pos+title (includes lenient matching)
         (unless location
           (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title))
           (when location (message "[/update] Found by file+pos+title")))
-        ;; Fall back to file+title (handles position drift)
+        ;; Fall back to file+title strict match (handles position drift)
         (unless location
           (setq location (org-agenda-api--find-todo-by-file-title file title))
           (when location (message "[/update] Found by file+title")))
-        ;; Fall back to title only across all agenda files
+        ;; Fall back to title only strict match across all agenda files
         (unless location
           (setq location (org-agenda-api--find-todo-by-title title))
           (when location (message "[/update] Found by title only")))
+        ;; Fall back to file+title lenient match (handles whitespace/unicode differences)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-title file title t))
+          (when location (message "[/update] Found by file+title (lenient)")))
+        ;; Fall back to title only lenient match across all agenda files
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-title title t))
+          (when location (message "[/update] Found by title only (lenient)")))
         (message "[/update] Location: %S" location)
         (if location
             (let ((result (org-agenda-api--update-todo-at
@@ -1787,15 +1825,23 @@ Accepts JSON body with:
              (location nil))
         ;; Try to find by ID first
         (setq location (org-agenda-api--find-todo-by-id id))
-        ;; Fall back to file+pos+title
+        ;; Fall back to file+pos+title (includes lenient matching)
         (unless location
           (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
-        ;; Fall back to file+title (handles position drift)
+        ;; Fall back to file+title strict match (handles position drift)
         (unless location
           (setq location (org-agenda-api--find-todo-by-file-title file title)))
-        ;; Fall back to title only across all agenda files
+        ;; Fall back to title only strict match across all agenda files
         (unless location
           (setq location (org-agenda-api--find-todo-by-title title)))
+        ;; Fall back to file+title lenient match (handles whitespace/unicode differences)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-title file title t))
+          (when location (message "[/complete] Found by file+title (lenient)")))
+        ;; Fall back to title only lenient match across all agenda files
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-title title t))
+          (when location (message "[/complete] Found by title only (lenient)")))
         (if location
             (let ((result (org-agenda-api--complete-todo-at
                            (car location) (cdr location) new-state)))
