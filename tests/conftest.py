@@ -274,6 +274,38 @@ def org_test_dir(tmp_path_factory):
   It should never appear in any agenda.
 """)
 
+    # Create file for testing ranged timestamps and plain timestamps
+    timestamps_org = test_dir / "timestamps.org"
+    timestamps_org.write_text(f"""\
+#+TITLE: Timestamp Tests
+
+* TODO Task with ranged schedule
+  SCHEDULED: <{TEST_DATE_ORG}>--<{TEST_DATE_NEXT_DAY_ORG}>
+  This task spans multiple days.
+
+* TODO Task with ranged deadline
+  DEADLINE: <{TEST_DATE_ORG} 10:00>--<{TEST_DATE_ORG} 14:00>
+  This task has a time range deadline.
+
+* TODO Task with plain timestamp in body
+  SCHEDULED: <{TEST_DATE_ORG}>
+  Meeting notes from <{TEST_DATE_PREV_DAY_ORG} 09:00>.
+  Follow up on <{TEST_DATE_NEXT_DAY_ORG}>.
+
+* TODO Task with multiple plain timestamps
+  Need to review:
+  - First review: <{TEST_DATE_ORG} 10:00>
+  - Second review: <{TEST_DATE_ORG} 15:00>
+  - Final deadline: <{TEST_DATE_NEXT_DAY_ORG}>
+
+* TODO Task with ranged plain timestamp
+  Event runs <{TEST_DATE_ORG}>--<{TEST_DATE_NEXT_DAY_ORG}>.
+
+* TODO Task with no special timestamps
+  SCHEDULED: <{TEST_DATE_ORG}>
+  Just a regular task with no body timestamps.
+""")
+
     return test_dir
 
 

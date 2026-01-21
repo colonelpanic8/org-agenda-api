@@ -390,44 +390,26 @@ deadline-end-has-time.  Supports ranged timestamps like <2024-06-15>--<2024-06-2
           (scheduled-end-time nil)
           (scheduled-end-has-time nil)
           (deadline-end-time nil)
-          (deadline-end-has-time nil))
-      ;; Check the planning line for time components and ranges
-      (when (or scheduled-time deadline-time)
-        (forward-line 1)
-        (when (looking-at org-planning-line-re)
-          (let ((line (buffer-substring-no-properties (point) (line-end-position))))
-            ;; Check SCHEDULED timestamp for time and range
-            (when (and scheduled-time
-                       (string-match "SCHEDULED: <[^>]+>\\(--<[^>]+>\\)?" line))
-              (let ((ts (match-string 0 line)))
-                (setq scheduled-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))
-                ;; Check for range (--<date>)
-                (when (string-match-p "--<" ts)
-                  ;; Use org-element to parse the timestamp for accurate end date
-                  (save-excursion
-                    (goto-char (+ (point) (string-match "SCHEDULED:" line)))
-                    (when (re-search-forward "<[^>]+>\\(--<[^>]+>\\)?" (line-end-position) t)
-                      (let ((ts-elem (org-element-context)))
-                        (when (eq (org-element-type ts-elem) 'timestamp)
-                          (setq scheduled-end-time (org-agenda-api--timestamp-end-to-time ts-elem))
-                          (setq scheduled-end-has-time
-                                (not (null (org-element-property :hour-end ts-elem)))))))))))
-            ;; Check DEADLINE timestamp for time and range
-            (when (and deadline-time
-                       (string-match "DEADLINE: <[^>]+>\\(--<[^>]+>\\)?" line))
-              (let ((ts (match-string 0 line)))
-                (setq deadline-has-time (string-match-p "[0-9]\\{1,2\\}:[0-9]\\{2\\}" ts))
-                ;; Check for range (--<date>)
-                (when (string-match-p "--<" ts)
-                  ;; Use org-element to parse the timestamp for accurate end date
-                  (save-excursion
-                    (goto-char (+ (point) (string-match "DEADLINE:" line)))
-                    (when (re-search-forward "<[^>]+>\\(--<[^>]+>\\)?" (line-end-position) t)
-                      (let ((ts-elem (org-element-context)))
-                        (when (eq (org-element-type ts-elem) 'timestamp)
-                          (setq deadline-end-time (org-agenda-api--timestamp-end-to-time ts-elem))
-                          (setq deadline-end-has-time
-                                (not (null (org-element-property :hour-end ts-elem))))))))))))))
+          (deadline-end-has-time nil)
+          ;; Get the headline element to access timestamp properties directly
+          (headline-elem (org-element-at-point)))
+      ;; Extract timestamp info from org-element
+      (let ((scheduled-ts (org-element-property :scheduled headline-elem))
+            (deadline-ts (org-element-property :deadline headline-elem)))
+        ;; Process SCHEDULED timestamp
+        (when scheduled-ts
+          (setq scheduled-has-time (not (null (org-element-property :hour-start scheduled-ts))))
+          ;; Check for range (:range-type is set for ranged timestamps like <date>--<date>)
+          (when (org-element-property :range-type scheduled-ts)
+            (setq scheduled-end-time (org-agenda-api--timestamp-end-to-time scheduled-ts))
+            (setq scheduled-end-has-time (not (null (org-element-property :hour-end scheduled-ts))))))
+        ;; Process DEADLINE timestamp
+        (when deadline-ts
+          (setq deadline-has-time (not (null (org-element-property :hour-start deadline-ts))))
+          ;; Check for range (:range-type is set for ranged timestamps like <date>--<date>)
+          (when (org-element-property :range-type deadline-ts)
+            (setq deadline-end-time (org-agenda-api--timestamp-end-to-time deadline-ts))
+            (setq deadline-end-has-time (not (null (org-element-property :hour-end deadline-ts)))))))
       `((scheduled-time . ,scheduled-time)
         (scheduled-has-time . ,scheduled-has-time)
         (scheduled-end-time . ,scheduled-end-time)
@@ -436,7 +418,6 @@ deadline-end-has-time.  Supports ranged timestamps like <2024-06-15>--<2024-06-2
         (deadline-has-time . ,deadline-has-time)
         (deadline-end-time . ,deadline-end-time)
         (deadline-end-has-time . ,deadline-end-has-time)))))
-
 (defun org-agenda-api--format-timestamp (time has-time)
   "Format TIME as ISO string.
 If HAS-TIME is non-nil, include time component in local timezone.
