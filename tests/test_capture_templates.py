@@ -213,3 +213,127 @@ class TestCaptureWithAutoFields:
         assert unique_title in content
         # Should have an inactive timestamp [2024-...]
         assert "[2024-" in content or "[2026-" in content  # Account for test date
+
+
+class TestCaptureWithSexpExpansion:
+    """Tests for %(sexp) template expansion like %(org-id-new)."""
+
+    def test_org_id_new_generates_uuid(self, api, org_dir):
+        """Templates with %(org-id-new) should generate a unique UUID."""
+        unique_title = "UUID test 55555"
+
+        api.post("/capture", json={
+            "template": "todo-with-id",
+            "values": {"Title": unique_title}
+        })
+
+        inbox_path = org_dir / "inbox.org"
+        content = inbox_path.read_text()
+
+        assert unique_title in content
+        # Should have :ID: property with a UUID (8-4-4-4-12 hex format)
+        assert ":ID:" in content
+        # UUID pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        import re
+        uuid_pattern = r':ID:\s+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+        assert re.search(uuid_pattern, content), f"No UUID found in content:\n{content}"
+
+    def test_org_id_not_literal(self, api, org_dir):
+        """%(org-id-new) should NOT appear literally in output."""
+        unique_title = "Literal test 55556"
+
+        api.post("/capture", json={
+            "template": "todo-with-id",
+            "values": {"Title": unique_title}
+        })
+
+        inbox_path = org_dir / "inbox.org"
+        content = inbox_path.read_text()
+
+        # The literal %(org-id-new) should NOT appear - it should be expanded
+        assert "%(org-id-new)" not in content, \
+            f"%(org-id-new) was not expanded in content:\n{content}"
+
+    def test_format_time_string_generates_date(self, api, org_dir):
+        """Templates with %(format-time-string ...) should generate formatted date."""
+        unique_title = "Format time test 66666"
+
+        api.post("/capture", json={
+            "template": "scheduled-auto",
+            "values": {"Title": unique_title}
+        })
+
+        inbox_path = org_dir / "inbox.org"
+        content = inbox_path.read_text()
+
+        assert unique_title in content
+        # Should have SCHEDULED with an actual date, not the literal expression
+        assert "%(format-time-string" not in content, \
+            f"%(format-time-string ...) was not expanded in content:\n{content}"
+        # Should have a proper org timestamp
+        assert "SCHEDULED: <" in content
+        # The date should be in YYYY-MM-DD format
+        import re
+        scheduled_pattern = r'SCHEDULED:\s+<\d{4}-\d{2}-\d{2}'
+        assert re.search(scheduled_pattern, content), \
+            f"No proper SCHEDULED date found in content:\n{content}"
+
+    def test_multiple_sexp_expressions(self, api, org_dir):
+        """Templates with multiple %(sexp) should all be expanded."""
+        unique_title = "Multi sexp test 77777"
+
+        api.post("/capture", json={
+            "template": "full-template",
+            "values": {"Title": unique_title}
+        })
+
+        inbox_path = org_dir / "inbox.org"
+        content = inbox_path.read_text()
+
+        assert unique_title in content
+
+        # None of the sexp expressions should appear literally
+        assert "%(org-id-new)" not in content
+        assert "%(format-time-string" not in content
+        assert "%(number-to-string" not in content
+
+        # Should have actual expanded values
+        import re
+        # UUID for :ID:
+        uuid_pattern = r':ID:\s+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+        assert re.search(uuid_pattern, content), f"No UUID found in content:\n{content}"
+        # SCHEDULED date
+        assert "SCHEDULED: <" in content
+        # EFFORT should be "30" (from %(number-to-string 30))
+        assert ":EFFORT:" in content
+        effort_pattern = r':EFFORT:\s+30'
+        assert re.search(effort_pattern, content), f"EFFORT not set to 30 in content:\n{content}"
+
+    def test_each_capture_gets_unique_id(self, api, org_dir):
+        """Each capture should generate a different UUID."""
+        import re
+
+        # Capture two items
+        api.post("/capture", json={
+            "template": "todo-with-id",
+            "values": {"Title": "First UUID item 88881"}
+        })
+        api.post("/capture", json={
+            "template": "todo-with-id",
+            "values": {"Title": "Second UUID item 88882"}
+        })
+
+        inbox_path = org_dir / "inbox.org"
+        content = inbox_path.read_text()
+
+        # Find all UUIDs
+        uuid_pattern = r':ID:\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
+        uuids = re.findall(uuid_pattern, content)
+
+        # Should have at least 2 UUIDs (one for each capture)
+        assert len(uuids) >= 2, f"Expected at least 2 UUIDs, found {len(uuids)}"
+
+        # The UUIDs should be unique
+        unique_uuids = set(uuids)
+        assert len(unique_uuids) >= 2, \
+            f"Expected unique UUIDs but found duplicates: {uuids}"

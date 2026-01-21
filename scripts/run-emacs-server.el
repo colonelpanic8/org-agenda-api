@@ -123,6 +123,27 @@
          :template ("n" "Note" entry (file ,test-inbox)
                     "* %^{Title}\n[%U]\n\n%?"
                     :immediate-finish t)
+         :prompts (("Title" :type string :required t)))
+        ;; Template with %(sexp) expressions for testing org-capture-fill-template
+        ("todo-with-id"
+         :name "Todo with ID"
+         :template ("i" "Todo with ID" entry (file ,test-inbox)
+                    "* TODO %^{Title}\n:PROPERTIES:\n:ID: %(org-id-new)\n:CREATED: %U\n:END:\n"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)))
+        ;; Template with %(format-time-string) for scheduled date
+        ("scheduled-auto"
+         :name "Scheduled Today Auto"
+         :template ("a" "Scheduled Auto" entry (file ,test-inbox)
+                    "* TODO %^{Title}\nSCHEDULED: %(format-time-string \"<%Y-%m-%d %a>\")\n:PROPERTIES:\n:ID: %(org-id-new)\n:END:\n"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)))
+        ;; Template with multiple %(sexp) expressions
+        ("full-template"
+         :name "Full Template"
+         :template ("f" "Full" entry (file ,test-inbox)
+                    "* TODO %^{Title}\nSCHEDULED: %(format-time-string \"<%Y-%m-%d %a>\")\n:PROPERTIES:\n:ID: %(org-id-new)\n:CREATED: %U\n:EFFORT: %(number-to-string 30)\n:END:\n"
+                    :immediate-finish t)
          :prompts (("Title" :type string :required t)))))
 
 ;; Set up test category strategy if org-category-capture is available

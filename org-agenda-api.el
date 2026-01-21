@@ -4,7 +4,7 @@
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 2.1.1
+;; Version: 2.1.2
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
@@ -1069,7 +1069,9 @@ Returns nil if valid, or an error message string if invalid."
 
 (defun org-agenda-api--build-entry-from-template (template-entry values)
   "Build an org entry string from TEMPLATE-ENTRY and VALUES.
-This substitutes values into the template without interactive prompts."
+This substitutes values into the template without interactive prompts.
+Uses `org-capture-fill-template' to handle standard escape sequences
+like %(sexp), %U, %t, etc."
   (let* ((plist (cdr template-entry))
          (prompts (plist-get plist :prompts))
          (capture-template (plist-get plist :template))
@@ -1087,7 +1089,7 @@ This substitutes values into the template without interactive prompts."
            ;; Plain string
            (t template-raw)))
          (result template-string))
-    ;; Replace %^{Name} with the value
+    ;; Replace %^{Name} with the value (interactive prompts we're filling programmatically)
     ;; Do patterns with suffixes FIRST, then without (otherwise suffix gets left behind)
     (dolist (prompt prompts)
       (let* ((name (car prompt))
@@ -1109,35 +1111,17 @@ This substitutes values into the template without interactive prompts."
                       (format "%%\\^{%s}" (regexp-quote name))
                       formatted-value
                       result t t))))
-    ;; Replace timestamp patterns - must be case-sensitive!
-    ;; Without this, %T would match %t due to case-fold-search defaulting to t
-    (let ((case-fold-search nil))
-      ;; Replace %U with inactive timestamp
-      (setq result (replace-regexp-in-string
-                    "%U"
-                    (format-time-string "[%Y-%m-%d %a %H:%M]" (current-time))
-                    result t t))
-      ;; Replace %u with inactive date (no time)
-      (setq result (replace-regexp-in-string
-                    "%u"
-                    (format-time-string "[%Y-%m-%d %a]" (current-time))
-                    result t t))
-      ;; Replace %T with active timestamp
-      (setq result (replace-regexp-in-string
-                    "%T"
-                    (format-time-string "<%Y-%m-%d %a %H:%M>" (current-time))
-                    result t t))
-      ;; Replace %t with active date
-      (setq result (replace-regexp-in-string
-                    "%t"
-                    (format-time-string "<%Y-%m-%d %a>" (current-time))
-                    result t t)))
     ;; Replace %? with Title value if present, otherwise remove it
+    ;; (do this before org-capture-fill-template which would leave %? for cursor)
     (let ((title-value (cdr (assoc "Title" values))))
       (setq result (replace-regexp-in-string
                     "%\\?"
                     (or title-value "")
                     result t t)))
+    ;; Use org-capture-fill-template to handle all other escape sequences:
+    ;; %(sexp), %U, %u, %T, %t, %a, %c, %i, etc.
+    (require 'org-capture)
+    (setq result (org-capture-fill-template result))
     result))
 
 (defun org-agenda-api--capture-with-template (template-key values)
