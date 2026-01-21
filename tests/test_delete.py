@@ -61,15 +61,17 @@ class TestDeleteTodo:
 
     def test_delete_by_id(self, api):
         """Should be able to delete by org-id."""
-        api.create_todo("Delete by ID test")
+        # Use todo-with-id template which includes %(org-id-new) for ID generation
+        unique_title = "Delete by ID test 99999"
+        response = api.capture("todo-with-id", {"Title": unique_title})
+        assert response.status_code == 200
 
         todos = api.get_all_todos().json()["todos"]
-        todo = next((t for t in todos if "Delete by ID test" in t.get("title", "")), None)
-        assert todo is not None
+        todo = next((t for t in todos if unique_title in t.get("title", "")), None)
+        assert todo is not None, f"Todo '{unique_title}' not found in todos"
 
-        # Skip if no ID assigned
-        if not todo.get("id"):
-            pytest.skip("Todo has no org-id assigned")
+        # The todo-with-id template generates an org-id via %(org-id-new)
+        assert todo.get("id") is not None, "Todo should have org-id from %(org-id-new)"
 
         response = api.post("/delete", json={"id": todo["id"]})
         assert response.status_code == 200
