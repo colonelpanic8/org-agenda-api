@@ -1,0 +1,288 @@
+;;; org-agenda-api-core.el --- Core utilities for org-agenda-api -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 Ivan Malison
+;; Author: Ivan Malison <IvanMalison@gmail.com>
+
+;;; Commentary:
+;; Core utilities: logging, caching, configuration, git refresh, worker lifecycle.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'lisp-mnt)
+(require 'org-agenda)
+
+;;; Version
+
+(defconst org-agenda-api-version
+  (lm-version (or load-file-name
+                  (locate-library "org-agenda-api")
+                  buffer-file-name))
+  "Version of org-agenda-api, read from package header.")
+
+;;; Logging
+
+(defcustom org-agenda-api-log-level 'info
+  "Log level for org-agenda-api.
+Levels are: debug, info, warn, error."
+  :type '(choice (const :tag "Debug" debug)
+                 (const :tag "Info" info)
+                 (const :tag "Warn" warn)
+                 (const :tag "Error" error))
+  :group 'org-agenda-api)
+
+(defun org-agenda-api--log (level format-string &rest args)
+  "Log a message at LEVEL using FORMAT-STRING and ARGS.
+Only logs if LEVEL is at or above `org-agenda-api-log-level'."
+  (let ((levels '(debug info warn error))
+        (prefix (pcase level
+                  ('debug "[DEBUG]")
+                  ('info "[INFO]")
+                  ('warn "[WARN]")
+                  ('error "[ERROR]"))))
+    (when (>= (cl-position level levels)
+              (cl-position org-agenda-api-log-level levels))
+      (apply #'message (concat "org-agenda-api " prefix " " format-string) args))))
+
+(defun org-agenda-api--log-request (endpoint method)
+  "Log an incoming request to ENDPOINT with METHOD."
+  (org-agenda-api--log 'info "Request: %s %s" method endpoint))
+
+(defun org-agenda-api--log-response (endpoint status duration-ms)
+  "Log a response for ENDPOINT with STATUS and DURATION-MS."
+  (org-agenda-api--log 'info "Response: %s -> %s (%dms)" endpoint status duration-ms))
+
+(defun org-agenda-api--log-error (endpoint error-msg)
+  "Log an error for ENDPOINT with ERROR-MSG."
+  (org-agenda-api--log 'error "Error in %s: %s" endpoint error-msg))
+
+(defun org-agenda-api--capture-backtrace ()
+  "Capture current backtrace as a string.
+Returns the backtrace excluding internal logging frames."
+  (let ((backtrace-str
+         (if (fboundp 'backtrace-to-string)
+             ;; Emacs 29+ has backtrace-to-string
+             (backtrace-to-string)
+           ;; Fallback for older Emacs - use with-output-to-string
+           ;; which properly binds standard-output to capture the backtrace
+           (with-output-to-string
+             (backtrace)))))
+    ;; Filter out internal frames for cleaner output
+    (with-temp-buffer
+      (insert backtrace-str)
+      (goto-char (point-min))
+      ;; Skip frames from our logging functions
+      (let ((skip-patterns '("org-agenda-api--capture-backtrace"
+                             "org-agenda-api--log-error-with-backtrace")))
+        (while (and (not (eobp))
+                    (cl-some (lambda (pat)
+                               (looking-at (concat ".*" (regexp-quote pat))))
+                             skip-patterns))
+          (forward-line 1)))
+      (buffer-substring (point) (point-max)))))
+
+(defun org-agenda-api--log-error-with-backtrace (endpoint err)
+  "Log an error for ENDPOINT with full backtrace.
+ERR should be the error caught by condition-case."
+  (let ((error-msg (error-message-string err))
+        (backtrace (org-agenda-api--capture-backtrace)))
+    (org-agenda-api--log 'error "Error in %s: %s" endpoint error-msg)
+    (org-agenda-api--log 'error "Backtrace:\n%s" backtrace)))
+
+;;; Customization
+
+(defgroup org-agenda-api nil
+  "JSON HTTP API for org-agenda."
+  :group 'org
+  :prefix "org-agenda-api-")
+
+(defcustom org-agenda-api-port 2025
+  "Port number for the HTTP server."
+  :type 'integer
+  :group 'org-agenda-api)
+
+(defcustom org-agenda-api-capture-templates nil
+  "Capture templates registered for API use.
+Each entry is a list of (KEY . PLIST) where PLIST contains:
+  :name     - Human-readable name for the template
+  :template - An org-capture template specification
+  :prompts  - List of prompt definitions for API parameters
+              Each prompt is (NAME . PLIST) with :type and :required"
+  :type 'sexp
+  :group 'org-agenda-api)
+
+(defcustom org-agenda-api-max-requests nil
+  "Maximum requests before worker exits for restart.
+Set to nil to disable (worker runs forever).
+When set, worker will exit gracefully after handling this many requests,
+allowing supervisord/process manager to restart it."
+  :type '(choice (const :tag "Disabled" nil)
+                 (integer :tag "Max requests"))
+  :group 'org-agenda-api)
+
+(defcustom org-agenda-api-max-lifetime nil
+  "Maximum lifetime in seconds before worker exits for restart.
+Set to nil to disable. When set, worker will exit after this many
+seconds, checked after each request completes."
+  :type '(choice (const :tag "Disabled" nil)
+                 (integer :tag "Max seconds"))
+  :group 'org-agenda-api)
+
+(defcustom org-agenda-api-category-strategies nil
+  "Category strategies registered for API use.
+Each entry can be either:
+  (NAME . STRATEGY) - simple form using default template and prompts
+  (NAME :strategy STRATEGY :template TEMPLATE :prompts PROMPTS) - full form
+
+Where:
+  NAME     - A string identifying the strategy type
+  STRATEGY - An instance of an occ-strategy subclass (from org-category-capture)
+  TEMPLATE - Optional capture template string (default: \"* TODO %?\\n\")
+  PROMPTS  - Optional list of prompt definitions for API parameters
+             Each prompt is (NAME :type TYPE :required BOOL)
+             Types: string, date, tags
+
+These strategies expose categories through the API.  When org-category-capture
+or org-project-capture is loaded, you can register strategies like:
+
+  ;; Simple form (uses default template and prompts):
+  (setq org-agenda-api-category-strategies
+        \\='((\"projects\" . org-project-capture-strategy)))
+
+  ;; With custom template and prompts:
+  (setq org-agenda-api-category-strategies
+        \\=`((\"projects\" :strategy ,org-project-capture-strategy
+                       :template ,org-project-capture-capture-template
+                       :prompts ((\"Title\" :type string :required t)
+                                 (\"Scheduled\" :type date :required nil)))))
+
+The API will then expose endpoints:
+  GET /category-types - list registered strategy types (includes prompts)
+  GET /categories?type=NAME - get categories for a strategy
+  GET /category-tasks?type=NAME&category=CAT - get tasks in a category
+  POST /category-capture - capture a new entry to a category"
+  :type '(alist :key-type string :value-type sexp)
+  :group 'org-agenda-api)
+
+;;; Worker Lifecycle
+
+(defvar org-agenda-api--request-count 0
+  "Number of requests handled by this worker.")
+
+(defvar org-agenda-api--start-time nil
+  "Time when this worker started.")
+
+(defun org-agenda-api--check-worker-lifecycle ()
+  "Check if worker should exit based on max-requests or max-lifetime.
+Called after each request completes. Exits gracefully if limit reached."
+  (let ((should-exit nil)
+        (reason nil))
+    ;; Check request count
+    (when (and org-agenda-api-max-requests
+               (>= org-agenda-api--request-count org-agenda-api-max-requests))
+      (setq should-exit t
+            reason (format "max requests reached (%d)" org-agenda-api--request-count)))
+    ;; Check lifetime
+    (when (and org-agenda-api-max-lifetime
+               org-agenda-api--start-time
+               (>= (float-time (time-subtract (current-time) org-agenda-api--start-time))
+                   org-agenda-api-max-lifetime))
+      (setq should-exit t
+            reason (format "max lifetime reached (%ds)" org-agenda-api-max-lifetime)))
+    ;; Exit if needed
+    (when should-exit
+      (message "org-agenda-api: worker exiting (%s)" reason)
+      ;; Use a timer to exit after response is fully sent
+      (run-at-time 0.1 nil #'kill-emacs 0))))
+
+(defun org-agenda-api--track-request ()
+  "Increment request counter and check lifecycle.
+Call this at the end of each servlet."
+  (cl-incf org-agenda-api--request-count)
+  (org-agenda-api--check-worker-lifecycle))
+
+;;; Caching
+
+(defvar org-agenda-api--todos-cache nil
+  "Cached TODO items from last computation.")
+
+(defvar org-agenda-api--cache-mtime nil
+  "Maximum modification time of org files when cache was built.")
+
+(defun org-agenda-api--get-max-mtime ()
+  "Get the maximum modification time across all `org-agenda-files'."
+  (if (null org-agenda-files)
+      0
+    (apply #'max
+           (mapcar (lambda (file)
+                     (if (file-exists-p file)
+                         (float-time (file-attribute-modification-time
+                                      (file-attributes file)))
+                       0))
+                   org-agenda-files))))
+
+(defun org-agenda-api--cache-valid-p ()
+  "Return t if the TODO cache is still valid."
+  (and org-agenda-api--todos-cache
+       org-agenda-api--cache-mtime
+       (<= (org-agenda-api--get-max-mtime)
+           org-agenda-api--cache-mtime)))
+
+(defun org-agenda-api--invalidate-cache ()
+  "Invalidate the TODO cache."
+  (setq org-agenda-api--todos-cache nil
+        org-agenda-api--cache-mtime nil))
+
+;;; Git Refresh
+
+(defun org-agenda-api--get-git-repos-for-agenda-files ()
+  "Get unique git repository roots for all `org-agenda-files'."
+  (let ((repos nil))
+    (dolist (file org-agenda-files)
+      (when (file-exists-p file)
+        (let ((dir (file-name-directory (expand-file-name file))))
+          (when dir
+            (let ((git-root (locate-dominating-file dir ".git")))
+              (when git-root
+                (let ((normalized (expand-file-name git-root)))
+                  (unless (member normalized repos)
+                    (push normalized repos)))))))))
+    repos))
+
+(defun org-agenda-api--git-refresh-repo (repo-path)
+  "Run git pull in REPO-PATH. Returns alist with result."
+  (let ((default-directory repo-path))
+    (condition-case err
+        (let ((output (shell-command-to-string "git pull --ff-only 2>&1")))
+          `(("repo" . ,repo-path)
+            ("status" . "success")
+            ("output" . ,(string-trim output))))
+      (error
+       (org-agenda-api--log-error-with-backtrace "git-refresh" err)
+       `(("repo" . ,repo-path)
+         ("status" . "error")
+         ("message" . ,(error-message-string err)))))))
+
+(defun org-agenda-api--git-refresh-all ()
+  "Refresh all git repos containing agenda files.
+Returns list of results for each repo."
+  (let ((repos (org-agenda-api--get-git-repos-for-agenda-files)))
+    (when repos
+      (org-agenda-api--invalidate-cache)
+      (mapcar #'org-agenda-api--git-refresh-repo repos))))
+
+;;; Utility Functions
+
+(defun org-agenda-api--plist-to-alist (plist)
+  "Convert PLIST to an alist for JSON encoding.
+Converts :key to \"key\" string."
+  (let ((result nil))
+    (while plist
+      (let ((key (substring (symbol-name (car plist)) 1))  ; Remove leading :
+            (value (cadr plist)))
+        (push (cons key value) result))
+      (setq plist (cddr plist)))
+    (nreverse result)))
+
+(provide 'org-agenda-api-core)
+;;; org-agenda-api-core.el ends here
