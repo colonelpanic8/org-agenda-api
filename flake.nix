@@ -148,13 +148,25 @@
         };
 
         # The elisp files
-        orgAgendaApiEl = ./org-agenda-api.el;
         containerInitEl = ./container-init.el;
         containerBootstrapEl = ./container-bootstrap.el;
 
+        # Package all org-agenda-api elisp files into a site-lisp directory
+        orgAgendaApiSitelisp = pkgs.runCommand "org-agenda-api-sitelisp" {} ''
+          mkdir -p $out/share/emacs/site-lisp
+          cp ${./org-agenda-api.el} $out/share/emacs/site-lisp/
+          cp ${./org-agenda-api-core.el} $out/share/emacs/site-lisp/
+          cp ${./org-agenda-api-data.el} $out/share/emacs/site-lisp/
+          cp ${./org-agenda-api-capture.el} $out/share/emacs/site-lisp/
+          cp ${./org-agenda-api-mutations.el} $out/share/emacs/site-lisp/
+          cp ${./org-agenda-api-endpoints.el} $out/share/emacs/site-lisp/
+          cp ${./org-agenda-api-categories.el} $out/share/emacs/site-lisp/
+          cp ${./org-agenda-api-window-habit.el} $out/share/emacs/site-lisp/
+        '';
+
         # Import the container builder
         mkContainer = import ./container.nix {
-          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiEl containerInitEl gitCommit movaWeb;
+          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiSitelisp containerInitEl gitCommit movaWeb;
         };
 
         # Package an existing emacs config directory (with pre-populated straight/)
@@ -258,11 +270,8 @@
         lib = { inherit mkContainer mkEmacsConfig; };
 
         packages = {
-          # The elisp package
-          org-agenda-api-el = pkgs.runCommand "org-agenda-api-el" {} ''
-            mkdir -p $out/share/emacs/site-lisp
-            cp ${orgAgendaApiEl} $out/share/emacs/site-lisp/org-agenda-api.el
-          '';
+          # The elisp package (all modules)
+          org-agenda-api-el = orgAgendaApiSitelisp;
 
           # Mova web app build
           inherit movaWeb;

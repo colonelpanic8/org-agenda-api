@@ -1,4 +1,4 @@
-{ pkgs, emacsWithPackages, gitSyncRs, orgAgendaApiEl, containerInitEl, gitCommit ? "unknown", movaWeb }:
+{ pkgs, emacsWithPackages, gitSyncRs, orgAgendaApiSitelisp, containerInitEl, gitCommit ? "unknown", movaWeb }:
 
 {
   name ? "org-agenda-api",
@@ -209,17 +209,24 @@ let
     done
   '';
 
+  # Path to org-agenda-api site-lisp directory
+  orgAgendaApiLoadPath = "${orgAgendaApiSitelisp}/share/emacs/site-lisp";
+
   # Emacs command varies based on whether we have a custom config dir
   emacsCommand = if emacsConfigDir != null then
     # With custom config: set user-emacs-directory and load the entry point
     ''${emacsWithPackages}/bin/emacs --fg-daemon=org-api \
       --eval "(setq user-emacs-directory \"${containerConfigPath}/\")" \
-      --load ${orgAgendaApiEl} \
+      --eval "(add-to-list 'load-path \"${orgAgendaApiLoadPath}\")" \
+      --eval "(require 'org-agenda-api)" \
       --load ${containerConfigPath}/${emacsConfigEntryPoint} \
       --load ${containerInitEl}''
   else
     # Without custom config: just load org-agenda-api and container-init
-    "${emacsWithPackages}/bin/emacs --fg-daemon=org-api --load ${orgAgendaApiEl} --load ${containerInitEl}";
+    ''${emacsWithPackages}/bin/emacs --fg-daemon=org-api \
+      --eval "(add-to-list 'load-path \"${orgAgendaApiLoadPath}\")" \
+      --eval "(require 'org-agenda-api)" \
+      --load ${containerInitEl}'';
 
   containerSupervisordConf = pkgs.writeText "supervisord.conf" ''
     [supervisord]
