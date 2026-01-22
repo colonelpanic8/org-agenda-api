@@ -17,7 +17,7 @@
 
 ;;; Code:
 
-(require 'org-agenda-api)
+(require 'org-agenda-api-core)
 
 ;; Only proceed if org-window-habit is available
 (when (require 'org-window-habit nil t)

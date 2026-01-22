@@ -175,3 +175,67 @@ class TestGetAllTodosHabitFields:
         assert len(non_habit_todos) > 0, "Should have non-habit todos"
         for todo in non_habit_todos:
             assert "habitSummary" not in todo
+
+
+class TestEffectiveCategory:
+    """Tests for effectiveCategory field in todos."""
+
+    def test_todos_have_effective_category_field(self, api):
+        """All todos should have an effectiveCategory field."""
+        response = api.get_all_todos()
+        data = response.json()
+        todos = data.get("todos", [])
+        assert len(todos) > 0, "Should have todos to test"
+        for todo in todos:
+            assert "effectiveCategory" in todo, f"Todo missing effectiveCategory: {todo.get('title')}"
+
+    def test_effective_category_is_string(self, api):
+        """effectiveCategory should be a string."""
+        response = api.get_all_todos()
+        data = response.json()
+        todos = data.get("todos", [])
+        for todo in todos:
+            cat = todo.get("effectiveCategory")
+            assert cat is None or isinstance(cat, str), f"effectiveCategory should be string, got {type(cat)}"
+
+    def test_explicit_category_property_becomes_effective(self, api):
+        """Entry with explicit CATEGORY property should use that as effectiveCategory."""
+        response = api.get_all_todos()
+        data = response.json()
+        todos = data.get("todos", [])
+
+        # Find the task with custom properties (has CATEGORY: testing in sample.org)
+        custom_task = next(
+            (t for t in todos if "custom properties" in t.get("title", "").lower()),
+            None,
+        )
+        assert custom_task is not None, "Should find task with custom properties"
+        assert custom_task["effectiveCategory"] == "testing", (
+            f"Expected effectiveCategory='testing', got '{custom_task.get('effectiveCategory')}'"
+        )
+
+    def test_effective_category_falls_back_to_filename(self, api):
+        """Entries without CATEGORY property should use filename as effectiveCategory."""
+        response = api.get_all_todos()
+        data = response.json()
+        todos = data.get("todos", [])
+
+        # Find a task from today.org that doesn't have explicit CATEGORY
+        today_task = next(
+            (t for t in todos if "scheduled for today" in t.get("title", "").lower()),
+            None,
+        )
+        assert today_task is not None, "Should find task scheduled for today"
+        # Should fall back to filename (without .org extension)
+        assert today_task["effectiveCategory"] == "today", (
+            f"Expected effectiveCategory='today' (filename), got '{today_task.get('effectiveCategory')}'"
+        )
+
+    def test_effective_category_in_agenda(self, api):
+        """Agenda entries should also have effectiveCategory."""
+        response = api.get_agenda()
+        data = response.json()
+        entries = data.get("entries", [])
+        assert len(entries) > 0, "Should have agenda entries"
+        for entry in entries:
+            assert "effectiveCategory" in entry, f"Agenda entry missing effectiveCategory: {entry.get('title')}"

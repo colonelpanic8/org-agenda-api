@@ -1,0 +1,476 @@
+;;; org-agenda-api-endpoints.el --- HTTP endpoints for org-agenda-api -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 Ivan Malison
+;; Author: Ivan Malison <IvanMalison@gmail.com>
+
+;;; Commentary:
+;; HTTP endpoint definitions (defservlets) for the API.
+
+;;; Code:
+
+(require 'json)
+(require 'simple-httpd)
+(require 'org-agenda-api-core)
+(require 'org-agenda-api-data)
+(require 'org-agenda-api-capture)
+(require 'org-agenda-api-mutations)
+
+;;; Query Endpoints
+
+(defservlet get-all-todos application/json (_path query)
+  "Endpoint: Return all TODO items from agenda files as JSON.
+Response is wrapped with notification defaults.
+Accepts optional query param 'refresh' (true/1) to git pull repos first."
+  (let* ((refresh-param (cadr (assoc "refresh" query)))
+         (git-results (when (member refresh-param '("true" "1"))
+                        (org-agenda-api--git-refresh-all)))
+         (todos (org-agenda-api--get-agenda-todos))
+         (defaults `(("notifyBefore" . ,(vconcat (org-agenda-api--get-default-notify-before)))))
+         (response `(("defaults" . ,defaults)
+                     ("todos" . ,(vconcat todos)))))
+    (when git-results
+      (push `("gitRefresh" . ,(vconcat git-results)) response))
+    (insert (json-encode response)))
+  (org-agenda-api--track-request))
+
+(defservlet get-todays-agenda application/json ()
+  "Endpoint: Return today's scheduled and deadlined items as JSON."
+  (insert (json-encode
+           (mapcar #'org-agenda-api--item-to-json
+                   (org-agenda-api--get-today-agenda))))
+  (org-agenda-api--track-request))
+
+(defservlet agenda application/json (_path query)
+  "Endpoint: Return org-agenda entries as JSON.
+Accepts optional query params:
+  - 'span' (day or week, defaults to day)
+  - 'date' (YYYY-MM-DD format, defaults to today)
+  - 'include_overdue' (true/1) to include overdue items from previous days (default: false)
+  - 'include_completed' (true/1) to include items completed on this date (default: false)
+  - 'refresh' (true/1) to git pull repos first."
+  (let* ((span-param (cadr (assoc "span" query)))
+         (date-param (cadr (assoc "date" query)))
+         (include-overdue-param (cadr (assoc "include_overdue" query)))
+         (include-completed-param (cadr (assoc "include_completed" query)))
+         (refresh-param (cadr (assoc "refresh" query)))
+         (git-results (when (member refresh-param '("true" "1"))
+                        (org-agenda-api--git-refresh-all)))
+         (span (if (string= span-param "week") 'week 'day))
+         (include-overdue (member include-overdue-param '("true" "1")))
+         (include-completed (member include-completed-param '("true" "1")))
+         ;; Use requested date or default to today (using calendar-current-date for testability)
+         (today (calendar-current-date))
+         (today-str (format "%04d-%02d-%02d" (nth 2 today) (nth 0 today) (nth 1 today)))
+         (effective-date (or date-param today-str))
+         (entries (org-agenda-api--run-agenda span effective-date include-overdue include-completed))
+         (response `(("span" . ,(symbol-name span))
+                     ("date" . ,effective-date)
+                     ("entries" . ,(vconcat entries)))))
+    (when git-results
+      (push `("gitRefresh" . ,(vconcat git-results)) response))
+    (insert (json-encode response)))
+  (org-agenda-api--track-request))
+
+(defservlet capture-templates application/json ()
+  "Endpoint: Return registered capture templates and their prompts."
+  (condition-case err
+      (let ((templates-data (org-agenda-api--get-all-templates-json)))
+        (message "[org-agenda-api] /capture-templates: returning %d templates"
+                 (length templates-data))
+        (insert (json-encode templates-data)))
+    (error
+     (message "[org-agenda-api] /capture-templates ERROR: %S" err)
+     (message "[org-agenda-api] org-agenda-api-capture-templates: %S"
+              org-agenda-api-capture-templates)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(format "Server error: %S" err)))))))
+  (org-agenda-api--track-request))
+
+(defservlet todo-states application/json ()
+  "Endpoint: Return configured TODO states.
+Returns active (not-done) states and done states separately."
+  (insert (json-encode (org-agenda-api--get-todo-states)))
+  (org-agenda-api--track-request))
+
+(defservlet filter-options application/json ()
+  "Endpoint: Return all available filter options for the UI.
+Returns todoStates, priorities, tags, and categories."
+  (condition-case err
+      (progn
+        (message "[org-agenda-api] /filter-options: fetching options...")
+        (let ((result (org-agenda-api--get-filter-options)))
+          (message "[org-agenda-api] /filter-options: got %d todo states, %d priorities, %d tags, %d categories"
+                   (length (cdr (assoc "todoStates" result)))
+                   (length (cdr (assoc "priorities" result)))
+                   (length (cdr (assoc "tags" result)))
+                   (length (cdr (assoc "categories" result))))
+          (insert (json-encode result))))
+    (error
+     (message "[org-agenda-api] /filter-options ERROR: %S" err)
+     (httpd-error t 500 (format "Error: %S" err))))
+  (org-agenda-api--track-request))
+
+(defservlet agenda-files application/json ()
+  "Endpoint: Return the list of org-agenda-files as JSON."
+  (let* ((files (mapcar #'expand-file-name org-agenda-files))
+         (file-info (mapcar (lambda (f)
+                              `(("path" . ,f)
+                                ("exists" . ,(if (file-exists-p f) t :json-false))
+                                ("readable" . ,(if (file-readable-p f) t :json-false))))
+                            files))
+         (response `(("count" . ,(length files))
+                     ("files" . ,(vconcat file-info)))))
+    (insert (json-encode response)))
+  (org-agenda-api--track-request))
+
+(defservlet custom-views application/json ()
+  "Endpoint: Return list of available custom agenda views."
+  (condition-case err
+      (let* ((views (org-agenda-api--list-custom-views))
+             (response `(("views" . ,(vconcat views)))))
+        (message "[org-agenda-api] /custom-views: returning %d views"
+                 (length views))
+        (insert (json-encode response)))
+    (error
+     (message "[org-agenda-api] /custom-views ERROR: %S" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(format "Server error: %S" err)))))))
+  (org-agenda-api--track-request))
+
+(defservlet metadata application/json ()
+  "Endpoint: Return all app metadata in a single request.
+Returns templates, filterOptions, todoStates, customViews, and any errors."
+  (let ((result '())
+        (errors '()))
+    ;; Collect templates
+    (condition-case err
+        (push `("templates" . ,(org-agenda-api--get-all-templates-json)) result)
+      (error
+       (push (format "templates: %s" (error-message-string err)) errors)
+       (push '("templates" . nil) result)))
+    ;; Collect filter options
+    (condition-case err
+        (push `("filterOptions" . ,(org-agenda-api--get-filter-options)) result)
+      (error
+       (push (format "filterOptions: %s" (error-message-string err)) errors)
+       (push '("filterOptions" . nil) result)))
+    ;; Collect todo states
+    (condition-case err
+        (push `("todoStates" . ,(org-agenda-api--get-todo-states)) result)
+      (error
+       (push (format "todoStates: %s" (error-message-string err)) errors)
+       (push '("todoStates" . nil) result)))
+    ;; Collect custom views
+    (condition-case err
+        (let ((views (org-agenda-api--list-custom-views)))
+          (push `("customViews" . (("views" . ,(vconcat views)))) result))
+      (error
+       (push (format "customViews: %s" (error-message-string err)) errors)
+       (push '("customViews" . nil) result)))
+    ;; Add errors array
+    (push `("errors" . ,(vconcat (nreverse errors))) result)
+    (insert (json-encode (nreverse result))))
+  (org-agenda-api--track-request))
+
+(defservlet custom-view application/json (_path query)
+  "Endpoint: Run a custom agenda view and return entries as JSON.
+Accepts query params:
+  - 'key' (required): The custom agenda command key
+  - 'refresh' (optional): If 'true' or '1', git pull repos first."
+  (let* ((key (cadr (assoc "key" query)))
+         (refresh-param (cadr (assoc "refresh" query)))
+         (git-results (when (member refresh-param '("true" "1"))
+                        (org-agenda-api--git-refresh-all))))
+    (if (or (null key) (string= key ""))
+        (insert (json-encode `(("status" . "error")
+                               ("message" . "Missing required 'key' parameter"))))
+      (let* ((name (org-agenda-api--get-custom-view-name key))
+             (entries (org-agenda-api--run-custom-view key))
+             (response `(("key" . ,key)
+                         ("name" . ,name)
+                         ("entries" . ,(vconcat entries)))))
+        (when git-results
+          (push `("gitRefresh" . ,(vconcat git-results)) response))
+        (insert (json-encode response)))))
+  (org-agenda-api--track-request))
+
+;;; Mutation Endpoints
+
+(defservlet capture application/json (_path _query headers)
+  "Endpoint: Capture using a registered template with provided values."
+  (condition-case err
+      (let* ((content-header (cadr (assoc "Content" headers)))
+             (json-data (json-parse-string content-header))
+             (template-key (gethash "template" json-data))
+             (values-hash (gethash "values" json-data))
+             ;; Convert hash-table to alist
+             (values (let (alist)
+                       (maphash (lambda (k v) (push (cons k v) alist)) values-hash)
+                       alist))
+             (result (org-agenda-api--capture-with-template template-key values)))
+        (insert (json-encode result)))
+    (error
+     ;; Return error as JSON with appropriate status
+     ;; Note: simple-httpd doesn't have great error handling, so we return 200 with error in body
+     ;; A better approach would need custom error handling
+     (org-agenda-api--log-error-with-backtrace "/capture" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
+(defservlet update application/json (_path _query headers)
+  "Endpoint: Update a TODO's title, scheduled date, deadline, priority, tags, or properties.
+Accepts JSON body with:
+  - id: org-id of the todo (preferred)
+  - file: file path (fallback)
+  - pos: position in file (fallback)
+  - title: heading title (can match by title alone or with file)
+  - new_title: new title to set for the heading
+  - scheduled: ISO date/datetime string or null to clear
+  - deadline: ISO date/datetime string or null to clear
+  - priority: A, B, C, or null to clear
+  - tags: array of tag strings to set, or empty array to clear
+  - properties: object of property name/value pairs to set/update
+Returns updated todo with new file and pos for cache update."
+  (condition-case err
+      (catch 'done
+        (let* ((content-header (cadr (assoc "Content" headers)))
+               (json-data (json-parse-string content-header))
+               (id (gethash "id" json-data))
+               (file (gethash "file" json-data))
+               (pos (gethash "pos" json-data))
+               (title (gethash "title" json-data))
+               (new-title (gethash "new_title" json-data))
+               (scheduled (gethash "scheduled" json-data))
+               (deadline (gethash "deadline" json-data))
+               (priority (gethash "priority" json-data))
+               (tags (gethash "tags" json-data))
+               (properties (gethash "properties" json-data))
+               (location nil)
+               (updates nil))
+          ;; Log incoming request for debugging
+        (message "[/update] Request: id=%s file=%s pos=%s title=%s new_title=%s scheduled=%s deadline=%s priority=%s"
+                 id file pos title new-title scheduled deadline priority)
+        ;; Check for unrecognized fields
+        (let ((allowed-fields '("id" "file" "pos" "title" "new_title" "scheduled" "deadline" "priority" "tags" "properties"))
+              (unrecognized nil))
+          (maphash (lambda (key _value)
+                     (unless (member key allowed-fields)
+                       (push key unrecognized)))
+                   json-data)
+          (when unrecognized
+            (message "[/update] ERROR: Unrecognized fields: %s" unrecognized)
+            (insert (json-encode `(("status" . "error")
+                                   ("message" . ,(format "Unrecognized fields: %s. Did you mean 'scheduled' instead of 'schedule'?"
+                                                         (string-join unrecognized ", "))))))
+            (throw 'done nil)))
+        ;; Build updates alist (include keys even if value is nil, to signal clearing)
+        ;; Use :not-found sentinel to properly detect if key exists in JSON
+        (unless (eq (gethash "new_title" json-data :not-found) :not-found)
+          (push (cons "new_title" (if (eq new-title :null) nil new-title)) updates))
+        (unless (eq (gethash "scheduled" json-data :not-found) :not-found)
+          (push (cons "scheduled" (if (eq scheduled :null) nil scheduled)) updates))
+        (unless (eq (gethash "deadline" json-data :not-found) :not-found)
+          (push (cons "deadline" (if (eq deadline :null) nil deadline)) updates))
+        (unless (eq (gethash "priority" json-data :not-found) :not-found)
+          (push (cons "priority" (if (eq priority :null) nil priority)) updates))
+        (unless (eq (gethash "tags" json-data :not-found) :not-found)
+          (push (cons "tags" (if (eq tags :null) nil tags)) updates))
+        ;; Handle properties - convert hash-table to alist
+        (unless (eq (gethash "properties" json-data :not-found) :not-found)
+          (let ((props-alist nil))
+            (when (and properties (hash-table-p properties))
+              (maphash (lambda (k v)
+                         (push (cons k (if (eq v :null) nil v)) props-alist))
+                       properties))
+            (push (cons "properties" props-alist) updates)))
+        (message "[/update] Updates to apply: %S" updates)
+        ;; Try to find by ID first
+        (setq location (org-agenda-api--find-todo-by-id id))
+        (when location (message "[/update] Found by ID"))
+        ;; Fall back to file+pos+title (includes lenient matching)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title))
+          (when location (message "[/update] Found by file+pos+title")))
+        ;; Fall back to file+title strict match (handles position drift)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-title file title))
+          (when location (message "[/update] Found by file+title")))
+        ;; Fall back to title only strict match across all agenda files
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-title title))
+          (when location (message "[/update] Found by title only")))
+        ;; Fall back to file+title lenient match (handles whitespace/unicode differences)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-title file title t))
+          (when location (message "[/update] Found by file+title (lenient)")))
+        ;; Fall back to title only lenient match across all agenda files
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-title title t))
+          (when location (message "[/update] Found by title only (lenient)")))
+        (message "[/update] Location: %S" location)
+        (if location
+            (let ((result (org-agenda-api--update-todo-at
+                           (car location) (cdr location) updates)))
+              (insert (json-encode result)))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Todo not found")))))))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/update" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
+(defservlet complete application/json (_path _query headers)
+  "Endpoint: Mark a TODO as complete.
+Accepts JSON body with:
+  - id: org-id of the todo (preferred)
+  - file: file path (fallback)
+  - pos: position in file (fallback)
+  - title: heading title (for verification)
+  - state: new state (optional, defaults to DONE)"
+  (condition-case err
+      (let* ((content-header (cadr (assoc "Content" headers)))
+             (json-data (json-parse-string content-header))
+             (id (gethash "id" json-data))
+             (file (gethash "file" json-data))
+             (pos (gethash "pos" json-data))
+             (title (gethash "title" json-data))
+             (new-state (gethash "state" json-data))
+             (location nil))
+        ;; Try to find by ID first
+        (setq location (org-agenda-api--find-todo-by-id id))
+        ;; Fall back to file+pos+title (includes lenient matching)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
+        ;; Fall back to file+title strict match (handles position drift)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-title file title)))
+        ;; Fall back to title only strict match across all agenda files
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-title title)))
+        ;; Fall back to file+title lenient match (handles whitespace/unicode differences)
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-file-title file title t))
+          (when location (message "[/complete] Found by file+title (lenient)")))
+        ;; Fall back to title only lenient match across all agenda files
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-title title t))
+          (when location (message "[/complete] Found by title only (lenient)")))
+        (if location
+            (let ((result (org-agenda-api--complete-todo-at
+                           (car location) (cdr location) new-state)))
+              (insert (json-encode result)))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Todo not found"))))))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/complete" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
+(defservlet delete application/json (_path _query headers)
+  "Endpoint: Delete an org item permanently.
+Accepts JSON body with either:
+  - id: org-id to locate the item
+  - file + pos: direct file location
+Optional:
+  - include_children: if true, delete subtree even if item has children"
+  (let* ((content-header (cadr (assoc "Content" headers)))
+         (json-data (condition-case parse-err
+                        (json-parse-string content-header)
+                      (error
+                       (org-agenda-api--log 'error "/delete: Failed to parse JSON body: %s (raw: %s)"
+                                            (error-message-string parse-err) content-header)
+                       nil)))
+         (id (and json-data (gethash "id" json-data)))
+         (file (and json-data (gethash "file" json-data)))
+         (position (and json-data (gethash "pos" json-data)))
+         (include-children (and json-data (eq (gethash "include_children" json-data) t))))
+    ;; Log the incoming request parameters
+    (org-agenda-api--log 'info "/delete: Request params - id=%S, file=%S, pos=%S, include_children=%S"
+                         id file position include-children)
+    (condition-case err
+        (if (null json-data)
+            (insert (json-encode `(("status" . "error")
+                                   ("code" . "INVALID_JSON")
+                                   ("message" . "Failed to parse request body as JSON"))))
+          (let ((result (org-agenda-api--delete-item id file position include-children)))
+            (org-agenda-api--log 'info "/delete: Success - deleted '%s'" (cdr (assoc "title" result)))
+            (insert (json-encode result))))
+      (org-agenda-api-delete-error
+       (let* ((error-data (cdr err))
+              (code (car error-data))
+              (message (cadr error-data)))
+         (org-agenda-api--log 'error "/delete: %s - %s (id=%S, file=%S, pos=%S)"
+                              code message id file position)
+         (org-agenda-api--log 'error "/delete: Backtrace:\n%s" (org-agenda-api--capture-backtrace))
+         (insert (json-encode `(("status" . "error")
+                                ("code" . ,code)
+                                ("message" . ,message)
+                                ("request" . (("id" . ,(or id :json-null))
+                                              ("file" . ,(or file :json-null))
+                                              ("pos" . ,(or position :json-null))
+                                              ("include_children" . ,(if include-children t :json-false)))))))))
+      (error
+       (org-agenda-api--log-error-with-backtrace "/delete" err)
+       (org-agenda-api--log 'error "/delete: Request was - id=%S, file=%S, pos=%S, include_children=%S"
+                            id file position include-children)
+       (insert (json-encode `(("status" . "error")
+                              ("code" . "INTERNAL_ERROR")
+                              ("message" . ,(error-message-string err))
+                              ("request" . (("id" . ,(or id :json-null))
+                                            ("file" . ,(or file :json-null))
+                                            ("pos" . ,(or position :json-null))
+                                            ("include_children" . ,(if include-children t :json-false))))))))))
+  (org-agenda-api--track-request))
+
+;;; Utility Endpoints
+
+(defservlet health application/json ()
+  "Endpoint: Health check for monitoring systems (nginx, supervisord, etc.).
+Returns basic status information and capture readiness check."
+  (let* ((uptime (when org-agenda-api--start-time
+                   (float-time (time-subtract (current-time) org-agenda-api--start-time))))
+         (capture-check (catch 'unhealthy (org-agenda-api--check-capture-ready)))
+         (healthy (null capture-check))
+         (response `(("status" . ,(if healthy "ok" "unhealthy"))
+                     ("uptime" . ,uptime)
+                     ("requests" . ,org-agenda-api--request-count))))
+    (when capture-check
+      (push `("captureStatus" . ,capture-check) response)
+      (org-agenda-api--log 'warn "Health check failed: %s" capture-check))
+    (insert (json-encode response))
+    ;; Return 503 if unhealthy so supervisord/nginx can detect it
+    (unless healthy
+      (httpd-error httpd-current-proc 503))))
+
+(defservlet version application/json ()
+  "Endpoint: Return version information including semantic version and git commit hash.
+The git commit is read from the ORG_AGENDA_API_GIT_COMMIT environment variable,
+which is set at build time by the Nix flake."
+  (let* ((git-commit (or (getenv "ORG_AGENDA_API_GIT_COMMIT") "unknown"))
+         (response `(("version" . ,org-agenda-api-version)
+                     ("gitCommit" . ,git-commit))))
+    (insert (json-encode response))))
+
+(defservlet debug-config application/json ()
+  "Endpoint: Return current org configuration for debugging."
+  (let ((response `(("org-log-into-drawer" . ,org-log-into-drawer)
+                    ("org-log-done" . ,org-log-done)
+                    ("org-log-repeat" . ,org-log-repeat)
+                    ("org-log-reschedule" . ,org-log-reschedule)
+                    ("org-log-redeadline" . ,org-log-redeadline)
+                    ("org-todo-keywords" . ,(format "%S" org-todo-keywords))
+                    ("custom-elisp-file" . ,(getenv "ORG_API_CUSTOM_ELISP")))))
+    (insert (json-encode response))))
+
+(defservlet restart application/json ()
+  "Endpoint: Restart Emacs.
+Exits gracefully, allowing supervisord to restart the process."
+  (insert (json-encode `(("status" . "restarting"))))
+  ;; Use run-at-time to allow the response to be sent before exiting
+  (run-at-time 0.1 nil #'kill-emacs 0))
+
+(provide 'org-agenda-api-endpoints)
+;;; org-agenda-api-endpoints.el ends here
