@@ -313,6 +313,7 @@ expensive `org-element-at-point' calls."
               (olpath (org-get-outline-path t))  ; include current heading
               (notify-before (org-agenda-api--parse-notify-before
                               (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
+              (effective-category (org-get-category))
               (all-properties (org-agenda-api--get-all-entry-properties))
               ;; Get plain timestamps from entry body
               (timestamps (org-agenda-api--get-entry-timestamps))
@@ -343,6 +344,7 @@ expensive `org-element-at-point' calls."
            ("olpath" . ,(if olpath (vconcat olpath) nil))
            ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
            ("priority" . ,priority)
+           ("effectiveCategory" . ,effective-category)
            ("properties" . ,all-properties)
            ("isWindowHabit" . ,(if is-window-habit t :json-false))
            ,@(when habit-summary
@@ -474,7 +476,7 @@ AGENDA-LINE is the raw agenda display text for reference."
                  (priority (org-entry-get (point) "PRIORITY"))
                  (notify-before (org-agenda-api--parse-notify-before
                                  (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
-                 (category (org-get-category))
+                 (effective-category (org-get-category))
                  (all-properties (org-agenda-api--get-all-entry-properties))
                  ;; Get plain timestamps from entry body
                  (timestamps (org-agenda-api--get-entry-timestamps))
@@ -504,7 +506,7 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("olpath" . ,(if olpath (vconcat olpath) nil))
               ("priority" . ,priority)
               ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
-              ("category" . ,category)
+              ("effectiveCategory" . ,effective-category)
               ("agendaLine" . ,(substring-no-properties agenda-line))
               ("properties" . ,all-properties)
               ("completedAt" . ,completed-at)
