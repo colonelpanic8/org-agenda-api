@@ -395,8 +395,12 @@ pkgs.dockerTools.buildImage {
       pkgs.cacert
       pkgs.python3Packages.supervisor
       gitSyncRs
+      # QoL tools for interactive use
+      pkgs.less
+      pkgs.ncurses
+      pkgs.readline
     ] ++ extraPackages;
-    pathsToLink = [ "/bin" "/lib" "/share" ];
+    pathsToLink = [ "/bin" "/lib" "/share" "/etc" ];
   };
 
   runAsRoot = ''
@@ -432,6 +436,12 @@ pkgs.dockerTools.buildImage {
       "/secrets" = {};
     };
     Env = [
+      # Global PATH for interactive shells (SSH, exec)
+      "PATH=/bin"
+      # Editor preference
+      "EDITOR=emacs"
+      # Terminal type for readline/ncurses
+      "TERM=xterm-256color"
       # SSL certificates for HTTPS git repos
       "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
       "NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
