@@ -213,20 +213,13 @@ let
   orgAgendaApiLoadPath = "${orgAgendaApiSitelisp}/share/emacs/site-lisp";
 
   # Emacs command varies based on whether we have a custom config dir
+  # Note: Using single quotes around --eval args so double quotes are literal
   emacsCommand = if emacsConfigDir != null then
     # With custom config: set user-emacs-directory and load the entry point
-    ''${emacsWithPackages}/bin/emacs --fg-daemon=org-api \
-      --eval "(setq user-emacs-directory \"${containerConfigPath}/\")" \
-      --eval "(add-to-list 'load-path \"${orgAgendaApiLoadPath}\")" \
-      --eval "(require 'org-agenda-api)" \
-      --load ${containerConfigPath}/${emacsConfigEntryPoint} \
-      --load ${containerInitEl}''
+    "${emacsWithPackages}/bin/emacs --fg-daemon=org-api --eval '(setq user-emacs-directory \"${containerConfigPath}/\")' --eval '(add-to-list (quote load-path) \"${orgAgendaApiLoadPath}\")' --eval '(require (quote org-agenda-api))' --load ${containerConfigPath}/${emacsConfigEntryPoint} --load ${containerInitEl}"
   else
     # Without custom config: just load org-agenda-api and container-init
-    ''${emacsWithPackages}/bin/emacs --fg-daemon=org-api \
-      --eval "(add-to-list 'load-path \"${orgAgendaApiLoadPath}\")" \
-      --eval "(require 'org-agenda-api)" \
-      --load ${containerInitEl}'';
+    "${emacsWithPackages}/bin/emacs --fg-daemon=org-api --eval '(add-to-list (quote load-path) \"${orgAgendaApiLoadPath}\")' --eval '(require (quote org-agenda-api))' --load ${containerInitEl}";
 
   containerSupervisordConf = pkgs.writeText "supervisord.conf" ''
     [supervisord]

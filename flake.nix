@@ -152,16 +152,17 @@
         containerBootstrapEl = ./container-bootstrap.el;
 
         # Package all org-agenda-api elisp files into a site-lisp directory
+        # Must explicitly name destination files to avoid nix store hash prefixes
         orgAgendaApiSitelisp = pkgs.runCommand "org-agenda-api-sitelisp" {} ''
           mkdir -p $out/share/emacs/site-lisp
-          cp ${./org-agenda-api.el} $out/share/emacs/site-lisp/
-          cp ${./org-agenda-api-core.el} $out/share/emacs/site-lisp/
-          cp ${./org-agenda-api-data.el} $out/share/emacs/site-lisp/
-          cp ${./org-agenda-api-capture.el} $out/share/emacs/site-lisp/
-          cp ${./org-agenda-api-mutations.el} $out/share/emacs/site-lisp/
-          cp ${./org-agenda-api-endpoints.el} $out/share/emacs/site-lisp/
-          cp ${./org-agenda-api-categories.el} $out/share/emacs/site-lisp/
-          cp ${./org-agenda-api-window-habit.el} $out/share/emacs/site-lisp/
+          cp ${./org-agenda-api.el} $out/share/emacs/site-lisp/org-agenda-api.el
+          cp ${./org-agenda-api-core.el} $out/share/emacs/site-lisp/org-agenda-api-core.el
+          cp ${./org-agenda-api-data.el} $out/share/emacs/site-lisp/org-agenda-api-data.el
+          cp ${./org-agenda-api-capture.el} $out/share/emacs/site-lisp/org-agenda-api-capture.el
+          cp ${./org-agenda-api-mutations.el} $out/share/emacs/site-lisp/org-agenda-api-mutations.el
+          cp ${./org-agenda-api-endpoints.el} $out/share/emacs/site-lisp/org-agenda-api-endpoints.el
+          cp ${./org-agenda-api-categories.el} $out/share/emacs/site-lisp/org-agenda-api-categories.el
+          cp ${./org-agenda-api-window-habit.el} $out/share/emacs/site-lisp/org-agenda-api-window-habit.el
         '';
 
         # Import the container builder
