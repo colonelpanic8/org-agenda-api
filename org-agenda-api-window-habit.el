@@ -171,29 +171,34 @@ Returns a JSON-encodable alist."
                                              done-times)))
                     ("graph" . ,(vconcat graph)))))))))))
 
+  ;;; Helper Functions
+
+  (defun org-agenda-api--get-habit-config ()
+    "Return habit config data as an alist suitable for JSON encoding."
+    (let ((enabled (and (boundp 'org-window-habit-mode) org-window-habit-mode)))
+      (if (not enabled)
+          `(("status" . "ok")
+            ("enabled" . :json-false))
+        `(("status" . "ok")
+          ("enabled" . t)
+          ("colors" . (("conforming" . ,org-window-habit-conforming-color)
+                       ("notConforming" . ,org-window-habit-not-conforming-color)
+                       ("requiredCompletionForeground" . ,org-window-habit-required-completion-foreground-color)
+                       ("nonRequiredCompletionForeground" . ,org-window-habit-non-required-completion-foreground-color)
+                       ("requiredCompletionTodayForeground" . ,org-window-habit-required-completion-today-foreground-color)))
+          ("display" . (("precedingIntervals" . ,org-window-habit-preceding-intervals)
+                        ("followingDays" . ,org-window-habit-following-days)
+                        ("completionNeededTodayGlyph" . ,(char-to-string org-window-habit-completion-needed-today-glyph))
+                        ("completedGlyph" . ,(char-to-string org-window-habit-completed-glyph))))
+          ("behavior" . (("repeatToDeadline" . ,(if org-window-habit-repeat-to-deadline t :json-false))
+                         ("repeatToScheduled" . ,(if org-window-habit-repeat-to-scheduled t :json-false))
+                         ("nonConformingScale" . ,org-window-habit-non-conforming-scale)))))))
+
   ;;; HTTP Endpoints
 
   (defservlet habit-config application/json ()
     "Endpoint: Return org-window-habit configuration including colors and settings."
-    (let ((enabled (and (boundp 'org-window-habit-mode) org-window-habit-mode)))
-      (if (not enabled)
-          (insert (json-encode `(("status" . "ok")
-                                 ("enabled" . :json-false))))
-        (insert (json-encode
-                 `(("status" . "ok")
-                   ("enabled" . t)
-                   ("colors" . (("conforming" . ,org-window-habit-conforming-color)
-                                ("notConforming" . ,org-window-habit-not-conforming-color)
-                                ("requiredCompletionForeground" . ,org-window-habit-required-completion-foreground-color)
-                                ("nonRequiredCompletionForeground" . ,org-window-habit-non-required-completion-foreground-color)
-                                ("requiredCompletionTodayForeground" . ,org-window-habit-required-completion-today-foreground-color)))
-                   ("display" . (("precedingIntervals" . ,org-window-habit-preceding-intervals)
-                                 ("followingDays" . ,org-window-habit-following-days)
-                                 ("completionNeededTodayGlyph" . ,(char-to-string org-window-habit-completion-needed-today-glyph))
-                                 ("completedGlyph" . ,(char-to-string org-window-habit-completed-glyph))))
-                   ("behavior" . (("repeatToDeadline" . ,(if org-window-habit-repeat-to-deadline t :json-false))
-                                  ("repeatToScheduled" . ,(if org-window-habit-repeat-to-scheduled t :json-false))
-                                  ("nonConformingScale" . ,org-window-habit-non-conforming-scale))))))))
+    (insert (json-encode (org-agenda-api--get-habit-config)))
     (org-agenda-api--track-request))
 
   (defservlet habit-status application/json (_path query)

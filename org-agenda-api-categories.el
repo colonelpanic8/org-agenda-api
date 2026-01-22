@@ -242,35 +242,41 @@ logic for finding the correct capture location."
       ("title" . ,title)
       ("file" . ,target-file))))
 
+;;; Category Types Helper
+
+(defun org-agenda-api--get-category-types ()
+  "Return category types data as an alist suitable for JSON encoding.
+Returns an alist with a 'types' key containing a vector of type objects."
+  (let* ((types (org-agenda-api--list-category-types))
+         (type-info (mapcar
+                     (lambda (type)
+                       (let ((strategy (org-agenda-api--get-strategy type))
+                             (template (org-agenda-api--get-strategy-template type))
+                             (prompts (org-agenda-api--get-strategy-prompts type)))
+                         `(("name" . ,type)
+                           ("hasCategories" . ,(if (and strategy
+                                                        (org-agenda-api--get-categories-for-strategy strategy))
+                                                   t :json-false))
+                           ("captureTemplate" . ,template)
+                           ("prompts" . ,(vconcat
+                                          (mapcar
+                                           (lambda (prompt)
+                                             (let ((name (car prompt))
+                                                   (plist (cdr prompt)))
+                                               `(("name" . ,name)
+                                                 ("type" . ,(symbol-name (plist-get plist :type)))
+                                                 ("required" . ,(if (plist-get plist :required) t :json-false)))))
+                                           prompts))))))
+                     types)))
+    `(("types" . ,(vconcat type-info)))))
+
 ;;; Category Endpoints
 
 (defservlet category-types application/json ()
   "Endpoint: Return list of registered category strategy types.
 Returns an array of type objects with name, hasCategories, and captureTemplate."
   (condition-case err
-      (let* ((types (org-agenda-api--list-category-types))
-             (type-info (mapcar
-                         (lambda (type)
-                           (let ((strategy (org-agenda-api--get-strategy type))
-                                 (template (org-agenda-api--get-strategy-template type))
-                                 (prompts (org-agenda-api--get-strategy-prompts type)))
-                             `(("name" . ,type)
-                               ("hasCategories" . ,(if (and strategy
-                                                            (org-agenda-api--get-categories-for-strategy strategy))
-                                                       t :json-false))
-                               ("captureTemplate" . ,template)
-                               ("prompts" . ,(vconcat
-                                              (mapcar
-                                               (lambda (prompt)
-                                                 (let ((name (car prompt))
-                                                       (plist (cdr prompt)))
-                                                   `(("name" . ,name)
-                                                     ("type" . ,(symbol-name (plist-get plist :type)))
-                                                     ("required" . ,(if (plist-get plist :required) t :json-false)))))
-                                               prompts))))))
-                         types))
-             (response `(("types" . ,(vconcat type-info)))))
-        (insert (json-encode response)))
+      (insert (json-encode (org-agenda-api--get-category-types)))
     (error
      (org-agenda-api--log-error-with-backtrace "/category-types" err)
      (insert (json-encode `(("status" . "error")

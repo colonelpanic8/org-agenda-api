@@ -139,7 +139,7 @@ Returns todoStates, priorities, tags, and categories."
 
 (defservlet metadata application/json ()
   "Endpoint: Return all app metadata in a single request.
-Returns templates, filterOptions, todoStates, customViews, and any errors."
+Returns templates, filterOptions, todoStates, customViews, categoryTypes, habitConfig, and any errors."
   (let ((result '())
         (errors '()))
     ;; Collect templates
@@ -167,6 +167,20 @@ Returns templates, filterOptions, todoStates, customViews, and any errors."
       (error
        (push (format "customViews: %s" (error-message-string err)) errors)
        (push '("customViews" . nil) result)))
+    ;; Collect category types
+    (condition-case err
+        (push `("categoryTypes" . ,(org-agenda-api--get-category-types)) result)
+      (error
+       (push (format "categoryTypes: %s" (error-message-string err)) errors)
+       (push '("categoryTypes" . nil) result)))
+    ;; Collect habit config (if org-window-habit integration is available)
+    (condition-case err
+        (if (fboundp 'org-agenda-api--get-habit-config)
+            (push `("habitConfig" . ,(org-agenda-api--get-habit-config)) result)
+          (push `("habitConfig" . (("status" . "ok") ("enabled" . :json-false))) result))
+      (error
+       (push (format "habitConfig: %s" (error-message-string err)) errors)
+       (push '("habitConfig" . nil) result)))
     ;; Add errors array
     (push `("errors" . ,(vconcat (nreverse errors))) result)
     (insert (json-encode (nreverse result))))
