@@ -133,15 +133,47 @@ class APIClient:
         """POST /capture"""
         return self.post("/capture", json={"template": template, "values": values})
 
-    def complete_todo(self, todo: dict, state: str = "DONE") -> requests.Response:
-        """POST /complete"""
-        return self.post("/complete", json={
+    def complete_todo(self, todo: dict, state: str = "DONE", override_date: str = None) -> requests.Response:
+        """POST /complete
+
+        Args:
+            todo: Dict with id, file, pos, title to identify the todo
+            state: New state (defaults to DONE)
+            override_date: Optional ISO date string (YYYY-MM-DD) to use as effective date
+                          for the state change (affects LOGBOOK timestamp)
+        """
+        payload = {
             "id": todo.get("id"),
             "file": todo.get("file"),
             "pos": todo.get("pos"),
             "title": todo.get("title"),
             "state": state,
-        })
+        }
+        if override_date:
+            payload["override_date"] = override_date
+        return self.post("/complete", json=payload)
+
+    def set_state(self, todo: dict, state: str, override_date: str = None) -> requests.Response:
+        """POST /set-state
+
+        More accurately named endpoint for state transitions.
+
+        Args:
+            todo: Dict with id, file, pos, title to identify the todo
+            state: New state (required)
+            override_date: Optional ISO date string (YYYY-MM-DD) to use as effective date
+                          for the state change (affects LOGBOOK timestamp)
+        """
+        payload = {
+            "id": todo.get("id"),
+            "file": todo.get("file"),
+            "pos": todo.get("pos"),
+            "title": todo.get("title"),
+            "state": state,
+        }
+        if override_date:
+            payload["override_date"] = override_date
+        return self.post("/set-state", json=payload)
 
     def update_todo(self, todo: dict, updates: dict) -> requests.Response:
         """POST /update"""

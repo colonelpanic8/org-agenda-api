@@ -342,7 +342,9 @@ Accepts JSON body with:
   - file: file path (fallback)
   - pos: position in file (fallback)
   - title: heading title (for verification)
-  - state: new state (optional, defaults to DONE)"
+  - state: new state (optional, defaults to DONE)
+  - override_date: ISO date string to use as effective date for the state change
+                   (affects LOGBOOK timestamp, useful for retroactive completions)"
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
              (json-data (json-parse-string content-header))
@@ -351,6 +353,11 @@ Accepts JSON body with:
              (pos (gethash "pos" json-data))
              (title (gethash "title" json-data))
              (new-state (gethash "state" json-data))
+             (override-date-str (gethash "override_date" json-data))
+             (override-date (when (and override-date-str
+                                       (not (eq override-date-str :null))
+                                       (not (string-empty-p override-date-str)))
+                              (org-agenda-api--parse-datetime override-date-str)))
              (location nil))
         ;; Try to find by ID first
         (setq location (org-agenda-api--find-todo-by-id id))
@@ -373,12 +380,75 @@ Accepts JSON body with:
           (when location (message "[/complete] Found by title only (lenient)")))
         (if location
             (let ((result (org-agenda-api--complete-todo-at
-                           (car location) (cdr location) new-state)))
+                           (car location) (cdr location) new-state override-date)))
               (insert (json-encode result)))
           (insert (json-encode `(("status" . "error")
                                  ("message" . "Todo not found"))))))
     (error
      (org-agenda-api--log-error-with-backtrace "/complete" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
+(defservlet set-state application/json (_path _query headers)
+  "Endpoint: Change a TODO's state.
+This is an alias for /complete with a more accurate name, since it supports
+any state transition (not just completion).
+Accepts JSON body with:
+  - id: org-id of the todo (preferred)
+  - file: file path (fallback)
+  - pos: position in file (fallback)
+  - title: heading title (for verification)
+  - state: new state (required for this endpoint)
+  - override_date: ISO date string to use as effective date for the state change
+                   (affects LOGBOOK timestamp, useful for retroactive state changes)"
+  (condition-case err
+      (catch 'done
+        (let* ((content-header (cadr (assoc "Content" headers)))
+               (json-data (json-parse-string content-header))
+               (id (gethash "id" json-data))
+               (file (gethash "file" json-data))
+               (pos (gethash "pos" json-data))
+               (title (gethash "title" json-data))
+               (new-state (gethash "state" json-data))
+               (override-date-str (gethash "override_date" json-data))
+               (override-date (when (and override-date-str
+                                         (not (eq override-date-str :null))
+                                         (not (string-empty-p override-date-str)))
+                                (org-agenda-api--parse-datetime override-date-str)))
+               (location nil))
+          ;; Validate state is provided for this endpoint
+          (unless new-state
+            (insert (json-encode `(("status" . "error")
+                                   ("message" . "Missing required 'state' parameter"))))
+            (throw 'done nil))
+          ;; Try to find by ID first
+          (setq location (org-agenda-api--find-todo-by-id id))
+          ;; Fall back to file+pos+title (includes lenient matching)
+          (unless location
+            (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
+          ;; Fall back to file+title strict match (handles position drift)
+          (unless location
+            (setq location (org-agenda-api--find-todo-by-file-title file title)))
+          ;; Fall back to title only strict match across all agenda files
+          (unless location
+            (setq location (org-agenda-api--find-todo-by-title title)))
+          ;; Fall back to file+title lenient match (handles whitespace/unicode differences)
+          (unless location
+            (setq location (org-agenda-api--find-todo-by-file-title file title t))
+            (when location (message "[/set-state] Found by file+title (lenient)")))
+          ;; Fall back to title only lenient match across all agenda files
+          (unless location
+            (setq location (org-agenda-api--find-todo-by-title title t))
+            (when location (message "[/set-state] Found by title only (lenient)")))
+          (if location
+              (let ((result (org-agenda-api--complete-todo-at
+                             (car location) (cdr location) new-state override-date)))
+                (insert (json-encode result)))
+            (insert (json-encode `(("status" . "error")
+                                   ("message" . "Todo not found")))))))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/set-state" err)
      (insert (json-encode `(("status" . "error")
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))

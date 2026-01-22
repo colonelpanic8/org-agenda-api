@@ -13,9 +13,11 @@
 (require 'org-agenda-api-core)
 (require 'org-agenda-api-data)
 
-(defun org-agenda-api--complete-todo-at (file pos &optional new-state)
+(defun org-agenda-api--complete-todo-at (file pos &optional new-state override-date)
   "Mark the TODO at FILE and POS as complete.
 NEW-STATE defaults to DONE if not specified.
+OVERRIDE-DATE, if provided, should be an encoded time value that will be used
+as the effective date for the state change (affects LOGBOOK timestamps).
 Returns alist with status and details."
   (let ((new-state (or new-state "DONE")))
     (with-current-buffer (find-file-noselect file)
@@ -24,11 +26,26 @@ Returns alist with status and details."
         (if (org-at-heading-p)
             (let ((old-state (org-get-todo-state))
                   (title (org-get-heading t t t t)))
-              (org-todo new-state)
-              ;; Run post-command-hook to trigger org-mode's state change logging
-              ;; (LOGBOOK entries). In non-interactive contexts, org-add-log-note
-              ;; is added to post-command-hook but never runs without this.
-              (run-hooks 'post-command-hook)
+              ;; Call org-todo and run post-command-hook, optionally with date override.
+              ;; The post-command-hook must be inside the cl-letf because org-add-log-note
+              ;; is added to post-command-hook and uses org-current-effective-time when run.
+              ;; We also override current-time because some org-mode code paths use it directly.
+              (if override-date
+                  (cl-letf (((symbol-function 'current-time)
+                             (lambda (&rest _) override-date))
+                            ((symbol-function 'org-current-effective-time)
+                             (lambda (&rest _) override-date))
+                            ((symbol-function 'org-today)
+                             (lambda (&rest _) (time-to-days override-date))))
+                    (org-todo new-state)
+                    ;; Run post-command-hook inside the override scope
+                    (run-hooks 'post-command-hook))
+                (progn
+                  (org-todo new-state)
+                  ;; Run post-command-hook to trigger org-mode's state change logging
+                  ;; (LOGBOOK entries). In non-interactive contexts, org-add-log-note
+                  ;; is added to post-command-hook but never runs without this.
+                  (run-hooks 'post-command-hook)))
               (save-buffer)
               (org-agenda-api--invalidate-cache)
               ;; Check if this is a window-habit and get summary if so

@@ -197,6 +197,180 @@ class TestCompleteTodo:
         )
 
 
+class TestCompleteWithOverrideDate:
+    """Tests for completing todos with an override_date."""
+
+    def test_complete_with_override_date_changes_logbook_timestamp(self, api, org_dir):
+        """Completing with override_date should use that date in LOGBOOK entry."""
+        # Create a unique todo
+        unique_title = "Override date test todo 55555"
+        api.create_todo(unique_title)
+
+        # Find it
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None, f"Created todo not found: {unique_title}"
+
+        # Complete it with an override date in the past
+        override_date = "2024-01-15"  # A past date
+        response = api.complete_todo(todo, override_date=override_date)
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "completed"
+
+        # Read the file and verify LOGBOOK entry uses the override date
+        from pathlib import Path
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+
+        # The LOGBOOK should contain the override date
+        assert "2024-01-15" in content, (
+            f"Expected override date 2024-01-15 in LOGBOOK entry.\n"
+            f"File content:\n{content}"
+        )
+
+    def test_complete_with_override_datetime_preserves_time(self, api, org_dir):
+        """Completing with override_date including time should preserve the time."""
+        unique_title = "Override datetime test todo 66666"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Complete with a specific datetime
+        override_date = "2024-02-20T14:30:00"
+        response = api.complete_todo(todo, override_date=override_date)
+        assert response.status_code == 200
+
+        from pathlib import Path
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+
+        # Should contain the date and time
+        assert "2024-02-20" in content
+        assert "14:30" in content, (
+            f"Expected time 14:30 in LOGBOOK entry.\n"
+            f"File content:\n{content}"
+        )
+
+    def test_complete_without_override_date_creates_logbook(self, api, org_dir):
+        """Completing without override_date creates a valid LOGBOOK entry."""
+        unique_title = "No override date test todo 77778"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        response = api.complete_todo(todo)
+        assert response.status_code == 200
+
+        from pathlib import Path
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+
+        # Should have a LOGBOOK entry with state change (actual date depends on system time)
+        assert ":LOGBOOK:" in content
+        assert 'State "DONE"' in content
+        assert 'from "TODO"' in content
+
+
+class TestSetStateEndpoint:
+    """Tests for POST /set-state endpoint."""
+
+    def test_set_state_returns_200(self, api):
+        """Endpoint should return 200 OK on successful state change."""
+        unique_title = "Set state test todo 11111"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        response = api.set_state(todo, "DONE")
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "completed"
+        assert data.get("newState") == "DONE"
+
+    def test_set_state_requires_state_parameter(self, api):
+        """Endpoint should return error if state parameter is missing."""
+        # Manually post without state parameter
+        response = api.post("/set-state", json={
+            "title": "Some todo",
+        })
+        data = response.json()
+        assert data.get("status") == "error"
+        assert "state" in data.get("message", "").lower()
+
+    def test_set_state_with_override_date(self, api, org_dir):
+        """set_state should support override_date parameter."""
+        unique_title = "Set state override date test 22222"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        override_date = "2024-03-10"
+        response = api.set_state(todo, "DONE", override_date=override_date)
+        assert response.status_code == 200
+
+        from pathlib import Path
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+
+        assert "2024-03-10" in content, (
+            f"Expected override date 2024-03-10 in LOGBOOK entry.\n"
+            f"File content:\n{content}"
+        )
+
+    def test_set_state_to_non_done_state(self, api):
+        """set_state should work with non-DONE states like CANCELLED."""
+        unique_title = "Set state cancelled test 33333"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        response = api.set_state(todo, "CANCELLED")
+        # This may fail if CANCELLED is not a configured state
+        # but it should at least not error on the endpoint itself
+        assert response.status_code == 200
+
+
 class TestCompleteHabitResponse:
     """Tests for habit-related fields in /complete response."""
 
