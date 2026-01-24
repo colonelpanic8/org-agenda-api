@@ -32,11 +32,9 @@
   (defun org-agenda-api--is-window-habit-p ()
     "Return non-nil if entry at point is an org-window-habit.
 Must be called with point at an org heading.
-Checks for both new format (WINDOW_SPECS) and old format (WINDOW_DURATION)."
+Delegates to `org-window-habit-entry-p' from the org-window-habit library."
     (and (org-agenda-api--window-habit-available-p)
-         (or (org-entry-get nil (org-window-habit-property "ASSESSMENT_INTERVAL") t)
-             (org-entry-get nil (org-window-habit-property "WINDOW_SPECS") t)
-             (org-entry-get nil (org-window-habit-property "WINDOW_DURATION") t))))
+         (org-window-habit-entry-p)))
 
   (defun org-agenda-api--get-habit-summary ()
     "Get habit summary for the entry at point.
