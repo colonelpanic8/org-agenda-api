@@ -162,11 +162,11 @@
     "org-window-habit": {
       "flake": false,
       "locked": {
-        "lastModified": 1769072196,
-        "narHash": "sha256-OHsjM/O656/y/WxeikKA7ibKLnqBhmk7GLydrGBUnMs=",
+        "lastModified": 1769194430,
+        "narHash": "sha256-Xp6SnK6M1rH6ppQ5heRKHGdAWX3TcLDnmMl02GAS4e0=",
         "owner": "colonelpanic8",
         "repo": "org-window-habit",
-        "rev": "cf95626f7cf091b9951514900c73b61f966b0412",
+        "rev": "56a404d9c37e325f9eb908467017a356aa055369",
         "type": "github"
       },
       "original": {
