@@ -13,6 +13,92 @@
 (require 'org-agenda-api-core)
 (require 'org-agenda-api-data)
 
+(defun org-agenda-api--extract-logbook-entry-timestamp (entry-text)
+  "Extract timestamp from ENTRY-TEXT (a logbook entry string).
+Returns an encoded time value for sorting, or nil if no timestamp found."
+  (when (string-match org-ts-regexp-inactive entry-text)
+    (let ((ts-string (match-string 1 entry-text)))
+      (when ts-string
+        (org-time-string-to-time (concat "[" ts-string "]"))))))
+
+(defun org-agenda-api--reorder-logbook-entries ()
+  "Reorder LOGBOOK entries by timestamp (newest first).
+Should be called with point at the org heading.
+Returns t if entries were reordered, nil otherwise."
+  (save-excursion
+    (let ((drawer-name (cond
+                        ((and (boundp 'org-log-into-drawer)
+                              (stringp org-log-into-drawer))
+                         org-log-into-drawer)
+                        (t "LOGBOOK")))
+          (end-of-subtree (save-excursion (org-end-of-subtree t) (point))))
+      (when (re-search-forward
+             (format "^[ \t]*:%s:[ \t]*$" (regexp-quote drawer-name))
+             end-of-subtree t)
+        (let ((drawer-start (point))
+              (drawer-end (save-excursion
+                           (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t)
+                           (match-beginning 0)))
+              (entries nil)
+              (current-entry-start nil)
+              (current-entry-lines nil))
+          (when drawer-end
+            ;; Parse entries - each entry starts with "- " and may have continuation lines
+            (goto-char drawer-start)
+            (forward-line 1)
+            (while (< (point) drawer-end)
+              (let ((line (buffer-substring (line-beginning-position) (line-end-position))))
+                (cond
+                 ;; New entry starts with "- "
+                 ((string-match "^[ \t]*- " line)
+                  ;; Save previous entry if exists
+                  (when current-entry-lines
+                    (push (cons (org-agenda-api--extract-logbook-entry-timestamp
+                                 (car current-entry-lines))
+                                (nreverse current-entry-lines))
+                          entries))
+                  (setq current-entry-lines (list line)))
+                 ;; Continuation line (indented, not starting with "- " or ":")
+                 ((and current-entry-lines
+                       (string-match "^[ \t]+" line)
+                       (not (string-match "^[ \t]*:" line)))
+                  (push line current-entry-lines))
+                 ;; Other lines (empty, etc) - ignore
+                 (t nil)))
+              (forward-line 1))
+            ;; Don't forget the last entry
+            (when current-entry-lines
+              (push (cons (org-agenda-api--extract-logbook-entry-timestamp
+                           (car current-entry-lines))
+                          (nreverse current-entry-lines))
+                    entries))
+            ;; Sort entries by timestamp (newest first)
+            ;; Entries without timestamps go to the end
+            (setq entries (nreverse entries))
+            ;; Save original order before sorting (sort is destructive)
+            (let* ((original-order (mapcar #'car entries))
+                   (sorted-entries
+                    (sort entries
+                          (lambda (a b)
+                            (let ((time-a (car a))
+                                  (time-b (car b)))
+                              (cond
+                               ((and time-a time-b)
+                                (time-less-p time-b time-a))  ; newest first
+                               (time-a t)   ; entries with timestamps before those without
+                               (t nil))))))
+                   (new-order (mapcar #'car sorted-entries)))
+              ;; Check if order changed
+              (unless (equal original-order new-order)
+                ;; Rewrite the drawer contents
+                (goto-char drawer-start)
+                (forward-line 1)
+                (delete-region (point) drawer-end)
+                (dolist (entry sorted-entries)
+                  (dolist (line (cdr entry))
+                    (insert line "\n")))
+                t))))))))
+
 (defun org-agenda-api--complete-todo-at (file pos &optional new-state override-date)
   "Mark the TODO at FILE and POS as complete.
 NEW-STATE defaults to DONE if not specified.
@@ -31,15 +117,20 @@ Returns alist with status and details."
               ;; is added to post-command-hook and uses org-current-effective-time when run.
               ;; We also override current-time because some org-mode code paths use it directly.
               (if override-date
-                  (cl-letf (((symbol-function 'current-time)
-                             (lambda (&rest _) override-date))
-                            ((symbol-function 'org-current-effective-time)
-                             (lambda (&rest _) override-date))
-                            ((symbol-function 'org-today)
-                             (lambda (&rest _) (time-to-days override-date))))
-                    (org-todo new-state)
-                    ;; Run post-command-hook inside the override scope
-                    (run-hooks 'post-command-hook))
+                  (progn
+                    (cl-letf (((symbol-function 'current-time)
+                               (lambda (&rest _) override-date))
+                              ((symbol-function 'org-current-effective-time)
+                               (lambda (&rest _) override-date))
+                              ((symbol-function 'org-today)
+                               (lambda (&rest _) (time-to-days override-date))))
+                      (org-todo new-state)
+                      ;; Run post-command-hook inside the override scope
+                      (run-hooks 'post-command-hook))
+                    ;; Reorder logbook entries to maintain chronological order
+                    ;; (override-date may have inserted entry out of order)
+                    (org-back-to-heading t)
+                    (org-agenda-api--reorder-logbook-entries))
                 (progn
                   (org-todo new-state)
                   ;; Run post-command-hook to trigger org-mode's state change logging

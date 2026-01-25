@@ -277,6 +277,100 @@ class TestCompleteWithOverrideDate:
         assert 'State "DONE"' in content
         assert 'from "TODO"' in content
 
+    def test_override_date_maintains_chronological_order(self, api, org_dir):
+        """Logbook entries should maintain chronological order (newest first) when using override_date.
+
+        This tests that when completing with an override_date that is earlier than
+        existing entries, the new entry is inserted in the correct position rather
+        than always at the top.
+        """
+        from pathlib import Path
+
+        # Create a todo and complete it multiple times with different dates
+        # to build up a logbook, then add one out of order
+        unique_title = "Logbook order test todo 88888"
+        api.create_todo(unique_title)
+
+        # Find the todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Complete with date Jan 20 (this will be the first entry)
+        response = api.complete_todo(todo, override_date="2024-01-20")
+        assert response.status_code == 200
+
+        # The todo should now be DONE, get it again
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Set back to TODO to allow another completion
+        api.set_state(todo, "TODO")
+
+        # Get updated todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Complete with date Jan 10 (earlier than Jan 20 - should be inserted after)
+        response = api.complete_todo(todo, override_date="2024-01-10")
+        assert response.status_code == 200
+
+        # Read the file and check the order
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+
+        # Find the section for our specific todo (by title), then find its logbook
+        # The todo heading is followed by its logbook
+        todo_section_pattern = re.compile(
+            r'\*+ (?:TODO|DONE) ' + re.escape(unique_title) + r'.*?\n'
+            r'(.*?)'
+            r'(?=^\*|\Z)',  # Until next heading or end of file
+            re.MULTILINE | re.DOTALL
+        )
+        todo_section_match = todo_section_pattern.search(content)
+        assert todo_section_match, f"Todo section not found in content:\n{content}"
+
+        todo_section = todo_section_match.group(1)
+
+        # Find the logbook within this todo's section
+        logbook_match = re.search(
+            r':LOGBOOK:\s*\n(.*?):END:',
+            todo_section,
+            re.DOTALL
+        )
+        assert logbook_match, f"LOGBOOK not found in todo section:\n{todo_section}"
+
+        logbook_content = logbook_match.group(1)
+
+        # Extract dates from logbook entries
+        date_pattern = re.compile(r'\[(\d{4}-\d{2}-\d{2})')
+        dates = date_pattern.findall(logbook_content)
+
+        assert len(dates) >= 2, f"Expected at least 2 logbook entries, found {len(dates)}: {logbook_content}"
+
+        # Dates should be in reverse chronological order (newest first)
+        # Jan 20 should come before Jan 10
+        assert dates == sorted(dates, reverse=True), (
+            f"Logbook entries are not in chronological order (newest first).\n"
+            f"Found dates: {dates}\n"
+            f"Expected: {sorted(dates, reverse=True)}\n"
+            f"Logbook content:\n{logbook_content}"
+        )
+
 
 class TestSetStateEndpoint:
     """Tests for POST /set-state endpoint."""
