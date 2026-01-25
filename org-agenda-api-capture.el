@@ -172,7 +172,9 @@ like %(sexp), %U, %t, etc."
 VALUES is an alist of (PROMPT-NAME . VALUE) pairs.
 In addition to template prompts, VALUES may contain universal org fields:
   - scheduled: ISO date string
+  - scheduledRepeater: repeater object with type, value, unit
   - deadline: ISO date string
+  - deadlineRepeater: repeater object with type, value, unit
   - priority: A, B, or C
   - tags: list of tag strings
   - todo: TODO state keyword
@@ -193,7 +195,9 @@ Returns an alist with status information."
            (entry-text (org-agenda-api--build-entry-from-template template-entry values))
            ;; Extract universal fields from values
            (scheduled (cdr (assoc "scheduled" values)))
+           (scheduled-repeater (cdr (assoc "scheduledRepeater" values)))
            (deadline (cdr (assoc "deadline" values)))
+           (deadline-repeater (cdr (assoc "deadlineRepeater" values)))
            (priority (cdr (assoc "priority" values)))
            (tags (cdr (assoc "tags" values)))
            (todo-state (cdr (assoc "todo" values)))
@@ -219,18 +223,20 @@ Returns an alist with status information."
               (let ((priority-char (string-to-char (upcase priority))))
                 (when (memq priority-char '(?A ?B ?C))
                   (org-priority priority-char))))
-            ;; Apply scheduled - use org timestamp string to preserve time
+            ;; Apply scheduled - use org timestamp string to preserve time (with optional repeater)
             (when (and scheduled (not (string-empty-p scheduled)))
               (let* ((has-time (org-agenda-api--datetime-has-time-p scheduled))
                      (time (org-agenda-api--parse-datetime scheduled))
-                     (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+                     (org-ts (when time (org-agenda-api--format-org-timestamp-with-repeater
+                                         time has-time scheduled-repeater))))
                 (when org-ts
                   (org-schedule nil org-ts))))
-            ;; Apply deadline - use org timestamp string to preserve time
+            ;; Apply deadline - use org timestamp string to preserve time (with optional repeater)
             (when (and deadline (not (string-empty-p deadline)))
               (let* ((has-time (org-agenda-api--datetime-has-time-p deadline))
                      (time (org-agenda-api--parse-datetime deadline))
-                     (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+                     (org-ts (when time (org-agenda-api--format-org-timestamp-with-repeater
+                                         time has-time deadline-repeater))))
                 (when org-ts
                   (org-deadline nil org-ts))))
             ;; Apply tags

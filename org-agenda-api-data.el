@@ -856,6 +856,30 @@ If HAS-TIME is non-nil, include the time component."
       (format-time-string "<%Y-%m-%d %a %H:%M>" time)
     (format-time-string "<%Y-%m-%d %a>" time)))
 
+(defun org-agenda-api--format-repeater (repeater)
+  "Format REPEATER alist as org repeater string.
+REPEATER should be an alist with keys \"type\", \"value\", and \"unit\".
+Returns a string like \"+1w\" or \"++2d\", or nil if REPEATER is invalid."
+  (when (and repeater (not (eq repeater :json-null)))
+    (let ((type (cdr (assoc "type" repeater)))
+          (value (cdr (assoc "value" repeater)))
+          (unit (cdr (assoc "unit" repeater))))
+      (when (and type value unit)
+        (format "%s%d%s" type value unit)))))
+
+(defun org-agenda-api--format-org-timestamp-with-repeater (time has-time repeater)
+  "Format TIME as an org timestamp string, optionally with REPEATER.
+If HAS-TIME is non-nil, include the time component.
+REPEATER should be an alist with keys \"type\", \"value\", and \"unit\"."
+  (let ((repeater-str (org-agenda-api--format-repeater repeater)))
+    (if has-time
+        (if repeater-str
+            (format-time-string (concat "<%Y-%m-%d %a %H:%M " repeater-str ">") time)
+          (format-time-string "<%Y-%m-%d %a %H:%M>" time))
+      (if repeater-str
+          (format-time-string (concat "<%Y-%m-%d %a " repeater-str ">") time)
+        (format-time-string "<%Y-%m-%d %a>" time)))))
+
 ;;; TODO State and Filter Functions
 
 (defun org-agenda-api--get-todo-states ()

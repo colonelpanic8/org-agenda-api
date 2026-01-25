@@ -81,9 +81,10 @@ Returns alist with status, details, and new position."
                   (org-edit-headline new-title-value)
                   (setq title new-title-value)  ; Update title for response
                   (push `("new_title" . ,new-title-value) applied-updates))))
-            ;; Handle scheduled
+            ;; Handle scheduled (with optional repeater)
             (when (assoc "scheduled" updates)
-              (let ((scheduled-value (cdr (assoc "scheduled" updates))))
+              (let ((scheduled-value (cdr (assoc "scheduled" updates)))
+                    (scheduled-repeater (cdr (assoc "scheduledRepeater" updates))))
                 (if (or (null scheduled-value) (string-empty-p scheduled-value))
                     ;; Clear scheduled
                     (progn
@@ -92,13 +93,17 @@ Returns alist with status, details, and new position."
                   ;; Set scheduled - use org timestamp string to preserve time
                   (let* ((has-time (org-agenda-api--datetime-has-time-p scheduled-value))
                          (time (org-agenda-api--parse-datetime scheduled-value))
-                         (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+                         (org-ts (when time (org-agenda-api--format-org-timestamp-with-repeater
+                                             time has-time scheduled-repeater))))
                     (when org-ts
                       (org-schedule nil org-ts)
-                      (push `("scheduled" . ,scheduled-value) applied-updates))))))
-            ;; Handle deadline
+                      (push `("scheduled" . ,scheduled-value) applied-updates)
+                      (when scheduled-repeater
+                        (push `("scheduledRepeater" . ,scheduled-repeater) applied-updates)))))))
+            ;; Handle deadline (with optional repeater)
             (when (assoc "deadline" updates)
-              (let ((deadline-value (cdr (assoc "deadline" updates))))
+              (let ((deadline-value (cdr (assoc "deadline" updates)))
+                    (deadline-repeater (cdr (assoc "deadlineRepeater" updates))))
                 (if (or (null deadline-value) (string-empty-p deadline-value))
                     ;; Clear deadline
                     (progn
@@ -107,10 +112,13 @@ Returns alist with status, details, and new position."
                   ;; Set deadline - use org timestamp string to preserve time
                   (let* ((has-time (org-agenda-api--datetime-has-time-p deadline-value))
                          (time (org-agenda-api--parse-datetime deadline-value))
-                         (org-ts (when time (org-agenda-api--format-org-timestamp time has-time))))
+                         (org-ts (when time (org-agenda-api--format-org-timestamp-with-repeater
+                                             time has-time deadline-repeater))))
                     (when org-ts
                       (org-deadline nil org-ts)
-                      (push `("deadline" . ,deadline-value) applied-updates))))))
+                      (push `("deadline" . ,deadline-value) applied-updates)
+                      (when deadline-repeater
+                        (push `("deadlineRepeater" . ,deadline-repeater) applied-updates)))))))
             ;; Handle priority
             (when (assoc "priority" updates)
               (let ((priority-value (cdr (assoc "priority" updates))))
