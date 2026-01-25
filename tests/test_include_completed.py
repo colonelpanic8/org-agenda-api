@@ -496,3 +496,10 @@ class TestIncludeCompletedParameter:
         # Both should return same structure (may have different content due to state changes)
         assert "entries" in response_false.json()
         assert "entries" in response_none.json()
+
+
+# Note: Tests for habit include_completed are in development.
+# The core functionality is implemented:
+# - org-agenda-api--get-habits-completed-on-date scans for habits completed on a date
+# - org-agenda-api--run-agenda adds these habits to filtered results when include_completed=true
+# - Habits will have habitCompletedOnQueryDate=true when they were completed on the query date

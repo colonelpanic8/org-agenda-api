@@ -36,6 +36,37 @@ Delegates to `org-window-habit-entry-p' from the org-window-habit library."
     (and (org-agenda-api--window-habit-available-p)
          (org-window-habit-entry-p)))
 
+  (defun org-agenda-api--habit-completed-on-date-p (date-string)
+    "Return non-nil if the habit at point was completed on DATE-STRING.
+DATE-STRING should be in YYYY-MM-DD format.
+Must be called with point at an org heading that is a window-habit."
+    (when (org-agenda-api--is-window-habit-p)
+      (condition-case nil
+          (let* ((habit (org-window-habit-create-instance-from-heading-at-point))
+                 (done-times (oref habit done-times)))
+            ;; Check if any done-time matches the date
+            (cl-some (lambda (time)
+                       (string= (format-time-string "%Y-%m-%d" time) date-string))
+                     done-times))
+        (error nil))))
+
+  (defun org-agenda-api--get-habits-completed-on-date (date-string)
+    "Get all habits that were completed on DATE-STRING.
+DATE-STRING should be in YYYY-MM-DD format.
+Returns a list of (file . pos) cons cells for each matching habit."
+    (let ((results nil))
+      (dolist (file org-agenda-files)
+        (when (file-exists-p file)
+          (with-current-buffer (find-file-noselect file)
+            (save-excursion
+              (goto-char (point-min))
+              (while (re-search-forward org-heading-regexp nil t)
+                (when (and (org-at-heading-p)
+                           (org-agenda-api--is-window-habit-p)
+                           (org-agenda-api--habit-completed-on-date-p date-string))
+                  (push (cons file (line-beginning-position)) results)))))))
+      (nreverse results)))
+
   (defun org-agenda-api--get-habit-summary ()
     "Get habit summary for the entry at point.
 Returns an alist suitable for JSON encoding, or nil if not a window-habit."

@@ -493,9 +493,10 @@ Returns ISO format timestamp string or nil."
                 (format "%sT%s:00" date-part (string-trim time-part))
               date-part)))))))
 
-(defun org-agenda-api--extract-entry-data (marker agenda-line)
+(defun org-agenda-api--extract-entry-data (marker agenda-line &optional query-date)
   "Extract todo data from the org entry at MARKER.
-AGENDA-LINE is the raw agenda display text for reference."
+AGENDA-LINE is the raw agenda display text for reference.
+QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completions."
   (when (marker-buffer marker)
     (with-current-buffer (marker-buffer marker)
       (save-excursion
@@ -534,7 +535,13 @@ AGENDA-LINE is the raw agenda display text for reference."
                                        (org-agenda-api--is-window-habit-p)))
                  (habit-summary (when (and is-window-habit
                                            (fboundp 'org-agenda-api--get-habit-summary))
-                                  (org-agenda-api--get-habit-summary))))
+                                  (org-agenda-api--get-habit-summary)))
+                 ;; Check if habit was completed on the query date
+                 (habit-completed-on-query-date
+                  (when (and is-window-habit
+                             query-date
+                             (fboundp 'org-agenda-api--habit-completed-on-date-p))
+                    (org-agenda-api--habit-completed-on-date-p query-date))))
             `(("todo" . ,todo)
               ("title" . ,title)
               ("tags" . ,(if tags (vconcat tags) nil))
@@ -559,7 +566,9 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("completedAt" . ,completed-at)
               ("isWindowHabit" . ,(if is-window-habit t :json-false))
               ,@(when habit-summary
-                  `(("habitSummary" . ,habit-summary))))))))))
+                  `(("habitSummary" . ,habit-summary)))
+              ,@(when habit-completed-on-query-date
+                  `(("habitCompletedOnQueryDate" . t))))))))))
 
 (defun org-agenda-api--run-agenda (span &optional start-date include-overdue include-completed)
   "Run org-agenda and return entries as a list of JSON-encodable alists.
@@ -642,7 +651,7 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
                   ;; Only include lines that have an org-hd-marker (actual entries)
                   (when marker
                     (org-agenda-api--log 'debug "run-agenda: Found marker, extracting data")
-                    (let ((entry-data (org-agenda-api--extract-entry-data marker line)))
+                    (let ((entry-data (org-agenda-api--extract-entry-data marker line start-date)))
                       (org-agenda-api--log 'debug "run-agenda: entry-data=%S" entry-data)
                       (when entry-data
                         (push entry-data entries)))))
@@ -673,11 +682,13 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
                           (deadline-date (org-agenda-api--extract-date
                                           (cdr (assoc "deadline" entry))))
                           (completed-at-date (org-agenda-api--extract-date
-                                              (cdr (assoc "completedAt" entry)))))
+                                              (cdr (assoc "completedAt" entry))))
+                          (habit-completed (cdr (assoc "habitCompletedOnQueryDate" entry))))
                       ;; Keep entries with:
                       ;; - scheduled date <= start-date (includes overdue)
                       ;; - deadline date <= start-date
-                      ;; - completed on the query date
+                      ;; - completed on the query date (via CLOSED timestamp)
+                      ;; - habit completed on the query date (via LOGBOOK done-times)
                       ;; - no scheduled/deadline ONLY when not in log mode
                       ;;   (When include-completed is true, log mode shows state change entries
                       ;;   that have no scheduled/deadline - these should only be kept if they
@@ -685,7 +696,8 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
                       (or (and (null scheduled-date) (null deadline-date) (not include-completed))
                           (and scheduled-date (not (string-greaterp scheduled-date start-date)))
                           (and deadline-date (not (string-greaterp deadline-date start-date)))
-                          (and completed-at-date (string= completed-at-date start-date)))))
+                          (and completed-at-date (string= completed-at-date start-date))
+                          habit-completed)))
                   all-entries)
                ;; Default: only items scheduled for the exact query date
                (cl-remove-if-not
@@ -695,11 +707,13 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
                         (deadline-date (org-agenda-api--extract-date
                                         (cdr (assoc "deadline" entry))))
                         (completed-at-date (org-agenda-api--extract-date
-                                            (cdr (assoc "completedAt" entry)))))
+                                            (cdr (assoc "completedAt" entry))))
+                        (habit-completed (cdr (assoc "habitCompletedOnQueryDate" entry))))
                     ;; Keep entries that have either:
                     ;; - scheduled date matching start-date
                     ;; - deadline date matching start-date
                     ;; - completed at date matching start-date (log entries)
+                    ;; - habit completed on the query date (via LOGBOOK done-times)
                     ;; - no scheduled/deadline (time grid items) ONLY when not in log mode
                     ;;   (When include-completed is true, log mode shows state change entries
                     ;;   that have no scheduled/deadline - these should only be kept if they
@@ -707,12 +721,101 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
                     (or (and (null scheduled-date) (null deadline-date) (not include-completed))
                         (and scheduled-date (string= scheduled-date start-date))
                         (and deadline-date (string= deadline-date start-date))
-                        (and completed-at-date (string= completed-at-date start-date)))))
+                        (and completed-at-date (string= completed-at-date start-date))
+                        habit-completed)))
                 all-entries))))
+        ;; When include-completed is requested, also fetch habits that were
+        ;; completed on the query date but might not appear in the agenda
+        ;; (because habits reschedule to future dates when completed)
+        (when (and include-completed
+                   (fboundp 'org-agenda-api--get-habits-completed-on-date))
+          (org-agenda-api--log 'debug "run-agenda: Checking for habits completed on %s" start-date)
+          (let ((habit-locations (org-agenda-api--get-habits-completed-on-date start-date)))
+            (org-agenda-api--log 'debug "run-agenda: Found %d habit locations: %S"
+                                 (length habit-locations) habit-locations)
+            (dolist (loc habit-locations)
+              (let* ((file (car loc))
+                     (pos (cdr loc))
+                     (already-present
+                      (cl-some (lambda (entry)
+                                 (and (string= (cdr (assoc "file" entry)) file)
+                                      (= (cdr (assoc "pos" entry)) pos)))
+                               filtered-entries)))
+                (org-agenda-api--log 'debug "run-agenda: Habit at %s:%d already-present=%s"
+                                     file pos already-present)
+                (unless already-present
+                  (with-current-buffer (find-file-noselect file)
+                    (save-excursion
+                      (goto-char pos)
+                      (when (org-at-heading-p)
+                        (let ((entry-data (org-agenda-api--extract-habit-entry-data pos file start-date)))
+                          (org-agenda-api--log 'debug "run-agenda: Extracted habit entry: %S"
+                                               (when entry-data (cdr (assoc "title" entry-data))))
+                          (when entry-data
+                            (setq filtered-entries (cons entry-data filtered-entries))))))))))))
         ;; Deduplicate entries - when an item has both SCHEDULED and DEADLINE
         ;; on the same day, org-agenda shows it twice. Keep only unique entries
         ;; based on (file, pos).
         (org-agenda-api--deduplicate-entries filtered-entries)))))
+
+(defun org-agenda-api--extract-habit-entry-data (pos file query-date)
+  "Extract entry data for a habit at POS in FILE.
+QUERY-DATE is used to mark habitCompletedOnQueryDate.
+This is similar to `org-agenda-api--extract-entry-data' but works directly
+from the org buffer rather than an agenda line."
+  (with-current-buffer (find-file-noselect file)
+    (save-excursion
+      (goto-char pos)
+      (when (org-at-heading-p)
+        (let* ((todo (org-get-todo-state))
+               (title (org-get-heading t t t t))
+               (tags (org-get-tags))
+               (level (org-current-level))
+               (planning (org-agenda-api--get-planning-info))
+               (scheduled-time (alist-get 'scheduled-time planning))
+               (scheduled-has-time (alist-get 'scheduled-has-time planning))
+               (scheduled-repeater (alist-get 'scheduled-repeater planning))
+               (deadline-time (alist-get 'deadline-time planning))
+               (deadline-has-time (alist-get 'deadline-has-time planning))
+               (deadline-repeater (alist-get 'deadline-repeater planning))
+               (org-id (org-entry-get (point) "ID"))
+               (olpath (org-get-outline-path t))
+               (priority (org-entry-get (point) "PRIORITY"))
+               (notify-before (org-agenda-api--parse-notify-before
+                               (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
+               (effective-category (org-get-category))
+               (all-properties (org-agenda-api--get-all-entry-properties))
+               ;; Habit detection
+               (is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
+                                     (org-agenda-api--is-window-habit-p)))
+               (habit-summary (when (and is-window-habit
+                                         (fboundp 'org-agenda-api--get-habit-summary))
+                                (org-agenda-api--get-habit-summary)))
+               ;; Check if habit was completed on the query date
+               (habit-completed-on-query-date
+                (when (and is-window-habit
+                           query-date
+                           (fboundp 'org-agenda-api--habit-completed-on-date-p))
+                  (org-agenda-api--habit-completed-on-date-p query-date))))
+          `(("todo" . ,todo)
+            ("title" . ,title)
+            ("tags" . ,(if tags (vconcat tags) nil))
+            ("level" . ,level)
+            ("scheduled" . ,(org-agenda-api--format-timestamp-object scheduled-time scheduled-has-time scheduled-repeater))
+            ("deadline" . ,(org-agenda-api--format-timestamp-object deadline-time deadline-has-time deadline-repeater))
+            ("file" . ,file)
+            ("pos" . ,pos)
+            ("id" . ,org-id)
+            ("olpath" . ,(if olpath (vconcat olpath) nil))
+            ("priority" . ,priority)
+            ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
+            ("effectiveCategory" . ,effective-category)
+            ("properties" . ,all-properties)
+            ("isWindowHabit" . ,(if is-window-habit t :json-false))
+            ,@(when habit-summary
+                `(("habitSummary" . ,habit-summary)))
+            ,@(when habit-completed-on-query-date
+                `(("habitCompletedOnQueryDate" . t)))))))))
 
 ;;; Custom View Functions
 
