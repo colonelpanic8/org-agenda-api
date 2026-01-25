@@ -24,6 +24,23 @@ TEST_DATE_PREV_DAY = "2024-06-14"
 TEST_DATE_PREV_DAY_ORG = "2024-06-14 Fri"
 
 
+def extract_date(timestamp):
+    """Extract the date string from a timestamp.
+
+    Handles both old format (string like "2024-06-15") and new format
+    (dict like {"date": "2024-06-15", "time": "10:00"}).
+
+    Returns None if timestamp is None or invalid.
+    """
+    if timestamp is None:
+        return None
+    if isinstance(timestamp, dict):
+        return timestamp.get("date")
+    if isinstance(timestamp, str):
+        return timestamp[:10] if len(timestamp) >= 10 else timestamp
+    return None
+
+
 class EmacsServer:
     """Manages an Emacs subprocess running org-agenda-api."""
 

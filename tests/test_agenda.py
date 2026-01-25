@@ -6,6 +6,7 @@ from conftest import (
     TEST_DATE_NEXT_DAY,
     TEST_DATE_PREV_DAY,
     TEST_DATE_ORG,
+    extract_date,
 )
 
 
@@ -180,7 +181,8 @@ class TestAgendaOverdueItems:
                 f"Entries: {[e.get('title') for e in data['entries']]}"
             )
 
-        assert overdue_entry["scheduled"] == TEST_DATE_PREV_DAY, (
+        scheduled_date = extract_date(overdue_entry["scheduled"])
+        assert scheduled_date == TEST_DATE_PREV_DAY, (
             f"Overdue item should show original scheduled date ({TEST_DATE_PREV_DAY}), "
             f"not the query date. Got: {overdue_entry['scheduled']}"
         )

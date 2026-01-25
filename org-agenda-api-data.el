@@ -71,13 +71,22 @@ or nil if TIME is nil."
       (nreverse result))))
 
 (defun org-agenda-api--extract-date (timestamp)
-  "Extract YYYY-MM-DD date portion from TIMESTAMP string.
-TIMESTAMP may be in formats like:
-  - \"2026-01-19\" (date only)
-  - \"2026-01-19T10:00:00\" (with time)
-Returns nil if TIMESTAMP is nil."
+  "Extract YYYY-MM-DD date portion from TIMESTAMP.
+TIMESTAMP may be:
+  - An alist like ((\"date\" . \"2026-01-19\") (\"time\" . \"10:00\"))
+  - A string like \"2026-01-19\" or \"2026-01-19T10:00:00\"
+  - nil
+Returns the date string or nil if TIMESTAMP is nil."
   (when timestamp
-    (substring timestamp 0 (min 10 (length timestamp)))))
+    (cond
+     ;; New format: alist with \"date\" key
+     ((and (listp timestamp) (assoc "date" timestamp))
+      (cdr (assoc "date" timestamp)))
+     ;; Old format: string
+     ((stringp timestamp)
+      (substring timestamp 0 (min 10 (length timestamp))))
+     ;; Unknown format
+     (t nil))))
 
 (defun org-agenda-api--extract-repeater-from-element (ts-elem)
   "Extract repeater info from timestamp element TS-ELEM.
