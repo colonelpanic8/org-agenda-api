@@ -233,7 +233,15 @@ def running_container(container_image, git_repo, tmp_path):
         "port": port,
     }
 
-    # Cleanup
+    # Cleanup: fix file ownership before removing container
+    # Docker container runs as root and creates files owned by root
+    # We need to chown them back to the host user so pytest can delete them
+    host_uid = os.getuid()
+    host_gid = os.getgid()
+    run_command([
+        "docker", "exec", container_name,
+        "chown", "-R", f"{host_uid}:{host_gid}", "/data/org", "/data/remote.git"
+    ])
     run_command(["docker", "rm", "-f", container_name])
 
 

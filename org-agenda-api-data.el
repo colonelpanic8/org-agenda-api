@@ -396,7 +396,7 @@ expensive `org-element-at-point' calls."
                `(("habitSummary" . ,habit-summary)))
            ,@(when logbook
                `(("logbook" . ,(vconcat logbook)))))))
-     "/!"  ; MATCH: "/!" matches all entries with any TODO keyword
+     "TODO={.+}"  ; MATCH: regex matches any non-empty TODO keyword (active or done)
      'file)))
 
 (defun org-agenda-api--get-agenda-todos ()

@@ -44,14 +44,7 @@ class TestCompleteTodo:
         assert data["newState"] == "DONE"
 
     def test_todo_state_changes(self, api):
-        """Completed todo should have DONE state in subsequent queries.
-
-        Note: This test verifies that completed items are reflected in get_all_todos.
-        In some Emacs batch/daemon configurations, org-mode's internal buffer state
-        may not refresh properly after mutations, causing this test to skip.
-        The underlying completion functionality works correctly (verified by
-        test_creates_logbook_entry which reads the file directly).
-        """
+        """Completed todo should have DONE state in subsequent queries."""
         # Create a unique todo to complete
         unique_title = "Complete test todo 98765"
         create_resp = api.create_todo(unique_title)
@@ -80,18 +73,12 @@ class TestCompleteTodo:
         todos_response = api.get_all_todos()
         todos = todos_response.json()
 
-        # Search more flexibly - title may have slight variations
+        # Search for the completed todo
         completed_todo = next(
-            (t for t in todos["todos"] if unique_title in t.get("title", "") or
-             t.get("title", "") in unique_title),
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
             None,
         )
-        # In batch/daemon mode, org-mode's buffer state may not refresh properly
-        # after mutations. The completion itself works (file is updated), but
-        # get_all_todos may read stale buffer content.
-        if completed_todo is None:
-            pytest.skip("Todo not found after completion - org-mode buffer refresh issue in batch mode")
-
+        assert completed_todo is not None, f"Completed todo not found: {unique_title}"
         assert completed_todo["todo"] == "DONE", f"Expected DONE, got {completed_todo['todo']}"
 
     def test_complete_with_custom_state(self, api):
