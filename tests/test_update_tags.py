@@ -205,7 +205,10 @@ class TestUpdateTags:
         assert "project" in updated_todo.get("tags", [])
         assert "important" in updated_todo.get("tags", [])
         assert updated_todo.get("priority") == "A"
-        assert "2024-07-01" in updated_todo.get("scheduled", "")
+        # scheduled is now an object with "date" key
+        scheduled = updated_todo.get("scheduled")
+        assert scheduled is not None
+        assert scheduled.get("date") == "2024-07-01"
 
 
 class TestTagsInAgendaOutput:

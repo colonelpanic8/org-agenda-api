@@ -114,6 +114,29 @@ def container_image():
     return "org-agenda-api:latest"
 
 
+def make_git_dir_deletable(path: Path):
+    """Make a git directory deletable by fixing permissions on .git objects.
+
+    Git creates object files with read-only permissions, which prevents
+    cleanup. This recursively makes everything writable.
+    """
+    import stat
+
+    for root, dirs, files in os.walk(path):
+        for d in dirs:
+            dir_path = Path(root) / d
+            try:
+                dir_path.chmod(stat.S_IRWXU)
+            except OSError:
+                pass
+        for f in files:
+            file_path = Path(root) / f
+            try:
+                file_path.chmod(stat.S_IRWXU)
+            except OSError:
+                pass
+
+
 @pytest.fixture
 def git_repo(tmp_path):
     """Create a temporary git repository with a bare remote for testing.
@@ -155,7 +178,12 @@ def git_repo(tmp_path):
     # Set back to container path
     run_command(["git", "remote", "set-url", "origin", "/data/remote.git"], cwd=repo_path)
 
-    return {"repo": repo_path, "bare": bare_path}
+    yield {"repo": repo_path, "bare": bare_path}
+
+    # Cleanup: fix permissions so pytest can delete the temp directory
+    # Git creates object files with read-only permissions
+    make_git_dir_deletable(repo_path / ".git")
+    make_git_dir_deletable(bare_path)
 
 
 @pytest.fixture

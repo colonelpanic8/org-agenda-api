@@ -16,6 +16,22 @@ def get_today_str():
     return date.today().strftime("%Y-%m-%d")
 
 
+def extract_date(timestamp):
+    """Extract date string from timestamp which may be object or string.
+
+    Handles both new format {"date": "2024-06-15", "time": "10:00"}
+    and legacy string format "2024-06-15" or "2024-06-15T10:00:00".
+    Returns the YYYY-MM-DD date portion or None if timestamp is None.
+    """
+    if timestamp is None:
+        return None
+    if isinstance(timestamp, dict):
+        return timestamp.get("date")
+    if isinstance(timestamp, str):
+        return timestamp[:10] if len(timestamp) >= 10 else timestamp
+    return None
+
+
 class TestIncludeCompleted:
     """Tests for include_completed=true on GET /agenda."""
 
@@ -75,7 +91,7 @@ class TestIncludeCompleted:
         # Find a todo that's scheduled for TEST_DATE so we can verify it disappears
         active_todo = next(
             (t for t in todos["todos"]
-             if t.get("todo") == "TODO" and (t.get("scheduled") or "").startswith(TEST_DATE)),
+             if t.get("todo") == "TODO" and extract_date(t.get("scheduled")) == TEST_DATE),
             None,
         )
         if active_todo is None:
@@ -405,8 +421,8 @@ class TestStateChangeLogBug:
             # At least one of these should match today for the entry to be valid
             has_valid_date = (
                 (completed_at and today in completed_at) or
-                (scheduled and today in scheduled) or
-                (deadline and today in deadline)
+                (extract_date(scheduled) == today) or
+                (extract_date(deadline) == today)
             )
             assert has_valid_date, (
                 f"Entry appeared without matching date. "
@@ -440,8 +456,8 @@ class TestStateChangeLogBug:
             completed_at = entry.get("completedAt")
 
             # Extract just the date portion for comparison
-            scheduled_date = scheduled[:10] if scheduled else None
-            deadline_date = deadline[:10] if deadline else None
+            scheduled_date = extract_date(scheduled)
+            deadline_date = extract_date(deadline)
             completed_at_date = completed_at[:10] if completed_at else None
 
             has_matching_date = (

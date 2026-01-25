@@ -1,6 +1,21 @@
 """Integration tests for POST /update endpoint."""
 
 
+def extract_date(timestamp):
+    """Extract date string from timestamp which may be object or string.
+
+    Handles both new format {"date": "2024-06-15", "time": "10:00"}
+    and legacy string format "2024-06-15" or "2024-06-15T10:00:00".
+    Returns the YYYY-MM-DD date portion or None if timestamp is None.
+    """
+    if timestamp is None:
+        return None
+    if isinstance(timestamp, dict):
+        return timestamp.get("date")
+    if isinstance(timestamp, str):
+        return timestamp[:10] if len(timestamp) >= 10 else timestamp
+    return None
+
 
 class TestUpdateTodo:
     """Tests for POST /update endpoint."""
@@ -146,6 +161,99 @@ class TestUpdatePriority:
         assert data.get("status") == "updated"
 
 
+class TestUpdateScheduledObjectFormat:
+    """Tests for updating todo scheduled date using object format.
+
+    The API accepts timestamps in object format: {"date": "YYYY-MM-DD", "time": "HH:MM", "repeater": {...}}
+    This mirrors what mobile/web clients send.
+    """
+
+    def test_set_scheduled_with_date_object(self, api):
+        """Should be able to set scheduled using object format with just date."""
+        unique_title = "Scheduled object date test todo"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Use object format like the mobile client does
+        response = api.update_todo(todo, {"scheduled": {"date": "2024-07-01"}})
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "updated", f"Expected 'updated' status, got: {data}"
+
+    def test_set_scheduled_with_date_and_time_object(self, api):
+        """Should be able to set scheduled using object format with date and time."""
+        unique_title = "Scheduled object datetime test todo"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Use object format with time
+        response = api.update_todo(todo, {"scheduled": {"date": "2024-07-01", "time": "14:30"}})
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "updated", f"Expected 'updated' status, got: {data}"
+
+    def test_set_scheduled_with_repeater_object(self, api):
+        """Should be able to set scheduled using object format with repeater."""
+        unique_title = "Scheduled object repeater test todo"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Use object format with repeater
+        response = api.update_todo(todo, {
+            "scheduled": {
+                "date": "2024-07-01",
+                "repeater": {"type": "+", "value": 1, "unit": "w"}
+            }
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "updated", f"Expected 'updated' status, got: {data}"
+
+    def test_set_deadline_with_date_object(self, api):
+        """Should be able to set deadline using object format with just date."""
+        unique_title = "Deadline object date test todo"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Use object format like the mobile client does
+        response = api.update_todo(todo, {"deadline": {"date": "2024-07-15"}})
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "updated", f"Expected 'updated' status, got: {data}"
+
+
 class TestUpdateScheduled:
     """Tests for updating todo scheduled date."""
 
@@ -226,8 +334,8 @@ class TestUpdateScheduled:
         assert updated_todo.get("scheduled") is not None, (
             f"Scheduled date not persisted on todo. Got: {updated_todo}"
         )
-        assert future_date in updated_todo["scheduled"], (
-            f"Expected scheduled date to contain {future_date}, "
+        assert extract_date(updated_todo["scheduled"]) == future_date, (
+            f"Expected scheduled date to be {future_date}, "
             f"got: {updated_todo['scheduled']}"
         )
 

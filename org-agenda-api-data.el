@@ -903,14 +903,22 @@ If HAS-TIME is non-nil, include the time component."
       (format-time-string "<%Y-%m-%d %a %H:%M>" time)
     (format-time-string "<%Y-%m-%d %a>" time)))
 
+(defun org-agenda-api--get-field (key obj)
+  "Get field KEY from OBJ, which can be a hash-table or alist.
+Returns nil if KEY is not found or OBJ is nil."
+  (when obj
+    (if (hash-table-p obj)
+        (gethash key obj)
+      (cdr (assoc key obj)))))
+
 (defun org-agenda-api--format-repeater (repeater)
-  "Format REPEATER alist as org repeater string.
-REPEATER should be an alist with keys \"type\", \"value\", and \"unit\".
+  "Format REPEATER as org repeater string.
+REPEATER can be a hash-table or alist with keys \"type\", \"value\", and \"unit\".
 Returns a string like \"+1w\" or \"++2d\", or nil if REPEATER is invalid."
   (when (and repeater (not (eq repeater :json-null)))
-    (let ((type (cdr (assoc "type" repeater)))
-          (value (cdr (assoc "value" repeater)))
-          (unit (cdr (assoc "unit" repeater))))
+    (let ((type (org-agenda-api--get-field "type" repeater))
+          (value (org-agenda-api--get-field "value" repeater))
+          (unit (org-agenda-api--get-field "unit" repeater)))
       (when (and type value unit)
         (format "%s%d%s" type value unit)))))
 
@@ -929,21 +937,33 @@ REPEATER should be an alist with keys \"type\", \"value\", and \"unit\"."
 
 (defun org-agenda-api--timestamp-to-org (timestamp)
   "Convert TIMESTAMP object to org timestamp string.
-TIMESTAMP should be an alist with keys \"date\" (required), \"time\" (optional),
-and \"repeater\" (optional). Returns org timestamp like <2026-01-25 Sat 10:00 +1w>."
+TIMESTAMP can be:
+  - A string like \"2026-01-25\" or \"2026-01-25T10:00:00\" (legacy format)
+  - A hash-table or alist with keys \"date\" (required),
+    \"time\" (optional), and \"repeater\" (optional)
+Returns org timestamp like <2026-01-25 Sat 10:00 +1w>."
   (when (and timestamp (not (eq timestamp :json-null)))
-    (let* ((date-str (cdr (assoc "date" timestamp)))
-           (time-str (let ((t (cdr (assoc "time" timestamp))))
-                       (unless (eq t :json-null) t)))
-           (repeater (let ((r (cdr (assoc "repeater" timestamp))))
-                       (unless (eq r :json-null) r)))
-           (has-time (and time-str (not (string-empty-p time-str))))
-           (datetime-str (if has-time
-                             (concat date-str " " time-str)
-                           date-str))
-           (time (org-agenda-api--parse-datetime datetime-str)))
-      (when time
-        (org-agenda-api--format-org-timestamp-with-repeater time has-time repeater)))))
+    (cond
+     ;; Handle string format (legacy): "2026-01-25" or "2026-01-25T10:00:00"
+     ((stringp timestamp)
+      (let* ((has-time (org-agenda-api--datetime-has-time-p timestamp))
+             (parsed-time (org-agenda-api--parse-datetime timestamp)))
+        (when parsed-time
+          (org-agenda-api--format-org-timestamp-with-repeater parsed-time has-time nil))))
+     ;; Handle object format: {"date": "2026-01-25", "time": "10:00", "repeater": {...}}
+     (t
+      (let* ((date-str (org-agenda-api--get-field "date" timestamp))
+             (time-str (let ((time-val (org-agenda-api--get-field "time" timestamp)))
+                         (unless (eq time-val :json-null) time-val)))
+             (repeater (let ((repeater-val (org-agenda-api--get-field "repeater" timestamp)))
+                         (unless (eq repeater-val :json-null) repeater-val)))
+             (has-time (and time-str (not (string-empty-p time-str))))
+             (datetime-str (if has-time
+                               (concat date-str " " time-str)
+                             date-str))
+             (parsed-time (org-agenda-api--parse-datetime datetime-str)))
+        (when parsed-time
+          (org-agenda-api--format-org-timestamp-with-repeater parsed-time has-time repeater)))))))
 
 (defun org-agenda-api--parse-org-timestamp-to-object (ts-string)
   "Parse org timestamp TS-STRING to timestamp object.

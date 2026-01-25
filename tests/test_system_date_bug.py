@@ -25,6 +25,22 @@ import requests
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
+def extract_date(timestamp):
+    """Extract date string from timestamp which may be object or string.
+
+    Handles both new format {"date": "2024-06-15", "time": "10:00"}
+    and legacy string format "2024-06-15" or "2024-06-15T10:00:00".
+    Returns the YYYY-MM-DD date portion or None if timestamp is None.
+    """
+    if timestamp is None:
+        return None
+    if isinstance(timestamp, dict):
+        return timestamp.get("date")
+    if isinstance(timestamp, str):
+        return timestamp[:10] if len(timestamp) >= 10 else timestamp
+    return None
+
+
 class EmacsServerNoFakeDate:
     """Emacs server WITHOUT fake date override - uses actual system date."""
 
@@ -173,7 +189,7 @@ class TestSystemDateBug:
         # Check that no entry has scheduled date == today
         today_items = []
         for entry in data["entries"]:
-            scheduled = entry.get("scheduled", "")[:10]  # Get date part only
+            scheduled = extract_date(entry.get("scheduled"))
             if scheduled == today_str:
                 today_items.append({
                     "title": entry.get("title"),
@@ -263,7 +279,7 @@ class TestSystemDateBug:
 
         # Items scheduled for today should NOT appear (they're in the past)
         today_items = [e for e in data["entries"]
-                       if e.get("scheduled", "")[:10] == today_str]
+                       if extract_date(e.get("scheduled")) == today_str]
 
         assert len(today_items) == 0, (
             f"Query for {tomorrow_str} should NOT include items scheduled for "
@@ -293,7 +309,7 @@ class TestSystemDateBug:
 
         if today_entry:
             # The scheduled date should be today
-            scheduled = today_entry.get("scheduled", "")[:10]
+            scheduled = extract_date(today_entry.get("scheduled"))
             assert scheduled == today_str, (
                 f"'Task for today' should have scheduled={today_str}, "
                 f"but got scheduled={scheduled}. "

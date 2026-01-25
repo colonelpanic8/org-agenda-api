@@ -358,7 +358,8 @@ class TestAgendaDateAccuracy:
                 f"Entries: {[e.get('title') for e in data['entries']]}"
             )
 
-        assert today_entry["scheduled"] == TEST_DATE, (
+        scheduled_date = extract_date(today_entry["scheduled"])
+        assert scheduled_date == TEST_DATE, (
             f"Item 'Task scheduled for today' should have scheduled={TEST_DATE}, "
             f"but got scheduled={today_entry['scheduled']}. "
             f"This indicates a date mismatch bug."
@@ -377,8 +378,8 @@ class TestAgendaDateAccuracy:
             scheduled = entry.get("scheduled")
             if scheduled:
                 # Extract just the date portion (YYYY-MM-DD) for comparison
-                # Scheduled dates may include time component (YYYY-MM-DDTHH:MM:SS)
-                scheduled_date = scheduled[:10]
+                # Scheduled dates may be dict with date/time or string
+                scheduled_date = extract_date(scheduled)
                 # Scheduled date should be <= query date (today or overdue)
                 # It should NOT be > query date (that would be a future item)
                 assert scheduled_date <= TEST_DATE, (
@@ -474,9 +475,10 @@ class TestAgendaDateIsolation:
         # Any items with a scheduled date should be <= TEST_DATE_PREV_DAY
         for entry in data["entries"]:
             scheduled = entry.get("scheduled")
-            if scheduled and not scheduled.startswith(TEST_DATE_PREV_DAY):
+            scheduled_date = extract_date(scheduled)
+            if scheduled_date and scheduled_date != TEST_DATE_PREV_DAY:
                 # For overdue items, scheduled should be before the query date
-                assert scheduled < TEST_DATE_PREV_DAY, (
+                assert scheduled_date < TEST_DATE_PREV_DAY, (
                     f"Entry '{entry.get('title')}' has scheduled={scheduled} "
                     f"which is after query date {TEST_DATE_PREV_DAY}"
                 )
@@ -537,15 +539,16 @@ class TestAgendaDateIsolation:
 
         for entry in data["entries"]:
             scheduled = entry.get("scheduled")
+            scheduled_date = extract_date(scheduled)
             agenda_line = entry.get("agendaLine", "")
 
-            if scheduled and scheduled < TEST_DATE:
+            if scheduled_date and scheduled_date < TEST_DATE:
                 # Overdue item - should have "Sched. Nx:" marker
                 assert "Sched." in agenda_line, (
                     f"Overdue item '{entry.get('title')}' (scheduled {scheduled}) "
                     f"should have 'Sched.' marker in agendaLine. Got: {agenda_line}"
                 )
-            elif scheduled == TEST_DATE:
+            elif scheduled_date == TEST_DATE:
                 # Same-day item - should have "Scheduled:" (no 'x' marker)
                 # or just the item without overdue marker
                 assert "Sched." not in agenda_line or "0x" not in agenda_line, (
@@ -600,15 +603,26 @@ class TestAgendaScheduledItemsWithTime:
             )
 
         scheduled = timed_entry.get("scheduled")
-        # Should have time component (T separator for ISO format)
-        assert "T" in (scheduled or ""), (
-            f"Scheduled field should include time (T separator). "
-            f"Got: {scheduled}"
-        )
-        assert "10:00" in (scheduled or ""), (
-            f"Scheduled field should include correct time (10:00). "
-            f"Got: {scheduled}"
-        )
+        # Should have time component - in new format this is a 'time' field in the dict
+        if isinstance(scheduled, dict):
+            assert scheduled.get("time") is not None, (
+                f"Scheduled field should include time. "
+                f"Got: {scheduled}"
+            )
+            assert scheduled.get("time") == "10:00", (
+                f"Scheduled field should include correct time (10:00). "
+                f"Got: {scheduled}"
+            )
+        else:
+            # Legacy string format with T separator
+            assert "T" in (scheduled or ""), (
+                f"Scheduled field should include time (T separator). "
+                f"Got: {scheduled}"
+            )
+            assert "10:00" in (scheduled or ""), (
+                f"Scheduled field should include correct time (10:00). "
+                f"Got: {scheduled}"
+            )
 
 
 class TestAgendaIncludeOverdueParameter:

@@ -3,6 +3,22 @@
 import pytest
 
 
+def extract_date(timestamp):
+    """Extract date string from timestamp which may be object or string.
+
+    Handles both new format {"date": "2024-06-15", "time": "10:00"}
+    and legacy string format "2024-06-15" or "2024-06-15T10:00:00".
+    Returns the YYYY-MM-DD date portion or None if timestamp is None.
+    """
+    if timestamp is None:
+        return None
+    if isinstance(timestamp, dict):
+        return timestamp.get("date")
+    if isinstance(timestamp, str):
+        return timestamp[:10] if len(timestamp) >= 10 else timestamp
+    return None
+
+
 @pytest.fixture
 def has_projects_strategy(api):
     """Check if the 'projects' strategy is registered."""
@@ -254,14 +270,15 @@ class TestCategoryCaptureEndpoint:
         """Can capture a TODO with scheduled date."""
         if not has_projects_strategy:
             pytest.skip("org-category-capture not available in test environment")
+        # Use new object format for scheduled timestamp
         response = api.post("/category-capture", json={
             "type": "projects",
             "category": "Project Alpha",
             "title": "Scheduled task",
-            "scheduled": "2024-07-01"
+            "scheduled": {"date": "2024-07-01"}
         })
         data = response.json()
-        assert data.get("status") == "created"
+        assert data.get("status") == "created", f"Expected 'created', got: {data}"
 
         # Verify the task has the scheduled date
         response = api.get("/category-tasks?type=projects&category=Project%20Alpha")
@@ -269,7 +286,7 @@ class TestCategoryCaptureEndpoint:
         task = next((t for t in tasks if t.get("title") == "Scheduled task"), None)
         assert task is not None
         assert task.get("scheduled") is not None
-        assert "2024-07-01" in task.get("scheduled")
+        assert extract_date(task.get("scheduled")) == "2024-07-01"
 
     def test_capture_with_tags(self, api, has_projects_strategy):
         """Can capture a TODO with tags."""

@@ -27,8 +27,9 @@ class TestRangedScheduledTimestamps:
             None
         )
         assert task is not None
-        assert task["scheduled"] == TEST_DATE
-        assert task["scheduledEnd"] == TEST_DATE_NEXT_DAY
+        # scheduled is now an object with "date" key
+        assert task["scheduled"]["date"] == TEST_DATE
+        assert task["scheduledEnd"]["date"] == TEST_DATE_NEXT_DAY
 
     def test_non_ranged_schedule_has_no_scheduled_end(self, api):
         """Task with regular schedule should not have scheduledEnd field or it should be null."""
@@ -65,11 +66,12 @@ class TestRangedDeadlineTimestamps:
             None
         )
         assert task is not None
-        # Should have time component (T in ISO format)
-        assert "T" in task["deadline"]
-        assert "T" in task["deadlineEnd"]
-        assert "10:00:00" in task["deadline"]
-        assert "14:00:00" in task["deadlineEnd"]
+        # deadline is now an object with "date" and "time" keys
+        # Note: fixture has same-day time range (10:00-14:00 on TEST_DATE)
+        assert task["deadline"]["date"] == TEST_DATE
+        assert task["deadline"]["time"] == "10:00"
+        assert task["deadlineEnd"]["date"] == TEST_DATE  # Same day, different time
+        assert task["deadlineEnd"]["time"] == "14:00"
 
 
 class TestPlainTimestamps:
