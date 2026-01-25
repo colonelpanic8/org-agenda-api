@@ -81,44 +81,32 @@ Returns alist with status, details, and new position."
                   (org-edit-headline new-title-value)
                   (setq title new-title-value)  ; Update title for response
                   (push `("new_title" . ,new-title-value) applied-updates))))
-            ;; Handle scheduled (with optional repeater)
+            ;; Handle scheduled - accepts object {date, time?, repeater?}
             (when (assoc "scheduled" updates)
-              (let ((scheduled-value (cdr (assoc "scheduled" updates)))
-                    (scheduled-repeater (cdr (assoc "scheduledRepeater" updates))))
-                (if (or (null scheduled-value) (string-empty-p scheduled-value))
+              (let ((scheduled-value (cdr (assoc "scheduled" updates))))
+                (if (or (null scheduled-value) (eq scheduled-value :json-null))
                     ;; Clear scheduled
                     (progn
                       (org-schedule '(4))  ; Universal arg removes scheduling
                       (push '("scheduled" . nil) applied-updates))
-                  ;; Set scheduled - use org timestamp string to preserve time
-                  (let* ((has-time (org-agenda-api--datetime-has-time-p scheduled-value))
-                         (time (org-agenda-api--parse-datetime scheduled-value))
-                         (org-ts (when time (org-agenda-api--format-org-timestamp-with-repeater
-                                             time has-time scheduled-repeater))))
+                  ;; Set scheduled - convert timestamp object to org format
+                  (let ((org-ts (org-agenda-api--timestamp-to-org scheduled-value)))
                     (when org-ts
                       (org-schedule nil org-ts)
-                      (push `("scheduled" . ,scheduled-value) applied-updates)
-                      (when scheduled-repeater
-                        (push `("scheduledRepeater" . ,scheduled-repeater) applied-updates)))))))
-            ;; Handle deadline (with optional repeater)
+                      (push `("scheduled" . ,scheduled-value) applied-updates))))))
+            ;; Handle deadline - accepts object {date, time?, repeater?}
             (when (assoc "deadline" updates)
-              (let ((deadline-value (cdr (assoc "deadline" updates)))
-                    (deadline-repeater (cdr (assoc "deadlineRepeater" updates))))
-                (if (or (null deadline-value) (string-empty-p deadline-value))
+              (let ((deadline-value (cdr (assoc "deadline" updates))))
+                (if (or (null deadline-value) (eq deadline-value :json-null))
                     ;; Clear deadline
                     (progn
                       (org-deadline '(4))  ; Universal arg removes deadline
                       (push '("deadline" . nil) applied-updates))
-                  ;; Set deadline - use org timestamp string to preserve time
-                  (let* ((has-time (org-agenda-api--datetime-has-time-p deadline-value))
-                         (time (org-agenda-api--parse-datetime deadline-value))
-                         (org-ts (when time (org-agenda-api--format-org-timestamp-with-repeater
-                                             time has-time deadline-repeater))))
+                  ;; Set deadline - convert timestamp object to org format
+                  (let ((org-ts (org-agenda-api--timestamp-to-org deadline-value)))
                     (when org-ts
                       (org-deadline nil org-ts)
-                      (push `("deadline" . ,deadline-value) applied-updates)
-                      (when deadline-repeater
-                        (push `("deadlineRepeater" . ,deadline-repeater) applied-updates)))))))
+                      (push `("deadline" . ,deadline-value) applied-updates))))))
             ;; Handle priority
             (when (assoc "priority" updates)
               (let ((priority-value (cdr (assoc "priority" updates))))

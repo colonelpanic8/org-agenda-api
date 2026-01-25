@@ -157,15 +157,13 @@ Uses occ-map-entries-for-category to traverse entries."
 
 (defun org-agenda-api--build-category-capture-template (values)
   "Build a capture template string from VALUES.
-VALUES is an alist with title, todo, scheduled, scheduledRepeater, deadline,
-deadlineRepeater, priority, tags, properties.
+VALUES is an alist with title, todo, scheduled, deadline, priority, tags, properties.
+scheduled and deadline are objects with {date, time?, repeater?}.
 Returns a template string with all values pre-filled (no interactive prompts)."
   (let* ((title (or (cdr (assoc "title" values)) ""))
          (todo-state (or (cdr (assoc "todo" values)) "TODO"))
          (scheduled (cdr (assoc "scheduled" values)))
-         (scheduled-repeater (cdr (assoc "scheduledRepeater" values)))
          (deadline (cdr (assoc "deadline" values)))
-         (deadline-repeater (cdr (assoc "deadlineRepeater" values)))
          (priority (cdr (assoc "priority" values)))
          (tags (cdr (assoc "tags" values)))
          (properties (cdr (assoc "properties" values)))
@@ -179,20 +177,14 @@ Returns a template string with all values pre-filled (no interactive prompts)."
       (let ((tag-list (if (vectorp tags) (append tags nil) tags)))
         (push (format " :%s:" (mapconcat #'identity tag-list ":")) parts)))
     (push "\n" parts)
-    ;; Add SCHEDULED/DEADLINE line if needed (with optional repeaters)
+    ;; Add SCHEDULED/DEADLINE line if needed (convert timestamp objects to org format)
     (let ((planning-parts nil))
-      (when (and scheduled (not (string-empty-p scheduled)))
-        (let* ((has-time (org-agenda-api--datetime-has-time-p scheduled))
-               (time (org-agenda-api--parse-datetime scheduled))
-               (org-ts (when time (org-agenda-api--format-org-timestamp-with-repeater
-                                   time has-time scheduled-repeater))))
+      (when scheduled
+        (let ((org-ts (org-agenda-api--timestamp-to-org scheduled)))
           (when org-ts
             (push (format "SCHEDULED: %s" org-ts) planning-parts))))
-      (when (and deadline (not (string-empty-p deadline)))
-        (let* ((has-time (org-agenda-api--datetime-has-time-p deadline))
-               (time (org-agenda-api--parse-datetime deadline))
-               (org-ts (when time (org-agenda-api--format-org-timestamp-with-repeater
-                                   time has-time deadline-repeater))))
+      (when deadline
+        (let ((org-ts (org-agenda-api--timestamp-to-org deadline)))
           (when org-ts
             (push (format "DEADLINE: %s" org-ts) planning-parts))))
       (when planning-parts

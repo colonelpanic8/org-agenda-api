@@ -240,10 +240,11 @@ Accepts JSON body with:
   - pos: position in file (fallback)
   - title: heading title (can match by title alone or with file)
   - new_title: new title to set for the heading
-  - scheduled: ISO date/datetime string or null to clear
-  - scheduledRepeater: object with type (+, ++, .+), value (number), unit (d, w, m, y) or null
-  - deadline: ISO date/datetime string or null to clear
-  - deadlineRepeater: object with type (+, ++, .+), value (number), unit (d, w, m, y) or null
+  - scheduled: object {date, time?, repeater?} or null to clear
+    - date: YYYY-MM-DD (required)
+    - time: HH:MM (optional)
+    - repeater: {type: +|++|.+, value: number, unit: d|w|m|y} (optional)
+  - deadline: object {date, time?, repeater?} or null to clear (same format as scheduled)
   - priority: A, B, C, or null to clear
   - tags: array of tag strings to set, or empty array to clear
   - properties: object of property name/value pairs to set/update
@@ -258,9 +259,7 @@ Returns updated todo with new file and pos for cache update."
                (title (gethash "title" json-data))
                (new-title (gethash "new_title" json-data))
                (scheduled (gethash "scheduled" json-data))
-               (scheduled-repeater (gethash "scheduledRepeater" json-data))
                (deadline (gethash "deadline" json-data))
-               (deadline-repeater (gethash "deadlineRepeater" json-data))
                (priority (gethash "priority" json-data))
                (tags (gethash "tags" json-data))
                (properties (gethash "properties" json-data))
@@ -270,7 +269,7 @@ Returns updated todo with new file and pos for cache update."
         (message "[/update] Request: id=%s file=%s pos=%s title=%s new_title=%s scheduled=%s deadline=%s priority=%s"
                  id file pos title new-title scheduled deadline priority)
         ;; Check for unrecognized fields
-        (let ((allowed-fields '("id" "file" "pos" "title" "new_title" "scheduled" "scheduledRepeater" "deadline" "deadlineRepeater" "priority" "tags" "properties"))
+        (let ((allowed-fields '("id" "file" "pos" "title" "new_title" "scheduled" "deadline" "priority" "tags" "properties"))
               (unrecognized nil))
           (maphash (lambda (key _value)
                      (unless (member key allowed-fields)
@@ -288,12 +287,8 @@ Returns updated todo with new file and pos for cache update."
           (push (cons "new_title" (if (eq new-title :null) nil new-title)) updates))
         (unless (eq (gethash "scheduled" json-data :not-found) :not-found)
           (push (cons "scheduled" (if (eq scheduled :null) nil scheduled)) updates))
-        (unless (eq (gethash "scheduledRepeater" json-data :not-found) :not-found)
-          (push (cons "scheduledRepeater" (if (eq scheduled-repeater :null) nil scheduled-repeater)) updates))
         (unless (eq (gethash "deadline" json-data :not-found) :not-found)
           (push (cons "deadline" (if (eq deadline :null) nil deadline)) updates))
-        (unless (eq (gethash "deadlineRepeater" json-data :not-found) :not-found)
-          (push (cons "deadlineRepeater" (if (eq deadline-repeater :null) nil deadline-repeater)) updates))
         (unless (eq (gethash "priority" json-data :not-found) :not-found)
           (push (cons "priority" (if (eq priority :null) nil priority)) updates))
         (unless (eq (gethash "tags" json-data :not-found) :not-found)

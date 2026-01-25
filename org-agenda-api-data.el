@@ -58,6 +58,18 @@ Otherwise return date-only format."
         (format-time-string "%Y-%m-%dT%H:%M:%S" time)
       (format-time-string "%Y-%m-%d" time))))
 
+(defun org-agenda-api--format-timestamp-object (time has-time repeater)
+  "Format TIME as timestamp object with date, time (optional), and repeater (optional).
+Returns alist like ((date . \"2026-01-25\") (time . \"10:00\") (repeater . ...))
+or nil if TIME is nil."
+  (when time
+    (let ((result `(("date" . ,(format-time-string "%Y-%m-%d" time)))))
+      (when has-time
+        (push (cons "time" (format-time-string "%H:%M" time)) result))
+      (when repeater
+        (push (cons "repeater" repeater) result))
+      (nreverse result))))
+
 (defun org-agenda-api--extract-date (timestamp)
   "Extract YYYY-MM-DD date portion from TIMESTAMP string.
 TIMESTAMP may be in formats like:
@@ -67,16 +79,34 @@ Returns nil if TIMESTAMP is nil."
   (when timestamp
     (substring timestamp 0 (min 10 (length timestamp)))))
 
+(defun org-agenda-api--extract-repeater-from-element (ts-elem)
+  "Extract repeater info from timestamp element TS-ELEM.
+Returns an alist with type, value, unit if repeater present, nil otherwise."
+  (let ((repeater-type (org-element-property :repeater-type ts-elem))
+        (repeater-value (org-element-property :repeater-value ts-elem))
+        (repeater-unit (org-element-property :repeater-unit ts-elem)))
+    (when (and repeater-type repeater-value repeater-unit)
+      `(("type" . ,(pcase repeater-type
+                     ('cumulate "+")
+                     ('catch-up "++")
+                     ('restart ".+")
+                     (_ "+")))
+        ("value" . ,repeater-value)
+        ("unit" . ,(symbol-name repeater-unit))))))
+
 (defun org-agenda-api--get-planning-info ()
   "Get scheduled and deadline info at point.
-Return alist with scheduled-time, scheduled-has-time, scheduled-end-time,
-scheduled-end-has-time, deadline-time, deadline-has-time, deadline-end-time,
-deadline-end-has-time.  Supports ranged timestamps like <2024-06-15>--<2024-06-20>."
+Return alist with scheduled-time, scheduled-has-time, scheduled-repeater,
+scheduled-end-time, scheduled-end-has-time, deadline-time, deadline-has-time,
+deadline-repeater, deadline-end-time, deadline-end-has-time.
+Supports ranged timestamps like <2024-06-15>--<2024-06-20>."
   (save-excursion
     (let ((scheduled-time (org-get-scheduled-time (point)))
           (deadline-time (org-get-deadline-time (point)))
           (scheduled-has-time nil)
           (deadline-has-time nil)
+          (scheduled-repeater nil)
+          (deadline-repeater nil)
           (scheduled-end-time nil)
           (scheduled-end-has-time nil)
           (deadline-end-time nil)
@@ -89,6 +119,7 @@ deadline-end-has-time.  Supports ranged timestamps like <2024-06-15>--<2024-06-2
         ;; Process SCHEDULED timestamp
         (when scheduled-ts
           (setq scheduled-has-time (not (null (org-element-property :hour-start scheduled-ts))))
+          (setq scheduled-repeater (org-agenda-api--extract-repeater-from-element scheduled-ts))
           ;; Check for range (:range-type is set for ranged timestamps like <date>--<date>)
           (when (org-element-property :range-type scheduled-ts)
             (setq scheduled-end-time (org-agenda-api--timestamp-end-to-time scheduled-ts))
@@ -96,16 +127,19 @@ deadline-end-has-time.  Supports ranged timestamps like <2024-06-15>--<2024-06-2
         ;; Process DEADLINE timestamp
         (when deadline-ts
           (setq deadline-has-time (not (null (org-element-property :hour-start deadline-ts))))
+          (setq deadline-repeater (org-agenda-api--extract-repeater-from-element deadline-ts))
           ;; Check for range (:range-type is set for ranged timestamps like <date>--<date>)
           (when (org-element-property :range-type deadline-ts)
             (setq deadline-end-time (org-agenda-api--timestamp-end-to-time deadline-ts))
             (setq deadline-end-has-time (not (null (org-element-property :hour-end deadline-ts)))))))
       `((scheduled-time . ,scheduled-time)
         (scheduled-has-time . ,scheduled-has-time)
+        (scheduled-repeater . ,scheduled-repeater)
         (scheduled-end-time . ,scheduled-end-time)
         (scheduled-end-has-time . ,scheduled-end-has-time)
         (deadline-time . ,deadline-time)
         (deadline-has-time . ,deadline-has-time)
+        (deadline-repeater . ,deadline-repeater)
         (deadline-end-time . ,deadline-end-time)
         (deadline-end-has-time . ,deadline-end-has-time)))))
 
@@ -302,10 +336,12 @@ expensive `org-element-at-point' calls."
               (planning (org-agenda-api--get-planning-info))
               (scheduled-time (alist-get 'scheduled-time planning))
               (scheduled-has-time (alist-get 'scheduled-has-time planning))
+              (scheduled-repeater (alist-get 'scheduled-repeater planning))
               (scheduled-end-time (alist-get 'scheduled-end-time planning))
               (scheduled-end-has-time (alist-get 'scheduled-end-has-time planning))
               (deadline-time (alist-get 'deadline-time planning))
               (deadline-has-time (alist-get 'deadline-has-time planning))
+              (deadline-repeater (alist-get 'deadline-repeater planning))
               (deadline-end-time (alist-get 'deadline-end-time planning))
               (deadline-end-has-time (alist-get 'deadline-end-has-time planning))
               (pos (point))
@@ -330,12 +366,12 @@ expensive `org-element-at-point' calls."
            ("title" . ,title)
            ("tags" . ,(if tags (vconcat tags) nil))
            ("level" . ,level)
-           ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+           ("scheduled" . ,(org-agenda-api--format-timestamp-object scheduled-time scheduled-has-time scheduled-repeater))
            ,@(when scheduled-end-time
-               `(("scheduledEnd" . ,(org-agenda-api--format-timestamp scheduled-end-time scheduled-end-has-time))))
-           ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
+               `(("scheduledEnd" . ,(org-agenda-api--format-timestamp-object scheduled-end-time scheduled-end-has-time nil))))
+           ("deadline" . ,(org-agenda-api--format-timestamp-object deadline-time deadline-has-time deadline-repeater))
            ,@(when deadline-end-time
-               `(("deadlineEnd" . ,(org-agenda-api--format-timestamp deadline-end-time deadline-end-has-time))))
+               `(("deadlineEnd" . ,(org-agenda-api--format-timestamp-object deadline-end-time deadline-end-has-time nil))))
            ,@(when timestamps
                `(("timestamps" . ,(vconcat timestamps))))
            ("file" . ,filepath)
@@ -463,10 +499,12 @@ AGENDA-LINE is the raw agenda display text for reference."
                  (planning (org-agenda-api--get-planning-info))
                  (scheduled-time (alist-get 'scheduled-time planning))
                  (scheduled-has-time (alist-get 'scheduled-has-time planning))
+                 (scheduled-repeater (alist-get 'scheduled-repeater planning))
                  (scheduled-end-time (alist-get 'scheduled-end-time planning))
                  (scheduled-end-has-time (alist-get 'scheduled-end-has-time planning))
                  (deadline-time (alist-get 'deadline-time planning))
                  (deadline-has-time (alist-get 'deadline-has-time planning))
+                 (deadline-repeater (alist-get 'deadline-repeater planning))
                  (deadline-end-time (alist-get 'deadline-end-time planning))
                  (deadline-end-has-time (alist-get 'deadline-end-has-time planning))
                  (pos (point))
@@ -492,12 +530,12 @@ AGENDA-LINE is the raw agenda display text for reference."
               ("title" . ,title)
               ("tags" . ,(if tags (vconcat tags) nil))
               ("level" . ,level)
-              ("scheduled" . ,(org-agenda-api--format-timestamp scheduled-time scheduled-has-time))
+              ("scheduled" . ,(org-agenda-api--format-timestamp-object scheduled-time scheduled-has-time scheduled-repeater))
               ,@(when scheduled-end-time
-                  `(("scheduledEnd" . ,(org-agenda-api--format-timestamp scheduled-end-time scheduled-end-has-time))))
-              ("deadline" . ,(org-agenda-api--format-timestamp deadline-time deadline-has-time))
+                  `(("scheduledEnd" . ,(org-agenda-api--format-timestamp-object scheduled-end-time scheduled-end-has-time nil))))
+              ("deadline" . ,(org-agenda-api--format-timestamp-object deadline-time deadline-has-time deadline-repeater))
               ,@(when deadline-end-time
-                  `(("deadlineEnd" . ,(org-agenda-api--format-timestamp deadline-end-time deadline-end-has-time))))
+                  `(("deadlineEnd" . ,(org-agenda-api--format-timestamp-object deadline-end-time deadline-end-has-time nil))))
               ,@(when timestamps
                   `(("timestamps" . ,(vconcat timestamps))))
               ("file" . ,filepath)
@@ -879,6 +917,48 @@ REPEATER should be an alist with keys \"type\", \"value\", and \"unit\"."
       (if repeater-str
           (format-time-string (concat "<%Y-%m-%d %a " repeater-str ">") time)
         (format-time-string "<%Y-%m-%d %a>" time)))))
+
+(defun org-agenda-api--timestamp-to-org (timestamp)
+  "Convert TIMESTAMP object to org timestamp string.
+TIMESTAMP should be an alist with keys \"date\" (required), \"time\" (optional),
+and \"repeater\" (optional). Returns org timestamp like <2026-01-25 Sat 10:00 +1w>."
+  (when (and timestamp (not (eq timestamp :json-null)))
+    (let* ((date-str (cdr (assoc "date" timestamp)))
+           (time-str (let ((t (cdr (assoc "time" timestamp))))
+                       (unless (eq t :json-null) t)))
+           (repeater (let ((r (cdr (assoc "repeater" timestamp))))
+                       (unless (eq r :json-null) r)))
+           (has-time (and time-str (not (string-empty-p time-str))))
+           (datetime-str (if has-time
+                             (concat date-str " " time-str)
+                           date-str))
+           (time (org-agenda-api--parse-datetime datetime-str)))
+      (when time
+        (org-agenda-api--format-org-timestamp-with-repeater time has-time repeater)))))
+
+(defun org-agenda-api--parse-org-timestamp-to-object (ts-string)
+  "Parse org timestamp TS-STRING to timestamp object.
+Returns alist with \"date\", \"time\" (if present), and \"repeater\" (if present).
+Example: <2026-01-25 Sat 10:00 +1w> -> ((date . \"2026-01-25\") (time . \"10:00\") (repeater . ...))"
+  (when (and ts-string (not (string-empty-p ts-string)))
+    (let ((result nil))
+      ;; Extract date (YYYY-MM-DD)
+      (when (string-match "\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)" ts-string)
+        (push (cons "date" (match-string 1 ts-string)) result))
+      ;; Extract time (HH:MM) if present
+      (when (string-match "\\([0-9]\\{2\\}:[0-9]\\{2\\}\\)" ts-string)
+        (push (cons "time" (match-string 1 ts-string)) result))
+      ;; Extract repeater if present (+1w, ++2d, .+1m)
+      (when (string-match "\\(\\.?\\+\\+?\\)\\([0-9]+\\)\\([dwmy]\\)" ts-string)
+        (let ((type (match-string 1 ts-string))
+              (value (string-to-number (match-string 2 ts-string)))
+              (unit (match-string 3 ts-string)))
+          (push (cons "repeater" `(("type" . ,type)
+                                   ("value" . ,value)
+                                   ("unit" . ,unit)))
+                result)))
+      (when result
+        (nreverse result)))))
 
 ;;; TODO State and Filter Functions
 
