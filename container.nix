@@ -82,7 +82,22 @@ let
         location = /version {
           proxy_pass http://emacs;
           proxy_http_version 1.1;
+
+          # CORS headers
           add_header 'Access-Control-Allow-Origin' '*' always;
+          add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
+          add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization' always;
+
+          # Handle preflight
+          if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization';
+            add_header 'Access-Control-Max-Age' 86400;
+            add_header 'Content-Length' 0;
+            add_header 'Content-Type' 'text/plain';
+            return 204;
+          }
         }
 
         # API endpoints - proxy to emacs with auth
