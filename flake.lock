@@ -82,11 +82,11 @@
     "mova": {
       "flake": false,
       "locked": {
-        "lastModified": 1769104847,
-        "narHash": "sha256-D6tBOciKgzrebipKnoWkhx2k6hboLxsv+7Usymv+y3c=",
+        "lastModified": 1769369181,
+        "narHash": "sha256-uqOecUbsq/jJRzF2RPpR5y3SZ31r6NKuWJPSCB1ubM0=",
         "ref": "refs/heads/master",
-        "rev": "96f612845cfee2969cdff2e1f86f04441a5b7bbf",
-        "revCount": 315,
+        "rev": "c27da31ad0c36fe9cbf82a9ac0c9a161d1614480",
+        "revCount": 351,
         "type": "git",
         "url": "ssh://git@github.com/colonelpanic8/mova"
       },
@@ -162,11 +162,11 @@
     "org-window-habit": {
       "flake": false,
       "locked": {
-        "lastModified": 1769194430,
-        "narHash": "sha256-Xp6SnK6M1rH6ppQ5heRKHGdAWX3TcLDnmMl02GAS4e0=",
+        "lastModified": 1769368586,
+        "narHash": "sha256-rNCOa+LsRKBTra6VTD9mLp3EwnVs20eJjHkE9lsye2Q=",
         "owner": "colonelpanic8",
         "repo": "org-window-habit",
-        "rev": "56a404d9c37e325f9eb908467017a356aa055369",
+        "rev": "6ead9bc8e211439ef49149b9851c796f3db32536",
         "type": "github"
       },
       "original": {
