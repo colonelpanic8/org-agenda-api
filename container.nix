@@ -218,7 +218,7 @@ let
   healthCheckerScript = pkgs.writeShellScript "health-checker" ''
     INTERVAL=''${HEALTH_CHECK_INTERVAL:-10}
     TIMEOUT=''${HEALTH_CHECK_TIMEOUT:-5}
-    GRACE_PERIOD=''${HEALTH_CHECK_GRACE_PERIOD:-90}
+    GRACE_PERIOD=''${HEALTH_CHECK_GRACE_PERIOD:-600}
     TIMESTAMP_FILE="/tmp/emacs_start_time"
 
     echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s, grace=''${GRACE_PERIOD}s)"

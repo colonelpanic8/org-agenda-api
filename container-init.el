@@ -29,9 +29,22 @@
 ;; === Auto-revert Configuration ===
 ;; Automatically reload files when they change on disk (e.g., from git-sync)
 (global-auto-revert-mode 1)
-(setq auto-revert-interval 1)        ; Check every second
+(setq auto-revert-interval 5)        ; Check every 5 seconds (was 1, too aggressive)
 (setq auto-revert-verbose nil)       ; Suppress "Reverting buffer" messages
-(setq auto-revert-check-vc-info t)   ; Also update VC info when reverting
+(setq auto-revert-check-vc-info nil) ; Don't check VC info on revert (can be slow)
+
+;; === Debug heartbeat timer ===
+;; Log every 30 seconds to confirm emacs event loop is responsive
+(run-with-timer 30 30
+  (lambda ()
+    (message "org-agenda-api heartbeat: uptime=%.0fs requests=%d timers=%d"
+             (if (boundp 'org-agenda-api--start-time)
+                 (float-time (time-subtract (current-time) org-agenda-api--start-time))
+               0)
+             (if (boundp 'org-agenda-api--request-count)
+                 org-agenda-api--request-count
+               0)
+             (length timer-list))))
 
 ;; Log startup
 (message "org-agenda-api container-init.el loading...")
