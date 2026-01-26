@@ -219,8 +219,8 @@ let
 
     echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s)"
 
-    # Wait for emacs to start up
-    ${pkgs.coreutils}/bin/sleep 15
+    # Wait for emacs to start up (cache warming can take 20+ seconds)
+    ${pkgs.coreutils}/bin/sleep 30
 
     while true; do
       # First check
