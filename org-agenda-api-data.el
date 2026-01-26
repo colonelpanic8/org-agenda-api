@@ -1339,7 +1339,9 @@ Returns a list of notification objects suitable for JSON encoding."
               (marker (plist-get notif :marker))
               (event (plist-get notif :event))
               (marker-info (org-agenda-api--get-marker-info marker))
-              (all-times (cadr (assoc 'times event))))
+              ;; Safely extract all-times only if event is a proper alist
+              (all-times (when (and event (listp event) (not (functionp event)))
+                           (cadr (assoc 'times event)))))
          `(("title" . ,title)
            ("notifyAt" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" notify-at))
            ("type" . ,(symbol-name notif-type))
