@@ -1284,37 +1284,19 @@ Returns a list of integers (minutes before event)."
             ("pos" . ,pos)
             ,@(when id `(("id" . ,id)))))))))
 
-(defun org-agenda-api--get-upcoming-notifications (&optional within-minutes as-of-time)
+(defun org-agenda-api--get-upcoming-notifications (&optional as-of-time)
   "Get upcoming notifications.
-If WITHIN-MINUTES is provided, filter to notifications within that time window.
 If AS-OF-TIME is provided (as an Emacs time value), use it as the reference time
 for determining which notifications are upcoming.
 Uses `org-wild-notifier-get-upcoming-notifications'.
 Returns a list of notification objects suitable for JSON encoding."
   (require 'org-wild-notifier)
   (let* ((now (or as-of-time (current-time)))
-         (window-end (when within-minutes
-                       (time-add now (seconds-to-time (* within-minutes 60)))))
          (all-notifications (condition-case err
                                 (org-wild-notifier-get-upcoming-notifications now)
                               (error
                                (message "[org-agenda-api] Error getting notifications: %S" err)
-                               nil)))
-         (filtered-notifications
-          (condition-case nil
-              (if within-minutes
-                  (cl-remove-if-not
-                   (lambda (notif)
-                     (condition-case nil
-                         (let ((notify-at (plist-get notif :notify-at)))
-                           (and notify-at
-                                (not (time-less-p notify-at now))
-                                (time-less-p notify-at window-end)))
-                       (error nil)))
-                   all-notifications)
-                ;; No filter - just return all notifications (already filtered by source)
-                all-notifications)
-            (error all-notifications))))
+                               nil))))
     (cl-remove nil
                (mapcar
                 (lambda (notif)
@@ -1360,7 +1342,7 @@ Returns a list of notification objects suitable for JSON encoding."
                     (error
                      (message "[org-agenda-api] Error processing notification: %S" err)
                      nil)))
-                filtered-notifications))))
+                all-notifications))))
 
 (provide 'org-agenda-api-data)
 ;;; org-agenda-api-data.el ends here

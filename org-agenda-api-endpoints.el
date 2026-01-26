@@ -113,31 +113,23 @@ Returns todoStates, priorities, tags, and categories."
 (defservlet notifications application/json (_path query)
   "Endpoint: Return items with upcoming notifications.
 Accepts optional query params:
-  - 'within' (minutes): time window for upcoming notifications
   - 'asOf' (ISO datetime): reference time for notification calculations
-If 'within' is not provided, returns all future notifications.
 If 'asOf' is provided, calculates notifications as if it were that time."
   (condition-case err
-      (let* ((within-param (cadr (assoc "within" query)))
-             (as-of-param (cadr (assoc "asOf" query)))
-             (within-minutes (when within-param
-                               (string-to-number within-param)))
+      (let* ((as-of-param (cadr (assoc "asOf" query)))
              (as-of-time (when as-of-param
                            (condition-case nil
                                (encode-time (parse-time-string as-of-param))
                              (error nil))))
-             (notifications (org-agenda-api--get-upcoming-notifications within-minutes as-of-time))
+             (notifications (org-agenda-api--get-upcoming-notifications as-of-time))
              (defaults (org-agenda-api--get-default-notify-before))
-             (response `(,@(when within-minutes
-                             `(("withinMinutes" . ,within-minutes)))
-                         ,@(when as-of-time
+             (response `(,@(when as-of-time
                              `(("asOf" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" as-of-time))))
                          ("defaultNotifyBefore" . ,(vconcat defaults))
                          ("count" . ,(length notifications))
                          ("notifications" . ,(vconcat notifications)))))
-        (message "[org-agenda-api] /notifications: %d notifications%s%s"
+        (message "[org-agenda-api] /notifications: %d notifications%s"
                  (length notifications)
-                 (if within-minutes (format " within %d minutes" within-minutes) "")
                  (if as-of-time (format " as-of %s" as-of-param) ""))
         (insert (json-encode response)))
     (error

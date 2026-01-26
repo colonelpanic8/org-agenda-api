@@ -251,10 +251,10 @@ class APIClient:
             params += f"&following={following}"
         return self.get(f"/habit-status{params}")
 
-    def get_notifications(self, within: int = None) -> requests.Response:
-        """GET /notifications with optional within parameter (minutes)."""
-        if within is not None:
-            return self.get(f"/notifications?within={within}")
+    def get_notifications(self, as_of: str = None) -> requests.Response:
+        """GET /notifications with optional asOf parameter (ISO datetime)."""
+        if as_of is not None:
+            return self.get(f"/notifications?asOf={as_of}")
         return self.get("/notifications")
 
     def reload(self, timeout: float = 10.0) -> requests.Response:
