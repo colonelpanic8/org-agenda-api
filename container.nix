@@ -214,21 +214,39 @@ let
 
   # Health checker script that monitors emacs and restarts if unhealthy
   # Uses unix socket at /tmp/supervisor.sock (defined in supervisord config)
+  # Tracks emacs restart times via timestamp file to reset grace period on each restart
   healthCheckerScript = pkgs.writeShellScript "health-checker" ''
     INTERVAL=''${HEALTH_CHECK_INTERVAL:-10}
     TIMEOUT=''${HEALTH_CHECK_TIMEOUT:-5}
+    GRACE_PERIOD=''${HEALTH_CHECK_GRACE_PERIOD:-45}
+    TIMESTAMP_FILE="/tmp/emacs_start_time"
 
-    echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s)"
+    echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s, grace=''${GRACE_PERIOD}s)"
 
-    # Wait for emacs to start up (cache warming can take 20+ seconds)
-    ${pkgs.coreutils}/bin/sleep 30
+    # Record initial start time
+    ${pkgs.coreutils}/bin/date +%s > "$TIMESTAMP_FILE"
 
     while true; do
+      # Check if we're still in the grace period after emacs (re)start
+      if [ -f "$TIMESTAMP_FILE" ]; then
+        start_time=$(${pkgs.coreutils}/bin/cat "$TIMESTAMP_FILE")
+        current_time=$(${pkgs.coreutils}/bin/date +%s)
+        elapsed=$((current_time - start_time))
+        if [ "$elapsed" -lt "$GRACE_PERIOD" ]; then
+          remaining=$((GRACE_PERIOD - elapsed))
+          echo "Grace period: ''${remaining}s remaining before health checks"
+          ${pkgs.coreutils}/bin/sleep $INTERVAL
+          continue
+        fi
+      fi
+
       # First check
       if ! ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
         # Immediate retry
         if ! ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
           echo "Emacs failed health check twice, restarting..."
+          # Record restart time BEFORE restarting so grace period starts immediately
+          ${pkgs.coreutils}/bin/date +%s > "$TIMESTAMP_FILE"
           ${pkgs.python3Packages.supervisor}/bin/supervisorctl -s unix:///tmp/supervisor.sock restart emacs || true
         fi
       fi
