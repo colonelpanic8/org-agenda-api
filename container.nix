@@ -213,6 +213,7 @@ let
   '';
 
   # Health checker script that monitors emacs and restarts if unhealthy
+  # Uses unix socket at /tmp/supervisor.sock (defined in supervisord config)
   healthCheckerScript = pkgs.writeShellScript "health-checker" ''
     INTERVAL=''${HEALTH_CHECK_INTERVAL:-10}
     TIMEOUT=''${HEALTH_CHECK_TIMEOUT:-5}
@@ -228,7 +229,7 @@ let
         # Immediate retry
         if ! ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
           echo "Emacs failed health check twice, restarting..."
-          ${pkgs.python3Packages.supervisor}/bin/supervisorctl restart emacs || true
+          ${pkgs.python3Packages.supervisor}/bin/supervisorctl -s unix:///tmp/supervisor.sock restart emacs || true
         fi
       fi
 
