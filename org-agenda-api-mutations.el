@@ -364,5 +364,95 @@ Returns alist with deletion result."
           `(("deleted" . t)
             ("title" . ,title)))))))
 
+(defun org-agenda-api--delete-logbook-entry (file pos date &optional entry-type)
+  "Delete a LOGBOOK entry at DATE for the heading at FILE and POS.
+DATE should be a string like \"2024-01-15\".
+ENTRY-TYPE if provided filters to only delete entries of that type
+\(e.g., \"state-change\", \"note\").
+Returns alist with deletion result."
+  (with-current-buffer (find-file-noselect file)
+    (save-excursion
+      (goto-char pos)
+      (if (not (org-at-heading-p))
+          `(("status" . "error")
+            ("message" . "No heading found at position"))
+        (let* ((title (org-get-heading t t t t))
+               (drawer-name (cond
+                             ((and (boundp 'org-log-into-drawer)
+                                   (stringp org-log-into-drawer))
+                              org-log-into-drawer)
+                             (t "LOGBOOK")))
+               (end-of-subtree (save-excursion (org-end-of-subtree t) (point)))
+               (deleted nil)
+               (deleted-entry-raw nil))
+          ;; Find the LOGBOOK drawer
+          (if (not (re-search-forward
+                    (format "^[ \t]*:%s:[ \t]*$" (regexp-quote drawer-name))
+                    end-of-subtree t))
+              `(("status" . "error")
+                ("message" . ,(format "No LOGBOOK drawer found for '%s'" title)))
+            (let ((drawer-start (point))
+                  (drawer-end (save-excursion
+                                (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t)
+                                (match-beginning 0))))
+              (if (not drawer-end)
+                  `(("status" . "error")
+                    ("message" . "Malformed LOGBOOK drawer - no :END: found"))
+                ;; Search for entry matching the date
+                (goto-char drawer-start)
+                (forward-line 1)
+                (while (and (not deleted) (< (point) drawer-end))
+                  (let ((line-start (line-beginning-position))
+                        (line-end (line-end-position))
+                        (line (buffer-substring-no-properties
+                               (line-beginning-position) (line-end-position))))
+                    ;; Check if this line is a logbook entry starting with "- "
+                    (when (string-match "^[ \t]*- " line)
+                      ;; Check if it contains our target date in an inactive timestamp
+                      (when (string-match (concat "\\[" (regexp-quote date)) line)
+                        ;; Check entry type if specified
+                        (let ((is-state-change (string-match "State \"" line))
+                              (is-note (string-match "Note taken on" line))
+                              (should-delete t))
+                          (when entry-type
+                            (setq should-delete
+                                  (cond
+                                   ((string= entry-type "state-change") is-state-change)
+                                   ((string= entry-type "note") is-note)
+                                   (t t))))  ; Unknown type - delete anyway
+                          (when should-delete
+                            ;; Found the entry to delete
+                            ;; Check for continuation lines (indented, not starting with "- " or ":")
+                            (let ((entry-end line-end))
+                              (save-excursion
+                                (forward-line 1)
+                                (while (and (< (point) drawer-end)
+                                            (looking-at "^[ \t]+[^-:]"))
+                                  (setq entry-end (line-end-position))
+                                  (forward-line 1)))
+                              ;; Delete the entry (including newline)
+                              (setq deleted-entry-raw
+                                    (buffer-substring-no-properties line-start (min (1+ entry-end) drawer-end)))
+                              (delete-region line-start (min (1+ entry-end) drawer-end))
+                              (setq deleted t)
+                              ;; Update drawer-end since we deleted content
+                              (setq drawer-end (- drawer-end (- (min (1+ entry-end) drawer-end) line-start)))))))))
+                  (unless deleted
+                    (forward-line 1)))
+                (if deleted
+                    (progn
+                      (save-buffer)
+                      (org-agenda-api--invalidate-cache)
+                      `(("status" . "deleted")
+                        ("title" . ,title)
+                        ("date" . ,date)
+                        ("deletedEntry" . ,(string-trim deleted-entry-raw))))
+                  `(("status" . "not_found")
+                    ("message" . ,(format "No logbook entry found for date %s%s"
+                                          date
+                                          (if entry-type
+                                              (format " with type '%s'" entry-type)
+                                            "")))))))))))))
+
 (provide 'org-agenda-api-mutations)
 ;;; org-agenda-api-mutations.el ends here

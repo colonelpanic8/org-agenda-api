@@ -1,5 +1,7 @@
 """Integration tests for logbook data in todos."""
 
+import re
+
 
 class TestLogbookData:
     """Tests for logbook data extraction from todos."""
@@ -125,3 +127,287 @@ class TestLogbookData:
         for entry in logbook:
             assert "raw" in entry, "Entry should have raw field"
             assert isinstance(entry["raw"], str), "Raw should be a string"
+
+
+class TestDeleteLogbookEntry:
+    """Tests for POST /delete-logbook-entry endpoint."""
+
+    def test_delete_logbook_entry_returns_200(self, api, org_dir):
+        """Endpoint should return 200 OK on successful deletion."""
+        from pathlib import Path
+
+        # Create a todo and complete it to create a logbook entry
+        unique_title = "Delete logbook test todo 11111"
+        api.create_todo(unique_title)
+
+        # Find the todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Complete it with a specific date
+        override_date = "2024-02-15"
+        response = api.complete_todo(todo, override_date=override_date)
+        assert response.status_code == 200
+
+        # Verify the logbook entry exists
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+        assert override_date in content, "Logbook entry should exist"
+
+        # Get updated todo (position may have changed)
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Delete the logbook entry
+        response = api.delete_logbook_entry(todo, override_date)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data.get("status") == "deleted"
+
+    def test_delete_logbook_entry_removes_entry_from_file(self, api, org_dir):
+        """Deleted entry should be removed from the file."""
+        from pathlib import Path
+
+        unique_title = "Delete logbook file test 22222"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Complete with specific date
+        override_date = "2024-03-10"
+        api.complete_todo(todo, override_date=override_date)
+
+        # Find the todo section and verify logbook entry exists
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+
+        # Find this specific todo's section
+        todo_section_match = re.search(
+            r'\*+ (?:TODO|DONE) ' + re.escape(unique_title) + r'.*?\n(.*?)(?=^\*|\Z)',
+            content,
+            re.MULTILINE | re.DOTALL
+        )
+        assert todo_section_match, "Should find todo section"
+        todo_section = todo_section_match.group(1)
+
+        # Verify the logbook entry exists
+        logbook_match = re.search(r':LOGBOOK:\s*\n(.*?):END:', todo_section, re.DOTALL)
+        assert logbook_match, "Should have LOGBOOK"
+        assert override_date in logbook_match.group(1), "Date should be in LOGBOOK"
+
+        # Get updated todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+
+        # Delete the entry
+        api.delete_logbook_entry(todo, override_date)
+
+        # Verify entry is gone from logbook
+        content = file_path.read_text()
+        todo_section_match = re.search(
+            r'\*+ (?:TODO|DONE) ' + re.escape(unique_title) + r'.*?\n(.*?)(?=^\*|\Z)',
+            content,
+            re.MULTILINE | re.DOTALL
+        )
+        assert todo_section_match, "Should still find todo section"
+        todo_section = todo_section_match.group(1)
+
+        logbook_match = re.search(r':LOGBOOK:\s*\n(.*?):END:', todo_section, re.DOTALL)
+        # Either no logbook or date not in logbook
+        if logbook_match:
+            assert override_date not in logbook_match.group(1), "Date should be removed from LOGBOOK"
+
+    def test_delete_logbook_entry_not_found(self, api, org_dir):
+        """Should return not_found status when entry doesn't exist."""
+        unique_title = "Delete logbook not found test 33333"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Complete it first to create a logbook
+        api.complete_todo(todo, override_date="2024-04-01")
+
+        # Get updated todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+
+        # Try to delete a non-existent entry
+        response = api.delete_logbook_entry(todo, "2024-12-31")
+        data = response.json()
+
+        assert data.get("status") == "not_found"
+
+    def test_delete_logbook_entry_with_type_filter(self, api, org_dir):
+        """Should only delete entries matching the type filter."""
+        from pathlib import Path
+
+        unique_title = "Delete logbook type filter test 44444"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Complete with specific date
+        override_date = "2024-05-15"
+        api.complete_todo(todo, override_date=override_date)
+
+        # Get updated todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+
+        # Delete with type filter for state-change
+        response = api.delete_logbook_entry(todo, override_date, entry_type="state-change")
+        data = response.json()
+
+        assert data.get("status") == "deleted"
+
+        # Verify entry is gone from logbook (not just file - CLOSED timestamp may still have date)
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+
+        # Find this specific todo's section
+        todo_section_match = re.search(
+            r'\*+ (?:TODO|DONE) ' + re.escape(unique_title) + r'.*?\n(.*?)(?=^\*|\Z)',
+            content,
+            re.MULTILINE | re.DOTALL
+        )
+        assert todo_section_match, "Should find todo section"
+        todo_section = todo_section_match.group(1)
+
+        logbook_match = re.search(r':LOGBOOK:\s*\n(.*?):END:', todo_section, re.DOTALL)
+        # Either no logbook or date not in logbook
+        if logbook_match:
+            assert override_date not in logbook_match.group(1), "Date should be removed from LOGBOOK"
+
+    def test_delete_logbook_entry_returns_deleted_content(self, api, org_dir):
+        """Response should include the deleted entry content."""
+        unique_title = "Delete logbook content test 55555"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        override_date = "2024-06-20"
+        api.complete_todo(todo, override_date=override_date)
+
+        # Get updated todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+
+        response = api.delete_logbook_entry(todo, override_date)
+        data = response.json()
+
+        assert "deletedEntry" in data
+        assert "DONE" in data["deletedEntry"]
+        assert override_date in data["deletedEntry"]
+
+    def test_delete_one_of_multiple_logbook_entries(self, api, org_dir):
+        """Should delete only the targeted entry when multiple exist."""
+        from pathlib import Path
+
+        unique_title = "Delete logbook multiple test 66666"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Complete multiple times with different dates
+        date1 = "2024-07-10"
+        date2 = "2024-07-15"
+
+        api.complete_todo(todo, override_date=date1)
+
+        # Get updated todo and set back to TODO
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        api.set_state(todo, "TODO")
+
+        # Get updated todo and complete again
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        api.complete_todo(todo, override_date=date2)
+
+        # Get updated todo
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+
+        # Verify both dates exist
+        file_path = Path(todo["file"])
+        content = file_path.read_text()
+        assert date1 in content, f"Date1 should exist: {content}"
+        assert date2 in content, f"Date2 should exist: {content}"
+
+        # Delete only the first date
+        response = api.delete_logbook_entry(todo, date1, entry_type="state-change")
+        assert response.json().get("status") == "deleted"
+
+        # Verify only date1 is gone, date2 still exists
+        content = file_path.read_text()
+        assert date1 not in content, "Date1 should be deleted"
+        assert date2 in content, "Date2 should still exist"

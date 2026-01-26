@@ -237,6 +237,25 @@ class APIClient:
             return self.get(f"/notifications?within={within}")
         return self.get("/notifications")
 
+    def delete_logbook_entry(self, todo: dict, date: str, entry_type: str = None) -> requests.Response:
+        """POST /delete-logbook-entry
+
+        Args:
+            todo: Dict with id, file, pos to identify the todo
+            date: The date of the logbook entry to delete (YYYY-MM-DD)
+            entry_type: Optional type filter ("state-change", "note")
+        """
+        payload = {
+            "file": todo.get("file"),
+            "pos": todo.get("pos"),
+            "date": date,
+        }
+        if todo.get("id"):
+            payload["id"] = todo["id"]
+        if entry_type:
+            payload["type"] = entry_type
+        return self.post("/delete-logbook-entry", json=payload)
+
 
 def find_free_port() -> int:
     """Find a free port to use for testing."""
