@@ -1284,17 +1284,19 @@ Returns a list of integers (minutes before event)."
             ("pos" . ,pos)
             ,@(when id `(("id" . ,id)))))))))
 
-(defun org-agenda-api--get-upcoming-notifications (&optional within-minutes)
+(defun org-agenda-api--get-upcoming-notifications (&optional within-minutes as-of-time)
   "Get upcoming notifications.
 If WITHIN-MINUTES is provided, filter to notifications within that time window.
+If AS-OF-TIME is provided (as an Emacs time value), use it as the reference time
+for determining which notifications are upcoming.
 Uses `org-wild-notifier-get-upcoming-notifications'.
 Returns a list of notification objects suitable for JSON encoding."
   (require 'org-wild-notifier)
-  (let* ((now (current-time))
+  (let* ((now (or as-of-time (current-time)))
          (window-end (when within-minutes
                        (time-add now (seconds-to-time (* within-minutes 60)))))
          (all-notifications (condition-case err
-                                (org-wild-notifier-get-upcoming-notifications)
+                                (org-wild-notifier-get-upcoming-notifications now)
                               (error
                                (message "[org-agenda-api] Error getting notifications: %S" err)
                                nil)))
