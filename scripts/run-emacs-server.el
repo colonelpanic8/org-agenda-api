@@ -26,11 +26,7 @@
 (require 'org)
 (require 'org-agenda)
 (require 'simple-httpd)
-
-;; org-wild-notifier is optional - only load if available
-;; It provides notification-related features
-(when (require 'org-wild-notifier nil t)
-  (message "org-wild-notifier loaded"))
+(require 'org-wild-notifier)
 
 ;; Override calendar-current-date and org-today BEFORE loading org-agenda-api
 ;; and BEFORE setting org-agenda-files. This ensures all date-related
