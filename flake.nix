@@ -13,7 +13,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mova = {
-      url = "git+ssh://git@github.com/colonelpanic8/mova";
+      url = "github:colonelpanic8/mova";
       flake = false;
     };
     org-window-habit = {
@@ -24,9 +24,13 @@
       url = "github:colonelpanic8/org-project-capture";
       flake = false;
     };
+    org-wild-notifier = {
+      url = "github:emacsorphanage/org-wild-notifier";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova, org-window-habit, org-project-capture }:
+  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova, org-window-habit, org-project-capture, org-wild-notifier }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -65,15 +69,24 @@
           cp ${org-project-capture}/org-project-capture-backend.el $out/share/emacs/site-lisp/
         '';
 
+        # org-wild-notifier package built from flake input
+        orgWildNotifierPkg = pkgs.runCommand "emacs-org-wild-notifier" {} ''
+          mkdir -p $out/share/emacs/site-lisp
+          cp ${org-wild-notifier}/org-wild-notifier.el $out/share/emacs/site-lisp/
+        '';
+
         # Emacs with required packages (base packages from nix)
         emacsWithPackages = pkgs.emacs-nox.pkgs.withPackages (epkgs: [
           epkgs.simple-httpd
           epkgs.org
           epkgs.dash
           epkgs.s
+          epkgs.async  # required by alert
+          epkgs.alert  # required by org-wild-notifier
           orgWindowHabitPkg
           orgCategoryCapturePkg
           orgProjectCapturePkg
+          orgWildNotifierPkg
         ]);
 
         # Python with test dependencies
