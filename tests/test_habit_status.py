@@ -1,7 +1,5 @@
 """Tests for /habit-status endpoint."""
 
-import pytest
-
 
 class TestHabitStatus:
     """Tests for the /habit-status endpoint."""
@@ -34,7 +32,9 @@ class TestHabitStatus:
         """Response has all required fields for a valid habit."""
         response = api.get_habit_status("habit-exercise-daily")
         data = response.json()
-        assert data.get("status") == "ok", f"Expected ok, got error: {data.get('message')}"
+        assert data.get("status") == "ok", (
+            f"Expected ok, got error: {data.get('message')}"
+        )
         assert "id" in data
         assert "title" in data
         assert "habit" in data

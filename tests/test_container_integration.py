@@ -23,8 +23,7 @@ import requests
 
 # Skip all tests in this module if Docker is not available
 pytestmark = pytest.mark.skipif(
-    shutil.which("docker") is None,
-    reason="Docker not available"
+    shutil.which("docker") is None, reason="Docker not available"
 )
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -41,16 +40,23 @@ def find_free_port() -> int:
 def cleanup_stale_containers():
     """Remove any stale test containers from previous runs."""
     result = subprocess.run(
-        ["docker", "ps", "-a", "--filter", f"name={CONTAINER_NAME_PREFIX}",
-         "--format", "{{.Names}}"],
-        capture_output=True, text=True
+        [
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            f"name={CONTAINER_NAME_PREFIX}",
+            "--format",
+            "{{.Names}}",
+        ],
+        capture_output=True,
+        text=True,
     )
     if result.returncode == 0 and result.stdout.strip():
         for container_name in result.stdout.strip().split("\n"):
             if container_name:
                 subprocess.run(
-                    ["docker", "rm", "-f", container_name],
-                    capture_output=True
+                    ["docker", "rm", "-f", container_name], capture_output=True
                 )
 
 
@@ -80,7 +86,7 @@ class TestContainerBuild:
         """Container should build without errors."""
         result = run_command(
             ["nix", "build", ".#container", "--no-link", "--print-out-paths"],
-            cwd=PROJECT_ROOT
+            cwd=PROJECT_ROOT,
         )
         assert result.returncode == 0, f"Build failed: {result.stderr}"
         assert result.stdout.strip().endswith(".tar.gz")
@@ -92,7 +98,7 @@ def container_image():
     # Build container
     result = run_command(
         ["nix", "build", ".#container", "--no-link", "--print-out-paths"],
-        cwd=PROJECT_ROOT
+        cwd=PROJECT_ROOT,
     )
     if result.returncode != 0:
         pytest.skip(f"Container build failed: {result.stderr}")
@@ -176,7 +182,9 @@ def git_repo(tmp_path):
     run_command(["git", "remote", "set-url", "origin", str(bare_path)], cwd=repo_path)
     run_command(["git", "push", "-u", "origin", "master"], cwd=repo_path)
     # Set back to container path
-    run_command(["git", "remote", "set-url", "origin", "/data/remote.git"], cwd=repo_path)
+    run_command(
+        ["git", "remote", "set-url", "origin", "/data/remote.git"], cwd=repo_path
+    )
 
     yield {"repo": repo_path, "bare": bare_path}
 
@@ -201,16 +209,26 @@ def running_container(container_image, git_repo, tmp_path):
     bare_path = git_repo["bare"]
 
     # Start container with both working repo and bare repo mounted
-    result = run_command([
-        "docker", "run", "-d",
-        "--name", container_name,
-        "-p", f"{port}:80",
-        "-v", f"{repo_path}:/data/org",
-        "-v", f"{bare_path}:/data/remote.git",
-        "-e", "GIT_SYNC_INTERVAL=2",  # Fast sync for testing
-        "-e", "GIT_SYNC_NEW_FILES=true",
-        container_image
-    ])
+    result = run_command(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container_name,
+            "-p",
+            f"{port}:80",
+            "-v",
+            f"{repo_path}:/data/org",
+            "-v",
+            f"{bare_path}:/data/remote.git",
+            "-e",
+            "GIT_SYNC_INTERVAL=2",  # Fast sync for testing
+            "-e",
+            "GIT_SYNC_NEW_FILES=true",
+            container_image,
+        ]
+    )
 
     if result.returncode != 0:
         pytest.fail(f"Failed to start container: {result.stderr}")
@@ -223,7 +241,9 @@ def running_container(container_image, git_repo, tmp_path):
         # Get container logs for debugging
         logs = run_command(["docker", "logs", container_name])
         run_command(["docker", "rm", "-f", container_name])
-        pytest.fail(f"Container did not start in time. Logs:\n{logs.stdout}\n{logs.stderr}")
+        pytest.fail(
+            f"Container did not start in time. Logs:\n{logs.stdout}\n{logs.stderr}"
+        )
 
     yield {
         "id": container_id,
@@ -238,10 +258,18 @@ def running_container(container_image, git_repo, tmp_path):
     # We need to chown them back to the host user so pytest can delete them
     host_uid = os.getuid()
     host_gid = os.getgid()
-    run_command([
-        "docker", "exec", container_name,
-        "chown", "-R", f"{host_uid}:{host_gid}", "/data/org", "/data/remote.git"
-    ])
+    run_command(
+        [
+            "docker",
+            "exec",
+            container_name,
+            "chown",
+            "-R",
+            f"{host_uid}:{host_gid}",
+            "/data/org",
+            "/data/remote.git",
+        ]
+    )
     run_command(["docker", "rm", "-f", container_name])
 
 
@@ -264,7 +292,7 @@ class TestContainerAPI:
         """POST /capture should work in container."""
         response = requests.post(
             f"{running_container['url']}/capture",
-            json={"template": "todo", "values": {"Title": "Container test todo"}}
+            json={"template": "todo", "values": {"Title": "Container test todo"}},
         )
         assert response.status_code == 200
         data = response.json()
@@ -293,7 +321,7 @@ class TestGitSync:
         unique_title = f"Git sync test {time.time()}"
         response = requests.post(
             f"{url}/capture",
-            json={"template": "todo", "values": {"Title": unique_title}}
+            json={"template": "todo", "values": {"Title": unique_title}},
         )
         assert response.status_code == 200
 
@@ -309,8 +337,9 @@ class TestGitSync:
                 break
             time.sleep(1)
 
-        assert new_commits > initial_commits, \
+        assert new_commits > initial_commits, (
             f"No new commits after {max_wait}s. Expected > {initial_commits}, got {new_commits}"
+        )
 
         # Verify the content is in the repo
         inbox = repo_path / "inbox.org"
@@ -326,8 +355,7 @@ class TestGitSync:
         todos = [f"Multi-sync test {i} - {time.time()}" for i in range(3)]
         for title in todos:
             response = requests.post(
-                f"{url}/capture",
-                json={"template": "todo", "values": {"Title": title}}
+                f"{url}/capture", json={"template": "todo", "values": {"Title": title}}
             )
             assert response.status_code == 200
 
@@ -363,8 +391,9 @@ class TestContainerRestart:
         time.sleep(5)
 
         # Server should come back up (supervisord restarts it)
-        assert wait_for_server(f"{url}/get-all-todos", timeout=30), \
+        assert wait_for_server(f"{url}/get-all-todos", timeout=30), (
             "Server did not come back after restart"
+        )
 
 
 if __name__ == "__main__":

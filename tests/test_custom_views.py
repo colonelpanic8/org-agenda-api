@@ -1,7 +1,6 @@
 """Tests for custom agenda views endpoints."""
 
 
-
 class TestCustomViews:
     """Tests for GET /custom-views endpoint."""
 

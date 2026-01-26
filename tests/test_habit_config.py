@@ -1,7 +1,5 @@
 """Tests for /habit-config endpoint."""
 
-import pytest
-
 
 class TestHabitConfig:
     """Tests for the /habit-config endpoint."""

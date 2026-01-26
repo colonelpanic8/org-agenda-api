@@ -1,8 +1,6 @@
 """Tests for ranged timestamps and plain timestamp extraction."""
 
-import pytest
-
-from conftest import TEST_DATE, TEST_DATE_NEXT_DAY, TEST_DATE_PREV_DAY
+from conftest import TEST_DATE, TEST_DATE_NEXT_DAY
 
 
 class TestRangedScheduledTimestamps:
@@ -12,8 +10,7 @@ class TestRangedScheduledTimestamps:
         """Task with ranged schedule should have scheduledEnd field."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "ranged schedule" in t.get("title", "").lower()),
-            None
+            (t for t in todos if "ranged schedule" in t.get("title", "").lower()), None
         )
         assert task is not None, "Test fixture 'Task with ranged schedule' not found"
         assert task.get("scheduled") is not None
@@ -23,8 +20,7 @@ class TestRangedScheduledTimestamps:
         """Ranged schedule start and end dates should be correct."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "ranged schedule" in t.get("title", "").lower()),
-            None
+            (t for t in todos if "ranged schedule" in t.get("title", "").lower()), None
         )
         assert task is not None
         # scheduled is now an object with "date" key
@@ -36,7 +32,7 @@ class TestRangedScheduledTimestamps:
         todos = api.get_all_todos().json()["todos"]
         task = next(
             (t for t in todos if "no special timestamps" in t.get("title", "").lower()),
-            None
+            None,
         )
         assert task is not None, "Test fixture not found"
         assert task.get("scheduled") is not None
@@ -51,8 +47,7 @@ class TestRangedDeadlineTimestamps:
         """Task with ranged deadline should have deadlineEnd field."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "ranged deadline" in t.get("title", "").lower()),
-            None
+            (t for t in todos if "ranged deadline" in t.get("title", "").lower()), None
         )
         assert task is not None, "Test fixture 'Task with ranged deadline' not found"
         assert task.get("deadline") is not None
@@ -62,8 +57,7 @@ class TestRangedDeadlineTimestamps:
         """Ranged deadline with time components should preserve times."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "ranged deadline" in t.get("title", "").lower()),
-            None
+            (t for t in todos if "ranged deadline" in t.get("title", "").lower()), None
         )
         assert task is not None
         # deadline is now an object with "date" and "time" keys
@@ -81,8 +75,12 @@ class TestPlainTimestamps:
         """Task with plain timestamps in body should have timestamps array."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "plain timestamp in body" in t.get("title", "").lower()),
-            None
+            (
+                t
+                for t in todos
+                if "plain timestamp in body" in t.get("title", "").lower()
+            ),
+            None,
         )
         assert task is not None, "Test fixture not found"
         assert "timestamps" in task
@@ -93,8 +91,12 @@ class TestPlainTimestamps:
         """Each plain timestamp should have required fields."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "plain timestamp in body" in t.get("title", "").lower()),
-            None
+            (
+                t
+                for t in todos
+                if "plain timestamp in body" in t.get("title", "").lower()
+            ),
+            None,
         )
         assert task is not None
         for ts in task["timestamps"]:
@@ -107,14 +109,17 @@ class TestPlainTimestamps:
         """Plain timestamp with time should have hasTime=true."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "plain timestamp in body" in t.get("title", "").lower()),
-            None
+            (
+                t
+                for t in todos
+                if "plain timestamp in body" in t.get("title", "").lower()
+            ),
+            None,
         )
         assert task is not None
         # Find the timestamp with 09:00
         ts_with_time = next(
-            (ts for ts in task["timestamps"] if "09:00" in ts.get("raw", "")),
-            None
+            (ts for ts in task["timestamps"] if "09:00" in ts.get("raw", "")), None
         )
         assert ts_with_time is not None, "Timestamp with 09:00 not found"
         assert ts_with_time["hasTime"] is True
@@ -124,15 +129,22 @@ class TestPlainTimestamps:
         """Plain timestamp without time should have hasTime=false."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "plain timestamp in body" in t.get("title", "").lower()),
-            None
+            (
+                t
+                for t in todos
+                if "plain timestamp in body" in t.get("title", "").lower()
+            ),
+            None,
         )
         assert task is not None
         # Find a date-only timestamp
         ts_without_time = next(
-            (ts for ts in task["timestamps"]
-             if ts.get("hasTime") is False and "T" not in ts.get("start", "T")),
-            None
+            (
+                ts
+                for ts in task["timestamps"]
+                if ts.get("hasTime") is False and "T" not in ts.get("start", "T")
+            ),
+            None,
         )
         assert ts_without_time is not None, "Date-only timestamp not found"
 
@@ -140,8 +152,12 @@ class TestPlainTimestamps:
         """Task with multiple plain timestamps should capture all."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "multiple plain timestamps" in t.get("title", "").lower()),
-            None
+            (
+                t
+                for t in todos
+                if "multiple plain timestamps" in t.get("title", "").lower()
+            ),
+            None,
         )
         assert task is not None, "Test fixture not found"
         assert "timestamps" in task
@@ -151,15 +167,18 @@ class TestPlainTimestamps:
         """Plain ranged timestamp should have end field."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "ranged plain timestamp" in t.get("title", "").lower()),
-            None
+            (
+                t
+                for t in todos
+                if "ranged plain timestamp" in t.get("title", "").lower()
+            ),
+            None,
         )
         assert task is not None, "Test fixture not found"
         assert "timestamps" in task
         # Find the ranged timestamp
         ranged_ts = next(
-            (ts for ts in task["timestamps"] if ts.get("end") is not None),
-            None
+            (ts for ts in task["timestamps"] if ts.get("end") is not None), None
         )
         assert ranged_ts is not None, "Ranged timestamp not found"
         assert ranged_ts["type"] == "active-range"
@@ -171,7 +190,7 @@ class TestPlainTimestamps:
         todos = api.get_all_todos().json()["todos"]
         task = next(
             (t for t in todos if "no special timestamps" in t.get("title", "").lower()),
-            None
+            None,
         )
         assert task is not None, "Test fixture not found"
         # timestamps should either be absent, null, or empty for tasks without plain timestamps
@@ -189,7 +208,7 @@ class TestTimestampsInAgenda:
 
         task = next(
             (e for e in entries if "ranged schedule" in e.get("title", "").lower()),
-            None
+            None,
         )
         # Task may or may not appear in agenda depending on how org handles ranges
         if task:
@@ -201,8 +220,12 @@ class TestTimestampsInAgenda:
         entries = response.json()["entries"]
 
         task = next(
-            (e for e in entries if "plain timestamp in body" in e.get("title", "").lower()),
-            None
+            (
+                e
+                for e in entries
+                if "plain timestamp in body" in e.get("title", "").lower()
+            ),
+            None,
         )
         if task:
             assert "timestamps" in task

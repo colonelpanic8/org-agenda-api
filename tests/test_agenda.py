@@ -205,7 +205,9 @@ class TestAgendaOverdueItems:
                 break
 
         if overdue_entry is None:
-            pytest.skip("Overdue item not found - see test_overdue_items_appear_on_today")
+            pytest.skip(
+                "Overdue item not found - see test_overdue_items_appear_on_today"
+            )
 
         agenda_line = overdue_entry.get("agendaLine", "")
         # Should show "Sched. 1x:" since it's 1 day overdue
@@ -288,7 +290,9 @@ class TestAgendaDateAccuracy:
         # "Task scheduled for tomorrow" (scheduled 2024-06-16) should NOT appear
         # when querying for 2024-06-15, UNLESS it's being shown as a future item
         # which org-agenda doesn't do by default for day view
-        tomorrow_items = [t for t in titles if "scheduled for tomorrow" in (t or "").lower()]
+        tomorrow_items = [
+            t for t in titles if "scheduled for tomorrow" in (t or "").lower()
+        ]
 
         # If tomorrow's item appears, check if it's incorrectly showing
         # (it should only appear if we're querying for tomorrow's date)
@@ -519,8 +523,7 @@ class TestAgendaDateIsolation:
         )
 
         # Should NOT contain "today" items (unless they're also scheduled for yesterday)
-        today_items = [e for e in data["entries"]
-                       if e.get("scheduled") == TEST_DATE]
+        today_items = [e for e in data["entries"] if e.get("scheduled") == TEST_DATE]
         assert len(today_items) == 0, (
             f"Query for {TEST_DATE_PREV_DAY} should not include items scheduled "
             f"for {TEST_DATE}. Found: {[e.get('title') for e in today_items]}"
@@ -606,22 +609,18 @@ class TestAgendaScheduledItemsWithTime:
         # Should have time component - in new format this is a 'time' field in the dict
         if isinstance(scheduled, dict):
             assert scheduled.get("time") is not None, (
-                f"Scheduled field should include time. "
-                f"Got: {scheduled}"
+                f"Scheduled field should include time. Got: {scheduled}"
             )
             assert scheduled.get("time") == "10:00", (
-                f"Scheduled field should include correct time (10:00). "
-                f"Got: {scheduled}"
+                f"Scheduled field should include correct time (10:00). Got: {scheduled}"
             )
         else:
             # Legacy string format with T separator
             assert "T" in (scheduled or ""), (
-                f"Scheduled field should include time (T separator). "
-                f"Got: {scheduled}"
+                f"Scheduled field should include time (T separator). Got: {scheduled}"
             )
             assert "10:00" in (scheduled or ""), (
-                f"Scheduled field should include correct time (10:00). "
-                f"Got: {scheduled}"
+                f"Scheduled field should include correct time (10:00). Got: {scheduled}"
             )
 
 
@@ -749,7 +748,8 @@ class TestAgendaDeduplication:
 
         # Find all entries matching "both scheduled and deadline"
         matching_entries = [
-            entry for entry in data["entries"]
+            entry
+            for entry in data["entries"]
             if "both scheduled and deadline" in (entry.get("title") or "").lower()
         ]
 
@@ -803,13 +803,15 @@ class TestAgendaDeduplication:
         for entry in data["entries"]:
             key = (entry.get("file"), entry.get("pos"))
             if key in seen:
-                duplicates.append({
-                    "title": entry.get("title"),
-                    "file": entry.get("file"),
-                    "pos": entry.get("pos"),
-                    "first_agenda_line": seen[key].get("agendaLine"),
-                    "duplicate_agenda_line": entry.get("agendaLine"),
-                })
+                duplicates.append(
+                    {
+                        "title": entry.get("title"),
+                        "file": entry.get("file"),
+                        "pos": entry.get("pos"),
+                        "first_agenda_line": seen[key].get("agendaLine"),
+                        "duplicate_agenda_line": entry.get("agendaLine"),
+                    }
+                )
             else:
                 seen[key] = entry
 

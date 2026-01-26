@@ -18,6 +18,7 @@
 ;;; Code:
 
 (require 'org-agenda-api-core)
+(require 'simple-httpd)  ; For defservlet macro
 
 ;; Only proceed if org-window-habit is available
 (when (require 'org-window-habit nil t)
@@ -46,7 +47,7 @@ Must be called with point at an org heading that is a window-habit."
                  (done-times (oref habit done-times)))
             (org-agenda-api--log 'debug "habit-completed-on-date-p: title=%s date=%s done-times=%S"
                                  (org-get-heading t t t t) date-string
-                                 (mapcar (lambda (t) (format-time-string "%Y-%m-%d" t)) done-times))
+                                 (mapcar (lambda (tm) (format-time-string "%Y-%m-%d" tm)) done-times))
             ;; Check if any done-time matches the date
             (cl-some (lambda (time)
                        (string= (format-time-string "%Y-%m-%d" time) date-string))

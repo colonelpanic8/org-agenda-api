@@ -107,6 +107,7 @@ class EmacsServerNoFakeDate:
 
 def find_free_port() -> int:
     import socket
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
@@ -127,13 +128,13 @@ def system_date_test_dir(tmp_path_factory):
 #+TITLE: System Date Test
 
 * NEXT Task for today
-  SCHEDULED: <{today.strftime('%Y-%m-%d')}>
+  SCHEDULED: <{today.strftime("%Y-%m-%d")}>
 
 * TODO Task for yesterday
-  SCHEDULED: <{yesterday.strftime('%Y-%m-%d')}>
+  SCHEDULED: <{yesterday.strftime("%Y-%m-%d")}>
 
 * TODO Task for tomorrow
-  SCHEDULED: <{tomorrow.strftime('%Y-%m-%d')}>
+  SCHEDULED: <{tomorrow.strftime("%Y-%m-%d")}>
 """)
 
     return test_dir
@@ -191,10 +192,12 @@ class TestSystemDateBug:
         for entry in data["entries"]:
             scheduled = extract_date(entry.get("scheduled"))
             if scheduled == today_str:
-                today_items.append({
-                    "title": entry.get("title"),
-                    "scheduled": entry.get("scheduled"),
-                })
+                today_items.append(
+                    {
+                        "title": entry.get("title"),
+                        "scheduled": entry.get("scheduled"),
+                    }
+                )
 
         assert len(today_items) == 0, (
             f"BUG CONFIRMED: Query for {yesterday_str} returned items scheduled for "
@@ -237,8 +240,7 @@ class TestSystemDateBug:
         titles = [e.get("title", "").lower() for e in data["entries"]]
 
         assert any("today" in t for t in titles), (
-            f"Query for {today_str} should include 'Task for today'. "
-            f"Found: {titles}"
+            f"Query for {today_str} should include 'Task for today'. Found: {titles}"
         )
 
     def test_query_tomorrow_should_include_tomorrow_items(self, server_no_fake_date):
@@ -278,8 +280,9 @@ class TestSystemDateBug:
         data = response.json()
 
         # Items scheduled for today should NOT appear (they're in the past)
-        today_items = [e for e in data["entries"]
-                       if extract_date(e.get("scheduled")) == today_str]
+        today_items = [
+            e for e in data["entries"] if extract_date(e.get("scheduled")) == today_str
+        ]
 
         assert len(today_items) == 0, (
             f"Query for {tomorrow_str} should NOT include items scheduled for "

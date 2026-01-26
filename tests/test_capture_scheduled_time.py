@@ -34,10 +34,10 @@ class TestCaptureScheduledTimeLocal:
         unique_title = "scheduled-t-local-test-12345"
 
         # Capture using scheduled-today template
-        capture_response = api.post("/capture", json={
-            "template": "scheduled-today",
-            "values": {"Title": unique_title}
-        })
+        capture_response = api.post(
+            "/capture",
+            json={"template": "scheduled-today", "values": {"Title": unique_title}},
+        )
         assert capture_response.status_code == 200
         capture_data = capture_response.json()
         assert capture_data.get("status") == "created"
@@ -52,7 +52,9 @@ class TestCaptureScheduledTimeLocal:
                 captured_todo = todo
                 break
 
-        assert captured_todo is not None, f"Could not find captured todo '{unique_title}'"
+        assert captured_todo is not None, (
+            f"Could not find captured todo '{unique_title}'"
+        )
 
         scheduled = captured_todo.get("scheduled")
         assert scheduled is not None, "Captured todo should have scheduled date from %t"
@@ -72,10 +74,10 @@ class TestCaptureScheduledTimeLocal:
         unique_title = "file-content-check-67890"
 
         # Capture using scheduled-today template
-        api.post("/capture", json={
-            "template": "scheduled-today",
-            "values": {"Title": unique_title}
-        })
+        api.post(
+            "/capture",
+            json={"template": "scheduled-today", "values": {"Title": unique_title}},
+        )
 
         # Check the actual file content
         inbox_path = org_dir / "inbox.org"

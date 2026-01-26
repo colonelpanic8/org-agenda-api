@@ -64,7 +64,9 @@ class TestCategoryTypes:
             pytest.skip("org-category-capture not available in test environment")
         response = api.get("/category-types")
         data = response.json()
-        projects_type = next((t for t in data["types"] if t["name"] == "projects"), None)
+        projects_type = next(
+            (t for t in data["types"] if t["name"] == "projects"), None
+        )
         assert projects_type is not None
         assert projects_type["hasCategories"] is True
 
@@ -181,32 +183,37 @@ class TestCategoryCaptureEndpoint:
 
     def test_missing_type_returns_error(self, api):
         """Missing type parameter returns error."""
-        response = api.post("/category-capture", json={"category": "test", "title": "Test"})
+        response = api.post(
+            "/category-capture", json={"category": "test", "title": "Test"}
+        )
         data = response.json()
         assert data.get("status") == "error"
         assert "type" in data.get("message", "").lower()
 
     def test_missing_category_returns_error(self, api):
         """Missing category parameter returns error."""
-        response = api.post("/category-capture", json={"type": "projects", "title": "Test"})
+        response = api.post(
+            "/category-capture", json={"type": "projects", "title": "Test"}
+        )
         data = response.json()
         assert data.get("status") == "error"
         assert "category" in data.get("message", "").lower()
 
     def test_missing_title_returns_error(self, api):
         """Missing title parameter returns error."""
-        response = api.post("/category-capture", json={"type": "projects", "category": "test"})
+        response = api.post(
+            "/category-capture", json={"type": "projects", "category": "test"}
+        )
         data = response.json()
         assert data.get("status") == "error"
         assert "title" in data.get("message", "").lower()
 
     def test_unknown_type_returns_error(self, api):
         """Unknown strategy type returns error."""
-        response = api.post("/category-capture", json={
-            "type": "nonexistent",
-            "category": "test",
-            "title": "Test Task"
-        })
+        response = api.post(
+            "/category-capture",
+            json={"type": "nonexistent", "category": "test", "title": "Test Task"},
+        )
         data = response.json()
         assert data.get("status") == "error"
         assert "unknown" in data.get("message", "").lower()
@@ -215,11 +222,14 @@ class TestCategoryCaptureEndpoint:
         """Can capture a basic TODO to a category."""
         if not has_projects_strategy:
             pytest.skip("org-category-capture not available in test environment")
-        response = api.post("/category-capture", json={
-            "type": "projects",
-            "category": "Project Alpha",
-            "title": "New task from API"
-        })
+        response = api.post(
+            "/category-capture",
+            json={
+                "type": "projects",
+                "category": "Project Alpha",
+                "title": "New task from API",
+            },
+        )
         data = response.json()
         assert data.get("status") == "created"
         assert data.get("category") == "Project Alpha"
@@ -233,11 +243,14 @@ class TestCategoryCaptureEndpoint:
             pytest.skip("org-category-capture not available in test environment")
         # First capture a uniquely named task
         unique_title = "Unique test task for verification"
-        response = api.post("/category-capture", json={
-            "type": "projects",
-            "category": "Project Beta",
-            "title": unique_title
-        })
+        response = api.post(
+            "/category-capture",
+            json={
+                "type": "projects",
+                "category": "Project Beta",
+                "title": unique_title,
+            },
+        )
         assert response.json().get("status") == "created"
 
         # Now query tasks for that category
@@ -250,12 +263,15 @@ class TestCategoryCaptureEndpoint:
         """Can capture a TODO with priority."""
         if not has_projects_strategy:
             pytest.skip("org-category-capture not available in test environment")
-        response = api.post("/category-capture", json={
-            "type": "projects",
-            "category": "Project Alpha",
-            "title": "High priority task",
-            "priority": "A"
-        })
+        response = api.post(
+            "/category-capture",
+            json={
+                "type": "projects",
+                "category": "Project Alpha",
+                "title": "High priority task",
+                "priority": "A",
+            },
+        )
         data = response.json()
         assert data.get("status") == "created"
 
@@ -271,12 +287,15 @@ class TestCategoryCaptureEndpoint:
         if not has_projects_strategy:
             pytest.skip("org-category-capture not available in test environment")
         # Use new object format for scheduled timestamp
-        response = api.post("/category-capture", json={
-            "type": "projects",
-            "category": "Project Alpha",
-            "title": "Scheduled task",
-            "scheduled": {"date": "2024-07-01"}
-        })
+        response = api.post(
+            "/category-capture",
+            json={
+                "type": "projects",
+                "category": "Project Alpha",
+                "title": "Scheduled task",
+                "scheduled": {"date": "2024-07-01"},
+            },
+        )
         data = response.json()
         assert data.get("status") == "created", f"Expected 'created', got: {data}"
 
@@ -292,12 +311,15 @@ class TestCategoryCaptureEndpoint:
         """Can capture a TODO with tags."""
         if not has_projects_strategy:
             pytest.skip("org-category-capture not available in test environment")
-        response = api.post("/category-capture", json={
-            "type": "projects",
-            "category": "Project Beta",
-            "title": "Tagged task",
-            "tags": ["urgent", "bug"]
-        })
+        response = api.post(
+            "/category-capture",
+            json={
+                "type": "projects",
+                "category": "Project Beta",
+                "title": "Tagged task",
+                "tags": ["urgent", "bug"],
+            },
+        )
         data = response.json()
         assert data.get("status") == "created"
 

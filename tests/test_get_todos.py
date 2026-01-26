@@ -1,7 +1,6 @@
 """Integration tests for GET endpoints."""
 
 
-
 class TestGetAllTodos:
     """Tests for GET /get-all-todos endpoint."""
 
@@ -127,7 +126,9 @@ class TestGetTodaysAgenda:
 
         # Should NOT include tomorrow's task
         tomorrow_items = [t for t in titles if "tomorrow" in t.lower()]
-        assert len(tomorrow_items) == 0, f"Should not include tomorrow items: {tomorrow_items}"
+        assert len(tomorrow_items) == 0, (
+            f"Should not include tomorrow items: {tomorrow_items}"
+        )
 
     def test_agenda_item_structure(self, api):
         """Each agenda item should have the expected fields."""
@@ -187,7 +188,9 @@ class TestEffectiveCategory:
         todos = data.get("todos", [])
         assert len(todos) > 0, "Should have todos to test"
         for todo in todos:
-            assert "effectiveCategory" in todo, f"Todo missing effectiveCategory: {todo.get('title')}"
+            assert "effectiveCategory" in todo, (
+                f"Todo missing effectiveCategory: {todo.get('title')}"
+            )
 
     def test_effective_category_is_string(self, api):
         """effectiveCategory should be a string."""
@@ -196,7 +199,9 @@ class TestEffectiveCategory:
         todos = data.get("todos", [])
         for todo in todos:
             cat = todo.get("effectiveCategory")
-            assert cat is None or isinstance(cat, str), f"effectiveCategory should be string, got {type(cat)}"
+            assert cat is None or isinstance(cat, str), (
+                f"effectiveCategory should be string, got {type(cat)}"
+            )
 
     def test_explicit_category_property_becomes_effective(self, api):
         """Entry with explicit CATEGORY property should use that as effectiveCategory."""
@@ -238,4 +243,6 @@ class TestEffectiveCategory:
         entries = data.get("entries", [])
         assert len(entries) > 0, "Should have agenda entries"
         for entry in entries:
-            assert "effectiveCategory" in entry, f"Agenda entry missing effectiveCategory: {entry.get('title')}"
+            assert "effectiveCategory" in entry, (
+                f"Agenda entry missing effectiveCategory: {entry.get('title')}"
+            )

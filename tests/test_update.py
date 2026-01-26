@@ -77,7 +77,9 @@ class TestUpdatePriority:
         # Updates may be returned as either a dict or array of [key, value] pairs
         updates = data.get("updates", {})
         if isinstance(updates, dict):
-            assert "priority" in updates, f"Expected priority in updates dict: {updates}"
+            assert "priority" in updates, (
+                f"Expected priority in updates dict: {updates}"
+            )
         else:
             priority_update = next((u for u in updates if u[0] == "priority"), None)
             assert priority_update is not None, f"Expected priority update in {updates}"
@@ -186,7 +188,9 @@ class TestUpdateScheduledObjectFormat:
         response = api.update_todo(todo, {"scheduled": {"date": "2024-07-01"}})
         assert response.status_code == 200
         data = response.json()
-        assert data.get("status") == "updated", f"Expected 'updated' status, got: {data}"
+        assert data.get("status") == "updated", (
+            f"Expected 'updated' status, got: {data}"
+        )
 
     def test_set_scheduled_with_date_and_time_object(self, api):
         """Should be able to set scheduled using object format with date and time."""
@@ -203,10 +207,14 @@ class TestUpdateScheduledObjectFormat:
         assert todo is not None
 
         # Use object format with time
-        response = api.update_todo(todo, {"scheduled": {"date": "2024-07-01", "time": "14:30"}})
+        response = api.update_todo(
+            todo, {"scheduled": {"date": "2024-07-01", "time": "14:30"}}
+        )
         assert response.status_code == 200
         data = response.json()
-        assert data.get("status") == "updated", f"Expected 'updated' status, got: {data}"
+        assert data.get("status") == "updated", (
+            f"Expected 'updated' status, got: {data}"
+        )
 
     def test_set_scheduled_with_repeater_object(self, api):
         """Should be able to set scheduled using object format with repeater."""
@@ -223,15 +231,20 @@ class TestUpdateScheduledObjectFormat:
         assert todo is not None
 
         # Use object format with repeater
-        response = api.update_todo(todo, {
-            "scheduled": {
-                "date": "2024-07-01",
-                "repeater": {"type": "+", "value": 1, "unit": "w"}
-            }
-        })
+        response = api.update_todo(
+            todo,
+            {
+                "scheduled": {
+                    "date": "2024-07-01",
+                    "repeater": {"type": "+", "value": 1, "unit": "w"},
+                }
+            },
+        )
         assert response.status_code == 200
         data = response.json()
-        assert data.get("status") == "updated", f"Expected 'updated' status, got: {data}"
+        assert data.get("status") == "updated", (
+            f"Expected 'updated' status, got: {data}"
+        )
 
     def test_set_deadline_with_date_object(self, api):
         """Should be able to set deadline using object format with just date."""
@@ -251,7 +264,9 @@ class TestUpdateScheduledObjectFormat:
         response = api.update_todo(todo, {"deadline": {"date": "2024-07-15"}})
         assert response.status_code == 200
         data = response.json()
-        assert data.get("status") == "updated", f"Expected 'updated' status, got: {data}"
+        assert data.get("status") == "updated", (
+            f"Expected 'updated' status, got: {data}"
+        )
 
 
 class TestUpdateScheduled:
@@ -417,11 +432,14 @@ class TestUpdateMultipleFields:
         )
         assert todo is not None
 
-        response = api.update_todo(todo, {
-            "scheduled": "2024-07-01",
-            "deadline": "2024-07-15",
-            "priority": "A",
-        })
+        response = api.update_todo(
+            todo,
+            {
+                "scheduled": "2024-07-01",
+                "deadline": "2024-07-15",
+                "priority": "A",
+            },
+        )
         data = response.json()
 
         assert data.get("status") == "updated"
@@ -478,7 +496,7 @@ class TestUpdateTitle:
             (t for t in todos["todos"] if new_title in t.get("title", "")),
             None,
         )
-        assert updated_todo is not None, f"Updated title not found in todos"
+        assert updated_todo is not None, "Updated title not found in todos"
 
     def test_update_title_with_other_fields(self, api):
         """Should be able to update title along with other fields."""
@@ -495,10 +513,13 @@ class TestUpdateTitle:
         assert todo is not None
 
         new_title = "New title with priority"
-        response = api.update_todo(todo, {
-            "new_title": new_title,
-            "priority": "A",
-        })
+        response = api.update_todo(
+            todo,
+            {
+                "new_title": new_title,
+                "priority": "A",
+            },
+        )
         data = response.json()
 
         assert data.get("status") == "updated"

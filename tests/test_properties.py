@@ -1,7 +1,6 @@
 """Tests for arbitrary properties support in org-agenda-api."""
 
 
-
 class TestPropertiesInGetTodos:
     """Tests for properties field in GET /get-all-todos endpoint."""
 
@@ -12,10 +11,16 @@ class TestPropertiesInGetTodos:
 
         # Find the item with custom properties
         custom_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
-        assert custom_item is not None, "Should find the 'Task with custom properties' item"
+        assert custom_item is not None, (
+            "Should find the 'Task with custom properties' item"
+        )
         assert "properties" in custom_item, "Item should have a 'properties' field"
 
     def test_properties_contains_custom_fields(self, api):
@@ -24,7 +29,11 @@ class TestPropertiesInGetTodos:
         todos = response.json()["todos"]
 
         custom_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         assert custom_item is not None
@@ -33,7 +42,9 @@ class TestPropertiesInGetTodos:
         assert properties is not None, "Properties should not be None"
 
         # Check for our custom fields
-        assert "CUSTOM_FIELD" in properties, f"Should have CUSTOM_FIELD, got: {properties.keys()}"
+        assert "CUSTOM_FIELD" in properties, (
+            f"Should have CUSTOM_FIELD, got: {properties.keys()}"
+        )
         assert properties["CUSTOM_FIELD"] == "my-custom-value"
 
     def test_properties_contains_effort(self, api):
@@ -42,7 +53,11 @@ class TestPropertiesInGetTodos:
         todos = response.json()["todos"]
 
         custom_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         assert custom_item is not None
@@ -57,7 +72,11 @@ class TestPropertiesInGetTodos:
         todos = response.json()["todos"]
 
         custom_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         assert custom_item is not None
@@ -93,15 +112,19 @@ class TestUpdateProperties:
         response = api.get_all_todos()
         todos = response.json()["todos"]
         custom_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         assert custom_item is not None
 
         # Update with a new custom property
-        update_response = api.update_todo(custom_item, {
-            "properties": {"NEW_PROPERTY": "new-value"}
-        })
+        update_response = api.update_todo(
+            custom_item, {"properties": {"NEW_PROPERTY": "new-value"}}
+        )
         assert update_response.status_code == 200
         result = update_response.json()
         assert result.get("status") == "updated"
@@ -110,7 +133,11 @@ class TestUpdateProperties:
         response = api.get_all_todos()
         todos = response.json()["todos"]
         updated_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         assert updated_item is not None
@@ -123,22 +150,30 @@ class TestUpdateProperties:
         response = api.get_all_todos()
         todos = response.json()["todos"]
         custom_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         assert custom_item is not None
 
         # Update the ENERGY property
-        update_response = api.update_todo(custom_item, {
-            "properties": {"ENERGY": "low"}
-        })
+        update_response = api.update_todo(
+            custom_item, {"properties": {"ENERGY": "low"}}
+        )
         assert update_response.status_code == 200
 
         # Verify the update
         response = api.get_all_todos()
         todos = response.json()["todos"]
         updated_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         properties = updated_item.get("properties", {})
@@ -149,27 +184,33 @@ class TestUpdateProperties:
         response = api.get_all_todos()
         todos = response.json()["todos"]
         custom_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         assert custom_item is not None
 
         # First add a property we can remove
-        api.update_todo(custom_item, {
-            "properties": {"REMOVABLE": "will-be-removed"}
-        })
+        api.update_todo(custom_item, {"properties": {"REMOVABLE": "will-be-removed"}})
 
         # Now remove it
-        update_response = api.update_todo(custom_item, {
-            "properties": {"REMOVABLE": ""}
-        })
+        update_response = api.update_todo(
+            custom_item, {"properties": {"REMOVABLE": ""}}
+        )
         assert update_response.status_code == 200
 
         # Verify removal
         response = api.get_all_todos()
         todos = response.json()["todos"]
         updated_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         properties = updated_item.get("properties", {})
@@ -181,26 +222,37 @@ class TestUpdateProperties:
         response = api.get_all_todos()
         todos = response.json()["todos"]
         custom_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         assert custom_item is not None
 
         # Set multiple properties
-        update_response = api.update_todo(custom_item, {
-            "properties": {
-                "PROP_A": "value-a",
-                "PROP_B": "value-b",
-                "PROP_C": "value-c"
-            }
-        })
+        update_response = api.update_todo(
+            custom_item,
+            {
+                "properties": {
+                    "PROP_A": "value-a",
+                    "PROP_B": "value-b",
+                    "PROP_C": "value-c",
+                }
+            },
+        )
         assert update_response.status_code == 200
 
         # Verify all were set
         response = api.get_all_todos()
         todos = response.json()["todos"]
         updated_item = next(
-            (item for item in todos if "custom properties" in item.get("title", "").lower()),
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
             None,
         )
         properties = updated_item.get("properties", {})
@@ -228,9 +280,9 @@ class TestUpdateProperties:
         assert "TEST_NEW_PROP" not in initial_props
 
         # Add a property - this should create the PROPERTIES drawer
-        update_response = api.update_todo(simple_item, {
-            "properties": {"TEST_NEW_PROP": "created-drawer"}
-        })
+        update_response = api.update_todo(
+            simple_item, {"properties": {"TEST_NEW_PROP": "created-drawer"}}
+        )
         assert update_response.status_code == 200
         result = update_response.json()
         assert result.get("status") == "updated"

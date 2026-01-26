@@ -1,9 +1,8 @@
 """Integration tests for include_completed parameter on /agenda endpoint."""
 
-import re
 from datetime import date
 
-from conftest import TEST_DATE, TEST_DATE_NEXT_DAY, TEST_DATE_ORG
+from conftest import TEST_DATE, TEST_DATE_NEXT_DAY
 
 
 def get_today_str():
@@ -44,12 +43,17 @@ class TestIncludeCompleted:
         todos = todos_response.json()
 
         active_todo = next(
-            (t for t in todos["todos"]
-             if t.get("todo") == "TODO"
-             and not t.get("isWindowHabit", False)  # Exclude window habits
-             and "habit" not in t.get("title", "").lower()  # Exclude other habits by name
-             and "Exercise" not in t.get("title", "")  # Exclude specific habit fixtures
-             and "Meditate" not in t.get("title", "")),
+            (
+                t
+                for t in todos["todos"]
+                if t.get("todo") == "TODO"
+                and not t.get("isWindowHabit", False)  # Exclude window habits
+                and "habit"
+                not in t.get("title", "").lower()  # Exclude other habits by name
+                and "Exercise"
+                not in t.get("title", "")  # Exclude specific habit fixtures
+                and "Meditate" not in t.get("title", "")
+            ),
             None,
         )
         assert active_todo is not None, "Need an active non-habit TODO to test"
@@ -58,7 +62,9 @@ class TestIncludeCompleted:
 
         # Complete it
         complete_response = api.complete_todo(active_todo)
-        assert complete_response.status_code == 200, f"Complete failed: {complete_response.text}"
+        assert complete_response.status_code == 200, (
+            f"Complete failed: {complete_response.text}"
+        )
 
         # Query agenda for TODAY's date (not fake test date) with include_completed=true
         # CLOSED timestamps use real date, not the fake test date
@@ -69,7 +75,15 @@ class TestIncludeCompleted:
         entries = agenda_response.json().get("entries", [])
 
         # Debug: print all entries to see what we got
-        entry_info = [(e.get("title"), e.get("todo"), e.get("completedAt"), e.get("agendaLine", "")[:50]) for e in entries]
+        entry_info = [
+            (
+                e.get("title"),
+                e.get("todo"),
+                e.get("completedAt"),
+                e.get("agendaLine", "")[:50],
+            )
+            for e in entries
+        ]
 
         # Find the completed item by title
         completed_entry = next(
@@ -90,13 +104,18 @@ class TestIncludeCompleted:
 
         # Find a todo that's scheduled for TEST_DATE so we can verify it disappears
         active_todo = next(
-            (t for t in todos["todos"]
-             if t.get("todo") == "TODO" and extract_date(t.get("scheduled")) == TEST_DATE),
+            (
+                t
+                for t in todos["todos"]
+                if t.get("todo") == "TODO"
+                and extract_date(t.get("scheduled")) == TEST_DATE
+            ),
             None,
         )
         if active_todo is None:
             # Skip if no suitable todo found
             import pytest
+
             pytest.skip("No TODO scheduled for test date found")
 
         original_title = active_todo["title"]
@@ -112,7 +131,11 @@ class TestIncludeCompleted:
 
         # The completed item should NOT appear (unless it has a scheduled/deadline for that day)
         # Since we completed it, if it appears it should be because of scheduled, not completion
-        done_entries = [e for e in entries if e.get("todo") == "DONE" and original_title in e.get("title", "")]
+        done_entries = [
+            e
+            for e in entries
+            if e.get("todo") == "DONE" and original_title in e.get("title", "")
+        ]
 
         # With log mode off, completed items shouldn't appear based on completion time alone.
         # They might still appear if they have scheduled/deadline for the date.
@@ -142,15 +165,20 @@ class TestIncludeCompleted:
         api.complete_todo(active_todo)
 
         # Query agenda for NEXT day with include_completed=true
-        agenda_response = api.get(f"/agenda?date={TEST_DATE_NEXT_DAY}&include_completed=true")
+        agenda_response = api.get(
+            f"/agenda?date={TEST_DATE_NEXT_DAY}&include_completed=true"
+        )
         assert agenda_response.status_code == 200
 
         entries = agenda_response.json().get("entries", [])
 
         # Should NOT find this completed item on the next day
         completed_entry = next(
-            (e for e in entries
-             if active_todo["title"] in e.get("title", "") and e.get("completedAt")),
+            (
+                e
+                for e in entries
+                if active_todo["title"] in e.get("title", "") and e.get("completedAt")
+            ),
             None,
         )
         assert completed_entry is None, (
@@ -165,12 +193,15 @@ class TestIncludeCompleted:
         todos = todos_response.json()
 
         active_todo = next(
-            (t for t in todos["todos"]
-             if t.get("todo") == "TODO"
-             and not t.get("isWindowHabit", False)
-             and "habit" not in t.get("title", "").lower()
-             and "Exercise" not in t.get("title", "")
-             and "Meditate" not in t.get("title", "")),
+            (
+                t
+                for t in todos["todos"]
+                if t.get("todo") == "TODO"
+                and not t.get("isWindowHabit", False)
+                and "habit" not in t.get("title", "").lower()
+                and "Exercise" not in t.get("title", "")
+                and "Meditate" not in t.get("title", "")
+            ),
             None,
         )
         assert active_todo is not None, "Need an active non-habit TODO to test"
@@ -184,7 +215,9 @@ class TestIncludeCompleted:
         entries = agenda_response.json().get("entries", [])
 
         # Debug: print all entries
-        entry_info = [(e.get("title"), e.get("todo"), e.get("completedAt")) for e in entries]
+        entry_info = [
+            (e.get("title"), e.get("todo"), e.get("completedAt")) for e in entries
+        ]
 
         # Find the completed item
         completed_entry = next(
@@ -212,7 +245,8 @@ class TestIncludeCompleted:
         todos = todos_response.json()
 
         active_todos = [
-            t for t in todos["todos"]
+            t
+            for t in todos["todos"]
             if t.get("todo") == "TODO"
             and not t.get("isWindowHabit", False)
             and "habit" not in t.get("title", "").lower()
@@ -221,6 +255,7 @@ class TestIncludeCompleted:
         ][:3]
         if len(active_todos) < 2:
             import pytest
+
             pytest.skip("Need at least 2 active non-habit TODOs for this test")
 
         # Complete them all
@@ -287,7 +322,8 @@ class TestIncludeCompleted:
         # The re-opened item should NOT appear as a completed entry
         # (It might appear if it has scheduled/deadline for today, but not due to completion)
         completed_entries = [
-            e for e in entries
+            e
+            for e in entries
             if original_title in e.get("title", "") and e.get("todo") == "DONE"
         ]
         assert len(completed_entries) == 0, (
@@ -336,7 +372,10 @@ class TestStateChangeLogBug:
         entries = agenda_response.json().get("entries", [])
 
         # Debug: print all entries
-        entry_info = [(e.get("title"), e.get("todo"), e.get("completedAt"), e.get("scheduled")) for e in entries]
+        entry_info = [
+            (e.get("title"), e.get("todo"), e.get("completedAt"), e.get("scheduled"))
+            for e in entries
+        ]
 
         # The DONE items from state_change_bug.org should NOT appear because:
         # - They have no CLOSED timestamp (completedAt is null)
@@ -344,9 +383,10 @@ class TestStateChangeLogBug:
         # They may appear in org-agenda due to LOGBOOK state change, but should be
         # filtered out because completedAt doesn't match the query date.
         bug_entries = [
-            e for e in entries
+            e
+            for e in entries
             if "Task with state change log but no CLOSED" in e.get("title", "")
-               or "Task done without any logging" in e.get("title", "")
+            or "Task done without any logging" in e.get("title", "")
         ]
         assert len(bug_entries) == 0, (
             f"DONE items without CLOSED timestamp should not appear with include_completed. "
@@ -365,7 +405,6 @@ class TestStateChangeLogBug:
         Entries that appear solely due to state change logs (no CLOSED or
         CLOSED on different date) should be filtered out.
         """
-        from pathlib import Path
 
         # Create an item, complete it (adds CLOSED), then query
         # First get an active todo
@@ -373,24 +412,32 @@ class TestStateChangeLogBug:
         todos = todos_response.json()
 
         active_todo = next(
-            (t for t in todos["todos"]
-             if t.get("todo") == "TODO"
-             and not t.get("scheduled")  # No scheduled
-             and not t.get("deadline")),  # No deadline
+            (
+                t
+                for t in todos["todos"]
+                if t.get("todo") == "TODO"
+                and not t.get("scheduled")  # No scheduled
+                and not t.get("deadline")
+            ),  # No deadline
             None,
         )
 
         if active_todo is None:
             # Create one without scheduled/deadline
-            capture_response = api.capture("todo", {"Title": "Temp task for state change test"})
+            capture_response = api.capture(
+                "todo", {"Title": "Temp task for state change test"}
+            )
             assert capture_response.status_code == 200
 
             # Re-fetch to get the new todo
             todos_response = api.get_all_todos()
             todos = todos_response.json()
             active_todo = next(
-                (t for t in todos["todos"]
-                 if "Temp task for state change test" in t.get("title", "")),
+                (
+                    t
+                    for t in todos["todos"]
+                    if "Temp task for state change test" in t.get("title", "")
+                ),
                 None,
             )
             assert active_todo is not None, "Could not create test todo"
@@ -420,9 +467,9 @@ class TestStateChangeLogBug:
 
             # At least one of these should match today for the entry to be valid
             has_valid_date = (
-                (completed_at and today in completed_at) or
-                (extract_date(scheduled) == today) or
-                (extract_date(deadline) == today)
+                (completed_at and today in completed_at)
+                or (extract_date(scheduled) == today)
+                or (extract_date(deadline) == today)
             )
             assert has_valid_date, (
                 f"Entry appeared without matching date. "
@@ -461,9 +508,9 @@ class TestStateChangeLogBug:
             completed_at_date = completed_at[:10] if completed_at else None
 
             has_matching_date = (
-                scheduled_date == query_date or
-                deadline_date == query_date or
-                completed_at_date == query_date
+                scheduled_date == query_date
+                or deadline_date == query_date
+                or completed_at_date == query_date
             )
             assert has_matching_date, (
                 f"Entry has no date matching {query_date}: "
@@ -520,38 +567,78 @@ class TestHabitIncludeCompleted:
         todos = todos_response.json()
 
         habit = next(
-            (t for t in todos["todos"]
-             if t.get("isWindowHabit", False)
-             and t.get("todo") == "TODO"),
+            (
+                t
+                for t in todos["todos"]
+                if t.get("isWindowHabit", False) and t.get("todo") == "TODO"
+            ),
             None,
         )
         if habit is None:
             import pytest
+
             pytest.skip("No window habit in TODO state found")
 
         original_title = habit["title"]
 
+        # Read file content BEFORE completion for comparison
+        habit_file = habit.get("file")
+        with open(habit_file, "r") as f:
+            before_content = f.read()
+        print(
+            f"\n=== File content BEFORE completion ===\n{before_content}\n=== End BEFORE ==="
+        )
+
         # Complete the habit - it will reschedule and go back to TODO
-        today = get_today_str()
+        # Try completing WITHOUT override_date first to see if LOGBOOK entry is created
         complete_response = api.complete_todo(habit)
-        assert complete_response.status_code == 200, f"Complete failed: {complete_response.text}"
+        assert complete_response.status_code == 200, (
+            f"Complete failed: {complete_response.text}"
+        )
+        print(
+            f"\n=== Complete response ===\n{complete_response.json()}\n=== End complete response ==="
+        )
+
+        # Get the server's view of the habit right after completion
+        todos_after_complete = api.get_all_todos().json()
+        habit_from_server = next(
+            (
+                t
+                for t in todos_after_complete["todos"]
+                if t.get("id") == habit.get("id")
+            ),
+            None,
+        )
+        print(
+            f"\n=== Habit from server after complete ===\n{habit_from_server}\n=== End server view ==="
+        )
+
+        # Debug: Read the file directly to verify LOGBOOK entry was written
+        habit_file = habit.get("file")
+        with open(habit_file, "r") as f:
+            file_content = f.read()
+        # Print file content for debugging to see if ANY LOGBOOK entry was created
+        print(
+            f"\n=== File content after completion (no override_date) ===\n{file_content}\n=== End file content ==="
+        )
 
         # Verify the habit is back to TODO state (it rescheduled)
         todos_response = api.get_all_todos()
         todos = todos_response.json()
         habit_after = next(
-            (t for t in todos["todos"]
-             if original_title in t.get("title", "")),
+            (t for t in todos["todos"] if original_title in t.get("title", "")),
             None,
         )
-        assert habit_after is not None, f"Habit '{original_title}' not found after completion"
+        assert habit_after is not None, (
+            f"Habit '{original_title}' not found after completion"
+        )
         assert habit_after.get("todo") == "TODO", (
             f"Habit should be back to TODO after completion (it reschedules). "
             f"Current state: {habit_after.get('todo')}"
         )
 
-        # Query agenda for today with include_completed=true
-        agenda_response = api.get(f"/agenda?date={today}&include_completed=true")
+        # Query agenda for TEST_DATE (the fake "today") with include_completed=true
+        agenda_response = api.get(f"/agenda?date={TEST_DATE}&include_completed=true")
         assert agenda_response.status_code == 200
 
         entries = agenda_response.json().get("entries", [])
@@ -564,13 +651,17 @@ class TestHabitIncludeCompleted:
 
         # Debug info
         entry_info = [
-            (e.get("title"), e.get("todo"), e.get("isWindowHabit"),
-             e.get("habitCompletedOnQueryDate", False))
+            (
+                e.get("title"),
+                e.get("todo"),
+                e.get("isWindowHabit"),
+                e.get("habitCompletedOnQueryDate", False),
+            )
             for e in entries
         ]
 
         assert habit_entry is not None, (
-            f"Habit '{original_title}' not found in agenda for {today} with include_completed=true. "
+            f"Habit '{original_title}' not found in agenda for {TEST_DATE} with include_completed=true. "
             f"The habit is in TODO state but was completed today, so it should appear. "
             f"Entries: {entry_info}"
         )
@@ -589,4 +680,116 @@ class TestHabitIncludeCompleted:
         # The habit should be marked as a window habit
         assert habit_entry.get("isWindowHabit", False), (
             f"Habit entry should have isWindowHabit=true. Entry: {habit_entry}"
+        )
+
+    def test_habit_completed_on_past_date_appears_in_past_agenda(self, api):
+        """Habit with LOGBOOK completion on past date should appear when querying that date.
+
+        This tests the key scenario where:
+        1. A habit has LOGBOOK entries showing completion on TEST_DATE_PREV_DAY
+        2. The habit is scheduled for today (TEST_DATE), so it doesn't appear in yesterday's normal agenda
+        3. Query yesterday (TEST_DATE_PREV_DAY) with include_completed=true
+        4. The habit should appear because it was completed on that date (per LOGBOOK)
+        """
+        # The fixture "Test Window Habit" has a LOGBOOK entry for TEST_DATE_PREV_DAY
+        # First verify the habit exists and is recognized as a window habit
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        habit = next(
+            (
+                t
+                for t in todos["todos"]
+                if "Test Window Habit" in t.get("title", "")
+                and t.get("isWindowHabit", False)
+            ),
+            None,
+        )
+
+        if habit is None:
+            import pytest
+
+            pytest.skip(
+                "Test Window Habit fixture not found or not recognized as window habit"
+            )
+
+        # Verify the habit is scheduled for today, not yesterday
+        scheduled = habit.get("scheduled")
+        if scheduled:
+            from conftest import extract_date, TEST_DATE
+
+            scheduled_date = extract_date(scheduled)
+            assert scheduled_date == TEST_DATE, (
+                f"Fixture should have habit scheduled for today ({TEST_DATE}), "
+                f"but got {scheduled_date}"
+            )
+
+        # Query yesterday's agenda with include_completed=true
+        from conftest import TEST_DATE_PREV_DAY
+
+        agenda_response = api.get(
+            f"/agenda?date={TEST_DATE_PREV_DAY}&include_completed=true"
+        )
+        assert agenda_response.status_code == 200
+
+        entries = agenda_response.json().get("entries", [])
+
+        # Find the habit in yesterday's agenda
+        habit_entry = next(
+            (e for e in entries if "Test Window Habit" in e.get("title", "")),
+            None,
+        )
+
+        # Debug info
+        entry_titles = [
+            (e.get("title"), e.get("isWindowHabit"), e.get("habitCompletedOnQueryDate"))
+            for e in entries
+        ]
+
+        assert habit_entry is not None, (
+            f"Habit 'Test Window Habit' not found in agenda for {TEST_DATE_PREV_DAY} "
+            f"with include_completed=true. The habit has a LOGBOOK entry for this date, "
+            f"so it should appear. Entries: {entry_titles}"
+        )
+
+        # The habit should have habitCompletedOnQueryDate=true
+        assert habit_entry.get("habitCompletedOnQueryDate", False), (
+            f"Habit should have habitCompletedOnQueryDate=true since it was completed "
+            f"on {TEST_DATE_PREV_DAY}. Entry: {habit_entry}"
+        )
+
+        # The habit should be in TODO state (habits reschedule after completion)
+        assert habit_entry.get("todo") == "TODO", (
+            f"Habit should be in TODO state. Found: {habit_entry.get('todo')}"
+        )
+
+    def test_habit_not_completed_on_date_does_not_appear(self, api):
+        """Habit that was NOT completed on a past date should not appear for that date.
+
+        This verifies that include_completed doesn't show habits that weren't
+        actually completed on the query date.
+        """
+        # "Another Window Habit Not Completed Yesterday" has LOGBOOK entries for
+        # 2024-06-13 and 2024-06-10, but NOT for TEST_DATE_PREV_DAY (2024-06-14)
+
+        # Query yesterday's agenda
+        from conftest import TEST_DATE_PREV_DAY
+
+        agenda_response = api.get(
+            f"/agenda?date={TEST_DATE_PREV_DAY}&include_completed=true"
+        )
+        assert agenda_response.status_code == 200
+
+        entries = agenda_response.json().get("entries", [])
+
+        # This habit should NOT appear because it wasn't completed on TEST_DATE_PREV_DAY
+        other_habit = next(
+            (e for e in entries if "Another Window Habit" in e.get("title", "")),
+            None,
+        )
+
+        assert other_habit is None, (
+            f"Habit 'Another Window Habit Not Completed Yesterday' should NOT appear "
+            f"in agenda for {TEST_DATE_PREV_DAY} because it wasn't completed on that date. "
+            f"Found: {other_habit}"
         )

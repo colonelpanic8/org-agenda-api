@@ -200,15 +200,15 @@ class TestDeleteLogbookEntry:
 
         # Find this specific todo's section
         todo_section_match = re.search(
-            r'\*+ (?:TODO|DONE) ' + re.escape(unique_title) + r'.*?\n(.*?)(?=^\*|\Z)',
+            r"\*+ (?:TODO|DONE) " + re.escape(unique_title) + r".*?\n(.*?)(?=^\*|\Z)",
             content,
-            re.MULTILINE | re.DOTALL
+            re.MULTILINE | re.DOTALL,
         )
         assert todo_section_match, "Should find todo section"
         todo_section = todo_section_match.group(1)
 
         # Verify the logbook entry exists
-        logbook_match = re.search(r':LOGBOOK:\s*\n(.*?):END:', todo_section, re.DOTALL)
+        logbook_match = re.search(r":LOGBOOK:\s*\n(.*?):END:", todo_section, re.DOTALL)
         assert logbook_match, "Should have LOGBOOK"
         assert override_date in logbook_match.group(1), "Date should be in LOGBOOK"
 
@@ -226,17 +226,19 @@ class TestDeleteLogbookEntry:
         # Verify entry is gone from logbook
         content = file_path.read_text()
         todo_section_match = re.search(
-            r'\*+ (?:TODO|DONE) ' + re.escape(unique_title) + r'.*?\n(.*?)(?=^\*|\Z)',
+            r"\*+ (?:TODO|DONE) " + re.escape(unique_title) + r".*?\n(.*?)(?=^\*|\Z)",
             content,
-            re.MULTILINE | re.DOTALL
+            re.MULTILINE | re.DOTALL,
         )
         assert todo_section_match, "Should still find todo section"
         todo_section = todo_section_match.group(1)
 
-        logbook_match = re.search(r':LOGBOOK:\s*\n(.*?):END:', todo_section, re.DOTALL)
+        logbook_match = re.search(r":LOGBOOK:\s*\n(.*?):END:", todo_section, re.DOTALL)
         # Either no logbook or date not in logbook
         if logbook_match:
-            assert override_date not in logbook_match.group(1), "Date should be removed from LOGBOOK"
+            assert override_date not in logbook_match.group(1), (
+                "Date should be removed from LOGBOOK"
+            )
 
     def test_delete_logbook_entry_not_found(self, api, org_dir):
         """Should return not_found status when entry doesn't exist."""
@@ -296,7 +298,9 @@ class TestDeleteLogbookEntry:
         )
 
         # Delete with type filter for state-change
-        response = api.delete_logbook_entry(todo, override_date, entry_type="state-change")
+        response = api.delete_logbook_entry(
+            todo, override_date, entry_type="state-change"
+        )
         data = response.json()
 
         assert data.get("status") == "deleted"
@@ -307,17 +311,19 @@ class TestDeleteLogbookEntry:
 
         # Find this specific todo's section
         todo_section_match = re.search(
-            r'\*+ (?:TODO|DONE) ' + re.escape(unique_title) + r'.*?\n(.*?)(?=^\*|\Z)',
+            r"\*+ (?:TODO|DONE) " + re.escape(unique_title) + r".*?\n(.*?)(?=^\*|\Z)",
             content,
-            re.MULTILINE | re.DOTALL
+            re.MULTILINE | re.DOTALL,
         )
         assert todo_section_match, "Should find todo section"
         todo_section = todo_section_match.group(1)
 
-        logbook_match = re.search(r':LOGBOOK:\s*\n(.*?):END:', todo_section, re.DOTALL)
+        logbook_match = re.search(r":LOGBOOK:\s*\n(.*?):END:", todo_section, re.DOTALL)
         # Either no logbook or date not in logbook
         if logbook_match:
-            assert override_date not in logbook_match.group(1), "Date should be removed from LOGBOOK"
+            assert override_date not in logbook_match.group(1), (
+                "Date should be removed from LOGBOOK"
+            )
 
     def test_delete_logbook_entry_returns_deleted_content(self, api, org_dir):
         """Response should include the deleted entry content."""

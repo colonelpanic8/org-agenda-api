@@ -13,14 +13,13 @@ class TestDeleteTodo:
 
         # Find it
         todos = api.get_all_todos().json()["todos"]
-        todo = next((t for t in todos if "Delete me please" in t.get("title", "")), None)
+        todo = next(
+            (t for t in todos if "Delete me please" in t.get("title", "")), None
+        )
         assert todo is not None, "Failed to create test todo"
 
         # Delete it
-        response = api.post("/delete", json={
-            "file": todo["file"],
-            "pos": todo["pos"]
-        })
+        response = api.post("/delete", json={"file": todo["file"], "pos": todo["pos"]})
         assert response.status_code == 200
 
     def test_returns_deleted_title(self, api):
@@ -28,13 +27,12 @@ class TestDeleteTodo:
         api.create_todo("Title for deletion test")
 
         todos = api.get_all_todos().json()["todos"]
-        todo = next((t for t in todos if "Title for deletion test" in t.get("title", "")), None)
+        todo = next(
+            (t for t in todos if "Title for deletion test" in t.get("title", "")), None
+        )
         assert todo is not None
 
-        response = api.post("/delete", json={
-            "file": todo["file"],
-            "pos": todo["pos"]
-        })
+        response = api.post("/delete", json={"file": todo["file"], "pos": todo["pos"]})
         data = response.json()
 
         assert data.get("deleted") is True
@@ -45,18 +43,20 @@ class TestDeleteTodo:
         api.create_todo("Vanishing todo 12345")
 
         todos = api.get_all_todos().json()["todos"]
-        todo = next((t for t in todos if "Vanishing todo 12345" in t.get("title", "")), None)
+        todo = next(
+            (t for t in todos if "Vanishing todo 12345" in t.get("title", "")), None
+        )
         assert todo is not None
 
         # Delete it
-        api.post("/delete", json={
-            "file": todo["file"],
-            "pos": todo["pos"]
-        })
+        api.post("/delete", json={"file": todo["file"], "pos": todo["pos"]})
 
         # Verify it's gone
         todos_after = api.get_all_todos().json()["todos"]
-        found = next((t for t in todos_after if "Vanishing todo 12345" in t.get("title", "")), None)
+        found = next(
+            (t for t in todos_after if "Vanishing todo 12345" in t.get("title", "")),
+            None,
+        )
         assert found is None, "Todo should have been deleted"
 
     def test_delete_by_id(self, api):
@@ -83,10 +83,7 @@ class TestDeleteErrors:
 
     def test_error_on_not_found(self, api):
         """Should return error for non-existent item."""
-        response = api.post("/delete", json={
-            "file": "/nonexistent/file.org",
-            "pos": 1
-        })
+        response = api.post("/delete", json={"file": "/nonexistent/file.org", "pos": 1})
         data = response.json()
         assert "error" in data or data.get("status") == "error"
 
@@ -108,14 +105,17 @@ class TestDeleteWithChildren:
         if parent is None:
             pytest.skip("Parent task fixture not found")
 
-        response = api.post("/delete", json={
-            "file": parent["file"],
-            "pos": parent["pos"]
-        })
+        response = api.post(
+            "/delete", json={"file": parent["file"], "pos": parent["pos"]}
+        )
         data = response.json()
 
         # Should return error about children
-        assert data.get("status") == "error" or "children" in data.get("message", "").lower() or "children" in data.get("error", "").lower()
+        assert (
+            data.get("status") == "error"
+            or "children" in data.get("message", "").lower()
+            or "children" in data.get("error", "").lower()
+        )
 
     def test_deletes_with_children_when_confirmed(self, api):
         """Should delete subtree when include_children=true."""
@@ -125,11 +125,14 @@ class TestDeleteWithChildren:
         if parent is None:
             pytest.skip("Parent task fixture not found")
 
-        response = api.post("/delete", json={
-            "file": parent["file"],
-            "pos": parent["pos"],
-            "include_children": True
-        })
+        response = api.post(
+            "/delete",
+            json={
+                "file": parent["file"],
+                "pos": parent["pos"],
+                "include_children": True,
+            },
+        )
         data = response.json()
 
         assert data.get("deleted") is True

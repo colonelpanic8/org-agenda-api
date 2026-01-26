@@ -48,9 +48,13 @@ class TestCompleteTodo:
         # Create a unique todo to complete
         unique_title = "Complete test todo 98765"
         create_resp = api.create_todo(unique_title)
-        assert create_resp.status_code == 200, f"create_todo failed: {create_resp.status_code} - {create_resp.text}"
+        assert create_resp.status_code == 200, (
+            f"create_todo failed: {create_resp.status_code} - {create_resp.text}"
+        )
         create_data = create_resp.json()
-        assert create_data.get("status") == "created", f"capture didn't succeed: {create_data}"
+        assert create_data.get("status") == "created", (
+            f"capture didn't succeed: {create_data}"
+        )
 
         # Find it in the list
         todos_response = api.get_all_todos()
@@ -61,13 +65,17 @@ class TestCompleteTodo:
             (t for t in todos["todos"] if unique_title in t.get("title", "")),
             None,
         )
-        assert todo_to_complete is not None, f"Created todo not found: {unique_title}. All todos: {all_titles}"
+        assert todo_to_complete is not None, (
+            f"Created todo not found: {unique_title}. All todos: {all_titles}"
+        )
 
         # Complete it
         complete_response = api.complete_todo(todo_to_complete)
         assert complete_response.status_code == 200
         complete_data = complete_response.json()
-        assert complete_data.get("status") == "completed", f"Complete failed: {complete_data}"
+        assert complete_data.get("status") == "completed", (
+            f"Complete failed: {complete_data}"
+        )
 
         # Verify state changed - note: position may change after state change
         todos_response = api.get_all_todos()
@@ -79,7 +87,9 @@ class TestCompleteTodo:
             None,
         )
         assert completed_todo is not None, f"Completed todo not found: {unique_title}"
-        assert completed_todo["todo"] == "DONE", f"Expected DONE, got {completed_todo['todo']}"
+        assert completed_todo["todo"] == "DONE", (
+            f"Expected DONE, got {completed_todo['todo']}"
+        )
 
     def test_complete_with_custom_state(self, api):
         """Should support completing with a custom state like CANCELLED."""
@@ -118,7 +128,9 @@ class TestCompleteTodo:
         if todo_with_id is None:
             pytest.skip("No todos with org IDs in test fixtures")
 
-        response = api.complete_todo({"id": todo_with_id["id"], "title": todo_with_id["title"]})
+        response = api.complete_todo(
+            {"id": todo_with_id["id"], "title": todo_with_id["title"]}
+        )
         assert response.status_code == 200
 
     def test_error_on_not_found(self, api):
@@ -163,6 +175,7 @@ class TestCompleteTodo:
 
         # Read the file and verify LOGBOOK entry was created
         from pathlib import Path
+
         file_path = Path(todo["file"])
         content = file_path.read_text()
 
@@ -172,10 +185,10 @@ class TestCompleteTodo:
         # - State "DONE"       from "TODO"       [2024-06-15 Sat 12:34]
         # :END:
         logbook_pattern = re.compile(
-            r':LOGBOOK:\s*\n'
+            r":LOGBOOK:\s*\n"
             r'- State "DONE"\s+from "TODO"\s+\[\d{4}-\d{2}-\d{2} \w{3} \d{2}:\d{2}\]\s*\n'
-            r':END:',
-            re.MULTILINE
+            r":END:",
+            re.MULTILINE,
         )
 
         assert logbook_pattern.search(content), (
@@ -212,6 +225,7 @@ class TestCompleteWithOverrideDate:
 
         # Read the file and verify LOGBOOK entry uses the override date
         from pathlib import Path
+
         file_path = Path(todo["file"])
         content = file_path.read_text()
 
@@ -241,14 +255,14 @@ class TestCompleteWithOverrideDate:
         assert response.status_code == 200
 
         from pathlib import Path
+
         file_path = Path(todo["file"])
         content = file_path.read_text()
 
         # Should contain the date and time
         assert "2024-02-20" in content
         assert "14:30" in content, (
-            f"Expected time 14:30 in LOGBOOK entry.\n"
-            f"File content:\n{content}"
+            f"Expected time 14:30 in LOGBOOK entry.\nFile content:\n{content}"
         )
 
     def test_complete_without_override_date_creates_logbook(self, api, org_dir):
@@ -269,6 +283,7 @@ class TestCompleteWithOverrideDate:
         assert response.status_code == 200
 
         from pathlib import Path
+
         file_path = Path(todo["file"])
         content = file_path.read_text()
 
@@ -336,10 +351,10 @@ class TestCompleteWithOverrideDate:
         # Find the section for our specific todo (by title), then find its logbook
         # The todo heading is followed by its logbook
         todo_section_pattern = re.compile(
-            r'\*+ (?:TODO|DONE) ' + re.escape(unique_title) + r'.*?\n'
-            r'(.*?)'
-            r'(?=^\*|\Z)',  # Until next heading or end of file
-            re.MULTILINE | re.DOTALL
+            r"\*+ (?:TODO|DONE) " + re.escape(unique_title) + r".*?\n"
+            r"(.*?)"
+            r"(?=^\*|\Z)",  # Until next heading or end of file
+            re.MULTILINE | re.DOTALL,
         )
         todo_section_match = todo_section_pattern.search(content)
         assert todo_section_match, f"Todo section not found in content:\n{content}"
@@ -347,20 +362,18 @@ class TestCompleteWithOverrideDate:
         todo_section = todo_section_match.group(1)
 
         # Find the logbook within this todo's section
-        logbook_match = re.search(
-            r':LOGBOOK:\s*\n(.*?):END:',
-            todo_section,
-            re.DOTALL
-        )
+        logbook_match = re.search(r":LOGBOOK:\s*\n(.*?):END:", todo_section, re.DOTALL)
         assert logbook_match, f"LOGBOOK not found in todo section:\n{todo_section}"
 
         logbook_content = logbook_match.group(1)
 
         # Extract dates from logbook entries
-        date_pattern = re.compile(r'\[(\d{4}-\d{2}-\d{2})')
+        date_pattern = re.compile(r"\[(\d{4}-\d{2}-\d{2})")
         dates = date_pattern.findall(logbook_content)
 
-        assert len(dates) >= 2, f"Expected at least 2 logbook entries, found {len(dates)}: {logbook_content}"
+        assert len(dates) >= 2, (
+            f"Expected at least 2 logbook entries, found {len(dates)}: {logbook_content}"
+        )
 
         # Dates should be in reverse chronological order (newest first)
         # Jan 20 should come before Jan 10
@@ -398,9 +411,12 @@ class TestSetStateEndpoint:
     def test_set_state_requires_state_parameter(self, api):
         """Endpoint should return error if state parameter is missing."""
         # Manually post without state parameter
-        response = api.post("/set-state", json={
-            "title": "Some todo",
-        })
+        response = api.post(
+            "/set-state",
+            json={
+                "title": "Some todo",
+            },
+        )
         data = response.json()
         assert data.get("status") == "error"
         assert "state" in data.get("message", "").lower()
@@ -424,6 +440,7 @@ class TestSetStateEndpoint:
         assert response.status_code == 200
 
         from pathlib import Path
+
         file_path = Path(todo["file"])
         content = file_path.read_text()
 
@@ -462,7 +479,9 @@ class TestCompleteHabitResponse:
         # First get a habit todo
         todos_response = api.get_all_todos()
         todos = todos_response.json().get("todos", [])
-        habit_todos = [t for t in todos if t.get("isWindowHabit") and t.get("todo") == "TODO"]
+        habit_todos = [
+            t for t in todos if t.get("isWindowHabit") and t.get("todo") == "TODO"
+        ]
 
         if not habit_todos:
             pytest.skip("No uncompleted habits in test data")

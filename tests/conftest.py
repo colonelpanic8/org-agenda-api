@@ -129,7 +129,9 @@ class APIClient:
         """GET /get-todays-agenda"""
         return self.get("/get-todays-agenda")
 
-    def get_agenda(self, span: str = "day", date: str = None, include_overdue: bool = None) -> requests.Response:
+    def get_agenda(
+        self, span: str = "day", date: str = None, include_overdue: bool = None
+    ) -> requests.Response:
         """GET /agenda with optional span, date, and include_overdue parameters."""
         params = f"?span={span}"
         if date:
@@ -150,7 +152,9 @@ class APIClient:
         """POST /capture"""
         return self.post("/capture", json={"template": template, "values": values})
 
-    def complete_todo(self, todo: dict, state: str = "DONE", override_date: str = None) -> requests.Response:
+    def complete_todo(
+        self, todo: dict, state: str = "DONE", override_date: str = None
+    ) -> requests.Response:
         """POST /complete
 
         Args:
@@ -170,7 +174,9 @@ class APIClient:
             payload["override_date"] = override_date
         return self.post("/complete", json=payload)
 
-    def set_state(self, todo: dict, state: str, override_date: str = None) -> requests.Response:
+    def set_state(
+        self, todo: dict, state: str, override_date: str = None
+    ) -> requests.Response:
         """POST /set-state
 
         More accurately named endpoint for state transitions.
@@ -194,15 +200,20 @@ class APIClient:
 
     def update_todo(self, todo: dict, updates: dict) -> requests.Response:
         """POST /update"""
-        return self.post("/update", json={
-            "id": todo.get("id"),
-            "file": todo.get("file"),
-            "pos": todo.get("pos"),
-            "title": todo.get("title"),
-            **updates,
-        })
+        return self.post(
+            "/update",
+            json={
+                "id": todo.get("id"),
+                "file": todo.get("file"),
+                "pos": todo.get("pos"),
+                "title": todo.get("title"),
+                **updates,
+            },
+        )
 
-    def delete_todo(self, todo: dict, include_children: bool = False) -> requests.Response:
+    def delete_todo(
+        self, todo: dict, include_children: bool = False
+    ) -> requests.Response:
         """POST /delete"""
         payload = {
             "file": todo.get("file"),
@@ -222,7 +233,9 @@ class APIClient:
         """GET /custom-view with key parameter."""
         return self.get(f"/custom-view?key={key}")
 
-    def get_habit_status(self, org_id: str, preceding: int = None, following: int = None) -> requests.Response:
+    def get_habit_status(
+        self, org_id: str, preceding: int = None, following: int = None
+    ) -> requests.Response:
         """GET /habit-status with id and optional range parameters."""
         params = f"?id={org_id}"
         if preceding is not None:
@@ -237,7 +250,9 @@ class APIClient:
             return self.get(f"/notifications?within={within}")
         return self.get("/notifications")
 
-    def delete_logbook_entry(self, todo: dict, date: str, entry_type: str = None) -> requests.Response:
+    def delete_logbook_entry(
+        self, todo: dict, date: str, entry_type: str = None
+    ) -> requests.Response:
         """POST /delete-logbook-entry
 
         Args:
@@ -260,6 +275,7 @@ class APIClient:
 def find_free_port() -> int:
     """Find a free port to use for testing."""
     import socket
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
@@ -379,6 +395,46 @@ def org_test_dir(tmp_path_factory):
   SCHEDULED: <{TEST_DATE_ORG}>
   Just a regular task with no body timestamps.
 """)
+
+    # Create habits file for window habit tests
+    # This habit was completed yesterday and has a deadline for today
+    # Note: org-window-habit requires OWH_ prefixed property names
+    # Note: org-window-habit uses DEADLINE by default (org-window-habit-repeat-to-deadline is t)
+    habits_org = test_dir / "habits.org"
+    habits_org.write_text(
+        f"""\
+#+TITLE: Test Habits
+
+* TODO Test Window Habit
+  DEADLINE: <{TEST_DATE_ORG} .+1d>
+  :PROPERTIES:
+  :STYLE: habit
+  :OWH_WINDOW_DURATION: 7d
+  :OWH_REPETITIONS_REQUIRED: 3
+  :ID: test-window-habit-001
+  :END:
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [{TEST_DATE_PREV_DAY_ORG} 14:00]
+  - State "DONE"       from "TODO"       [2024-06-13 Thu 10:00]
+  - State "DONE"       from "TODO"       [2024-06-12 Wed 09:00]
+  :END:
+  This is a test window habit that was completed yesterday.
+
+* TODO Another Window Habit Not Completed Yesterday
+  DEADLINE: <{TEST_DATE_ORG} .+1d>
+  :PROPERTIES:
+  :STYLE: habit
+  :OWH_WINDOW_DURATION: 7d
+  :OWH_REPETITIONS_REQUIRED: 2
+  :ID: test-window-habit-002
+  :END:
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [2024-06-13 Thu 10:00]
+  - State "DONE"       from "TODO"       [2024-06-10 Mon 09:00]
+  :END:
+  This habit was NOT completed yesterday.
+"""
+    )
 
     return test_dir
 

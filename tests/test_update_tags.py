@@ -54,7 +54,11 @@ class TestUpdateTags:
 
         # Find an item that has existing tags
         todo = next(
-            (t for t in todos["todos"] if t.get("tags") and "work" in t.get("tags", [])),
+            (
+                t
+                for t in todos["todos"]
+                if t.get("tags") and "work" in t.get("tags", [])
+            ),
             None,
         )
         assert todo is not None, "Need a todo with 'work' tag for this test"
@@ -185,11 +189,14 @@ class TestUpdateTags:
         assert todo is not None
 
         # Update multiple fields including tags
-        response = api.update_todo(todo, {
-            "tags": ["project", "important"],
-            "priority": "A",
-            "scheduled": "2024-07-01",
-        })
+        response = api.update_todo(
+            todo,
+            {
+                "tags": ["project", "important"],
+                "priority": "A",
+                "scheduled": "2024-07-01",
+            },
+        )
         assert response.status_code == 200
         data = response.json()
         assert data.get("status") == "updated"
@@ -229,10 +236,13 @@ class TestTagsInAgendaOutput:
         assert todo is not None
 
         # Add tags and schedule for test date
-        api.update_todo(todo, {
-            "tags": ["agenda", "visible"],
-            "scheduled": "2024-06-15",  # TEST_DATE
-        })
+        api.update_todo(
+            todo,
+            {
+                "tags": ["agenda", "visible"],
+                "scheduled": "2024-06-15",  # TEST_DATE
+            },
+        )
 
         # Check agenda output
         agenda_response = api.get_agenda(date="2024-06-15")
@@ -242,8 +252,12 @@ class TestTagsInAgendaOutput:
             (e for e in entries if unique_title in e.get("title", "")),
             None,
         )
-        assert agenda_entry is not None, f"Todo should appear in agenda. Entries: {entries}"
-        assert "agenda" in agenda_entry.get("tags", []), f"Tags missing from agenda entry: {agenda_entry}"
+        assert agenda_entry is not None, (
+            f"Todo should appear in agenda. Entries: {entries}"
+        )
+        assert "agenda" in agenda_entry.get("tags", []), (
+            f"Tags missing from agenda entry: {agenda_entry}"
+        )
         assert "visible" in agenda_entry.get("tags", [])
 
     def test_tags_in_todays_agenda(self, api):
@@ -261,10 +275,13 @@ class TestTagsInAgendaOutput:
         assert todo is not None
 
         # Add tags and schedule for test date
-        api.update_todo(todo, {
-            "tags": ["today", "tagged"],
-            "scheduled": "2024-06-15",  # TEST_DATE
-        })
+        api.update_todo(
+            todo,
+            {
+                "tags": ["today", "tagged"],
+                "scheduled": "2024-06-15",  # TEST_DATE
+            },
+        )
 
         # Check today's agenda output
         agenda_response = api.get_todays_agenda()
@@ -284,5 +301,7 @@ class TestTagsInAgendaOutput:
                 None,
             )
 
-        assert agenda_entry is not None, f"Todo should appear in today's agenda. Response: {entries}"
+        assert agenda_entry is not None, (
+            f"Todo should appear in today's agenda. Response: {entries}"
+        )
         assert "today" in agenda_entry.get("tags", []), f"Tags missing: {agenda_entry}"

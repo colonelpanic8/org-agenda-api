@@ -350,6 +350,55 @@
             echo "  ORG_AGENDA_FILES     - Colon-separated list of org file paths"
           '';
         };
+
+        # Checks run by `nix flake check`
+        # Note: Integration tests (pytest) are run separately via `nix develop -c pytest`
+        # because they need localhost networking which doesn't work in the Nix sandbox
+        checks = {
+          # Elisp byte-compilation check
+          elisp-compile = pkgs.stdenv.mkDerivation {
+            name = "org-agenda-api-elisp-compile";
+            src = ./.;
+
+            nativeBuildInputs = [ emacsWithPackages ];
+
+            buildPhase = ''
+              export HOME=$(mktemp -d)
+
+              # Byte-compile all elisp files
+              for f in *.el; do
+                echo "Compiling $f..."
+                emacs --batch \
+                  -L . \
+                  -f batch-byte-compile "$f" || exit 1
+              done
+            '';
+
+            installPhase = ''
+              mkdir -p $out
+              cp *.elc $out/ 2>/dev/null || true
+              echo "Elisp compilation passed" > $out/result
+            '';
+          };
+
+          # Python linting with ruff
+          ruff = pkgs.stdenv.mkDerivation {
+            name = "org-agenda-api-ruff";
+            src = ./.;
+
+            nativeBuildInputs = [ pkgs.ruff ];
+
+            buildPhase = ''
+              ruff check tests/
+              ruff format --check tests/
+            '';
+
+            installPhase = ''
+              mkdir -p $out
+              echo "Ruff checks passed" > $out/result
+            '';
+          };
+        };
       }
     );
 }
