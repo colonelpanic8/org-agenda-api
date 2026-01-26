@@ -110,15 +110,22 @@ class EmacsServer:
 class APIClient:
     """Simple HTTP client for org-agenda-api."""
 
+    # Default timeout for all requests (seconds)
+    DEFAULT_TIMEOUT = 10.0
+
     def __init__(self, base_url: str):
         self.base_url = base_url
 
     def get(self, path: str, **kwargs) -> requests.Response:
         """Make a GET request."""
+        if "timeout" not in kwargs:
+            kwargs["timeout"] = self.DEFAULT_TIMEOUT
         return requests.get(f"{self.base_url}{path}", **kwargs)
 
     def post(self, path: str, **kwargs) -> requests.Response:
         """Make a POST request."""
+        if "timeout" not in kwargs:
+            kwargs["timeout"] = self.DEFAULT_TIMEOUT
         return requests.post(f"{self.base_url}{path}", **kwargs)
 
     def get_all_todos(self) -> requests.Response:
@@ -583,16 +590,36 @@ def api(emacs_server, org_test_dir) -> APIClient:
     )
     # Create client and reload to invalidate Emacs's cached buffers
     client = APIClient(emacs_server.base_url)
+    reload_succeeded = False
     try:
         reload_response = client.reload(timeout=5.0)
-        if reload_response.status_code != 200:
+        if reload_response.status_code == 200:
+            reload_succeeded = True
+        else:
             print(
                 f"[api fixture] WARNING: /reload returned {reload_response.status_code}"
             )
     except requests.exceptions.Timeout:
-        print("[api fixture] WARNING: /reload timed out, continuing without reload")
+        print("[api fixture] WARNING: /reload timed out")
     except requests.exceptions.ConnectionError as e:
         print(f"[api fixture] WARNING: /reload connection error: {e}")
+
+    # If reload failed, verify server is still responsive with a simple health check
+    if not reload_succeeded:
+        try:
+            # Try a simple GET request to verify server is responsive
+            health_response = client.get("/get-all-todos", timeout=5.0)
+            if health_response.status_code == 200:
+                print("[api fixture] Server still responsive after reload failure")
+            else:
+                print(
+                    f"[api fixture] WARNING: Health check returned {health_response.status_code}"
+                )
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            print(f"[api fixture] ERROR: Server unresponsive after reload failure: {e}")
+            # Server is hung - tests will likely fail
+            # Could potentially restart the server here, but that's complex
+
     return client
 
 
