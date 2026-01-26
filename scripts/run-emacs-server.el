@@ -28,6 +28,10 @@
 (require 'simple-httpd)
 (require 'org-wild-notifier)
 
+;; Configure org-id to use test directory instead of ~/.emacs.d
+;; This prevents "No such file or directory" errors in CI
+(setq org-id-locations-file (expand-file-name ".org-id-locations" test-org-dir))
+
 ;; Override calendar-current-date and org-today BEFORE loading org-agenda-api
 ;; and BEFORE setting org-agenda-files. This ensures all date-related
 ;; operations use the fake date for deterministic tests.
