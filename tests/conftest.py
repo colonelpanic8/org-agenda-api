@@ -500,6 +500,10 @@ def org_test_dir(tmp_path_factory):
 """
     )
 
+    # Create inbox file BEFORE git commit so it's tracked
+    inbox_org = test_dir / "inbox.org"
+    inbox_org.write_text("#+TITLE: Inbox\n\n")
+
     # Initialize git repo for fixture reset between tests
     subprocess.run(
         ["git", "init"],
@@ -536,10 +540,12 @@ def org_test_dir(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def inbox_file(org_test_dir):
-    """Path to inbox file for capturing new TODOs."""
-    inbox = org_test_dir / "inbox.org"
-    inbox.write_text("#+TITLE: Inbox\n\n")
-    return inbox
+    """Path to inbox file for capturing new TODOs.
+
+    Note: The file is created in org_test_dir before the git commit
+    so that it gets tracked and isn't deleted by git clean.
+    """
+    return org_test_dir / "inbox.org"
 
 
 @pytest.fixture(scope="module")
@@ -561,33 +567,30 @@ def emacs_server(org_test_dir, inbox_file):
 def api(emacs_server, org_test_dir) -> APIClient:
     """HTTP client for making API requests.
 
-    Note: git reset + reload is disabled for now because it causes
-    /get-all-todos to hang in the pytest environment (but works fine
-    in standalone scripts). This means tests may have order dependencies.
-
-    TODO: Investigate why pytest environment behaves differently.
+    Resets org files to pristine state before each test using git reset,
+    then calls /reload to invalidate Emacs's cached buffers.
     """
-    # Disabled - causes tests to hang in pytest environment
-    # subprocess.run(
-    #     ["git", "reset", "--hard", "HEAD"],
-    #     cwd=org_test_dir,
-    #     capture_output=True,
-    # )
-    # subprocess.run(
-    #     ["git", "clean", "-fd"],
-    #     cwd=org_test_dir,
-    #     capture_output=True,
-    # )
+    # Reset org files to initial state before each test
+    subprocess.run(
+        ["git", "reset", "--hard", "HEAD"],
+        cwd=org_test_dir,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "clean", "-fd"],
+        cwd=org_test_dir,
+        capture_output=True,
+    )
+    # Create client and reload to invalidate Emacs's cached buffers
     client = APIClient(emacs_server.base_url)
-    # Disabled - causes /get-all-todos to hang after reload
-    # try:
-    #     reload_response = client.reload(timeout=5.0)
-    #     if reload_response.status_code != 200:
-    #         print(f"[api fixture] WARNING: /reload returned {reload_response.status_code}")
-    # except requests.exceptions.Timeout:
-    #     print("[api fixture] WARNING: /reload timed out, continuing without reload")
-    # except requests.exceptions.ConnectionError as e:
-    #     print(f"[api fixture] WARNING: /reload connection error: {e}")
+    try:
+        reload_response = client.reload(timeout=5.0)
+        if reload_response.status_code != 200:
+            print(f"[api fixture] WARNING: /reload returned {reload_response.status_code}")
+    except requests.exceptions.Timeout:
+        print("[api fixture] WARNING: /reload timed out, continuing without reload")
+    except requests.exceptions.ConnectionError as e:
+        print(f"[api fixture] WARNING: /reload connection error: {e}")
     return client
 
 
