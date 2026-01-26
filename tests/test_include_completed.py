@@ -498,8 +498,95 @@ class TestIncludeCompletedParameter:
         assert "entries" in response_none.json()
 
 
-# Note: Tests for habit include_completed are in development.
-# The core functionality is implemented:
-# - org-agenda-api--get-habits-completed-on-date scans for habits completed on a date
-# - org-agenda-api--run-agenda adds these habits to filtered results when include_completed=true
-# - Habits will have habitCompletedOnQueryDate=true when they were completed on the query date
+class TestHabitIncludeCompleted:
+    """Tests for include_completed with org-window-habit entries.
+
+    Habits don't use CLOSED timestamps - they reschedule to future dates when completed.
+    After completion, habits go back to TODO state but should still show up with
+    include_completed=true because they have logbook entries showing the completion.
+    """
+
+    def test_habit_in_todo_state_appears_when_completed_on_date(self, api):
+        """Habit that was completed and rescheduled (now TODO) should appear with include_completed.
+
+        This tests the key scenario:
+        1. Complete a habit (it reschedules and goes back to TODO state)
+        2. Query with include_completed=true for the completion date
+        3. The habit should appear with habitCompletedOnQueryDate=true
+        4. The habit's todo state should be TODO (not DONE) because it rescheduled
+        """
+        # Get a window habit
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        habit = next(
+            (t for t in todos["todos"]
+             if t.get("isWindowHabit", False)
+             and t.get("todo") == "TODO"),
+            None,
+        )
+        if habit is None:
+            import pytest
+            pytest.skip("No window habit in TODO state found")
+
+        original_title = habit["title"]
+
+        # Complete the habit - it will reschedule and go back to TODO
+        today = get_today_str()
+        complete_response = api.complete_todo(habit)
+        assert complete_response.status_code == 200, f"Complete failed: {complete_response.text}"
+
+        # Verify the habit is back to TODO state (it rescheduled)
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        habit_after = next(
+            (t for t in todos["todos"]
+             if original_title in t.get("title", "")),
+            None,
+        )
+        assert habit_after is not None, f"Habit '{original_title}' not found after completion"
+        assert habit_after.get("todo") == "TODO", (
+            f"Habit should be back to TODO after completion (it reschedules). "
+            f"Current state: {habit_after.get('todo')}"
+        )
+
+        # Query agenda for today with include_completed=true
+        agenda_response = api.get(f"/agenda?date={today}&include_completed=true")
+        assert agenda_response.status_code == 200
+
+        entries = agenda_response.json().get("entries", [])
+
+        # Find the habit by title
+        habit_entry = next(
+            (e for e in entries if original_title in e.get("title", "")),
+            None,
+        )
+
+        # Debug info
+        entry_info = [
+            (e.get("title"), e.get("todo"), e.get("isWindowHabit"),
+             e.get("habitCompletedOnQueryDate", False))
+            for e in entries
+        ]
+
+        assert habit_entry is not None, (
+            f"Habit '{original_title}' not found in agenda for {today} with include_completed=true. "
+            f"The habit is in TODO state but was completed today, so it should appear. "
+            f"Entries: {entry_info}"
+        )
+
+        # The habit should be in TODO state (it rescheduled)
+        assert habit_entry.get("todo") == "TODO", (
+            f"Habit should be in TODO state (it rescheduled after completion). "
+            f"Found: {habit_entry.get('todo')}"
+        )
+
+        # The habit should have habitCompletedOnQueryDate=true
+        assert habit_entry.get("habitCompletedOnQueryDate", False), (
+            f"Habit entry should have habitCompletedOnQueryDate=true. Entry: {habit_entry}"
+        )
+
+        # The habit should be marked as a window habit
+        assert habit_entry.get("isWindowHabit", False), (
+            f"Habit entry should have isWindowHabit=true. Entry: {habit_entry}"
+        )

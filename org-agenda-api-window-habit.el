@@ -41,30 +41,57 @@ Delegates to `org-window-habit-entry-p' from the org-window-habit library."
 DATE-STRING should be in YYYY-MM-DD format.
 Must be called with point at an org heading that is a window-habit."
     (when (org-agenda-api--is-window-habit-p)
-      (condition-case nil
+      (condition-case err
           (let* ((habit (org-window-habit-create-instance-from-heading-at-point))
                  (done-times (oref habit done-times)))
+            (org-agenda-api--log 'debug "habit-completed-on-date-p: title=%s date=%s done-times=%S"
+                                 (org-get-heading t t t t) date-string
+                                 (mapcar (lambda (t) (format-time-string "%Y-%m-%d" t)) done-times))
             ;; Check if any done-time matches the date
             (cl-some (lambda (time)
                        (string= (format-time-string "%Y-%m-%d" time) date-string))
                      done-times))
-        (error nil))))
+        (error
+         (org-agenda-api--log 'debug "habit-completed-on-date-p error: %S" err)
+         nil))))
 
   (defun org-agenda-api--get-habits-completed-on-date (date-string)
     "Get all habits that were completed on DATE-STRING.
 DATE-STRING should be in YYYY-MM-DD format.
 Returns a list of (file . pos) cons cells for each matching habit."
+    (org-agenda-api--log 'debug "get-habits-completed-on-date: looking for date=%s in %d files"
+                         date-string (length org-agenda-files))
     (let ((results nil))
       (dolist (file org-agenda-files)
+        (org-agenda-api--log 'debug "get-habits-completed-on-date: checking file=%s exists=%s"
+                             file (file-exists-p file))
         (when (file-exists-p file)
-          (with-current-buffer (find-file-noselect file)
-            (save-excursion
-              (goto-char (point-min))
-              (while (re-search-forward org-heading-regexp nil t)
-                (when (and (org-at-heading-p)
-                           (org-agenda-api--is-window-habit-p)
-                           (org-agenda-api--habit-completed-on-date-p date-string))
-                  (push (cons file (line-beginning-position)) results)))))))
+          (let ((buf (find-file-noselect file)))
+            (with-current-buffer buf
+              ;; Revert buffer if file changed on disk to get latest logbook entries
+              (when (and (buffer-file-name)
+                         (file-exists-p (buffer-file-name))
+                         (not (verify-visited-file-modtime buf)))
+                (org-agenda-api--log 'debug "get-habits-completed-on-date: reverting buffer for %s" file)
+                (revert-buffer t t t))
+              (save-excursion
+                (goto-char (point-min))
+                (let ((heading-count 0)
+                      (habit-count 0))
+                  (while (re-search-forward org-heading-regexp nil t)
+                    (cl-incf heading-count)
+                    (when (org-at-heading-p)
+                      (let ((title (org-get-heading t t t t))
+                            (is-habit (org-agenda-api--is-window-habit-p)))
+                        (when is-habit
+                          (cl-incf habit-count)
+                          (org-agenda-api--log 'debug "get-habits-completed-on-date: found habit '%s'" title)
+                          (when (org-agenda-api--habit-completed-on-date-p date-string)
+                            (org-agenda-api--log 'debug "get-habits-completed-on-date: habit '%s' completed on %s" title date-string)
+                            (push (cons file (line-beginning-position)) results))))))
+                  (org-agenda-api--log 'debug "get-habits-completed-on-date: file=%s headings=%d habits=%d"
+                                       file heading-count habit-count)))))))
+      (org-agenda-api--log 'debug "get-habits-completed-on-date: found %d results" (length results))
       (nreverse results)))
 
   (defun org-agenda-api--get-habit-summary ()

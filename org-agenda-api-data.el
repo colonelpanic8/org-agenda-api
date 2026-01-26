@@ -168,6 +168,66 @@ keeping only one entry per unique headline location."
           (push entry result))))
     (nreverse result)))
 
+(defun org-agenda-api--entry-has-scheduled-time-p (entry)
+  "Return non-nil if ENTRY has a specific scheduled time (not just date)."
+  (let ((scheduled (cdr (assoc "scheduled" entry))))
+    (and scheduled
+         (listp scheduled)
+         (cdr (assoc "time" scheduled)))))
+
+(defun org-agenda-api--entry-is-untimed-habit-p (entry)
+  "Return non-nil if ENTRY is a window habit without a specific scheduled time."
+  (and (eq (cdr (assoc "isWindowHabit" entry)) t)
+       (not (org-agenda-api--entry-has-scheduled-time-p entry))))
+
+(defun org-agenda-api--group-habits-in-agenda (entries)
+  "Reorder ENTRIES to group untimed habits together at the end.
+Habits with a specific scheduled time remain in their time-based position.
+Untimed habits are moved to the end and sorted alphabetically by title."
+  (let ((non-habits nil)
+        (timed-habits nil)
+        (untimed-habits nil))
+    ;; Partition entries into three groups
+    (dolist (entry entries)
+      (cond
+       ((not (eq (cdr (assoc "isWindowHabit" entry)) t))
+        ;; Not a habit - keep in original order
+        (push entry non-habits))
+       ((org-agenda-api--entry-has-scheduled-time-p entry)
+        ;; Habit with specific time - keep in original order
+        (push entry timed-habits))
+       (t
+        ;; Untimed habit - will be grouped at end
+        (push entry untimed-habits))))
+    ;; Reverse to restore original order for non-habits and timed-habits
+    (setq non-habits (nreverse non-habits))
+    (setq timed-habits (nreverse timed-habits))
+    ;; Sort untimed habits by title
+    (setq untimed-habits
+          (sort (nreverse untimed-habits)
+                (lambda (a b)
+                  (string< (or (cdr (assoc "title" a)) "")
+                           (or (cdr (assoc "title" b)) "")))))
+    ;; Merge: non-habits first, then timed-habits interspersed, then untimed-habits at end
+    ;; Actually, we want to preserve the relative order of non-habits and timed-habits
+    ;; So we need to merge them back in their original positions
+    (let ((merged nil)
+          (non-habit-set (make-hash-table :test 'equal))
+          (timed-habit-set (make-hash-table :test 'equal)))
+      ;; Build sets for quick lookup
+      (dolist (e non-habits)
+        (puthash (cons (cdr (assoc "file" e)) (cdr (assoc "pos" e))) t non-habit-set))
+      (dolist (e timed-habits)
+        (puthash (cons (cdr (assoc "file" e)) (cdr (assoc "pos" e))) t timed-habit-set))
+      ;; Iterate through original entries, keeping non-habits and timed-habits in order
+      (dolist (entry entries)
+        (let ((key (cons (cdr (assoc "file" entry)) (cdr (assoc "pos" entry)))))
+          (when (or (gethash key non-habit-set)
+                    (gethash key timed-habit-set))
+            (push entry merged))))
+      ;; Append untimed habits at the end
+      (append (nreverse merged) untimed-habits))))
+
 ;;; Property and Logbook Functions
 
 (defun org-agenda-api--get-all-entry-properties ()
@@ -756,7 +816,9 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
         ;; Deduplicate entries - when an item has both SCHEDULED and DEADLINE
         ;; on the same day, org-agenda shows it twice. Keep only unique entries
         ;; based on (file, pos).
-        (org-agenda-api--deduplicate-entries filtered-entries)))))
+        ;; Then group untimed habits together at the end.
+        (org-agenda-api--group-habits-in-agenda
+         (org-agenda-api--deduplicate-entries filtered-entries))))))
 
 (defun org-agenda-api--extract-habit-entry-data (pos file query-date)
   "Extract entry data for a habit at POS in FILE.
