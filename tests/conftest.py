@@ -231,6 +231,12 @@ class APIClient:
             params += f"&following={following}"
         return self.get(f"/habit-status{params}")
 
+    def get_notifications(self, within: int = None) -> requests.Response:
+        """GET /notifications with optional within parameter (minutes)."""
+        if within is not None:
+            return self.get(f"/notifications?within={within}")
+        return self.get("/notifications")
+
 
 def find_free_port() -> int:
     """Find a free port to use for testing."""

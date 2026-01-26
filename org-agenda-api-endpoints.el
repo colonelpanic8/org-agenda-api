@@ -110,6 +110,32 @@ Returns todoStates, priorities, tags, and categories."
      (httpd-error t 500 (format "Error: %S" err))))
   (org-agenda-api--track-request))
 
+(defservlet notifications application/json (_path query)
+  "Endpoint: Return items with upcoming notifications.
+Accepts optional query params:
+  - 'within' (minutes): time window for upcoming notifications
+If 'within' is not provided, returns all future notifications."
+  (condition-case err
+      (let* ((within-param (cadr (assoc "within" query)))
+             (within-minutes (when within-param
+                               (string-to-number within-param)))
+             (notifications (org-agenda-api--get-upcoming-notifications within-minutes))
+             (defaults (org-agenda-api--get-default-notify-before))
+             (response `(,@(when within-minutes
+                             `(("withinMinutes" . ,within-minutes)))
+                         ("defaultNotifyBefore" . ,(vconcat defaults))
+                         ("count" . ,(length notifications))
+                         ("notifications" . ,(vconcat notifications)))))
+        (message "[org-agenda-api] /notifications: %d notifications%s"
+                 (length notifications)
+                 (if within-minutes (format " within %d minutes" within-minutes) ""))
+        (insert (json-encode response)))
+    (error
+     (message "[org-agenda-api] /notifications ERROR: %S" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(format "Server error: %S" err)))))))
+  (org-agenda-api--track-request))
+
 (defservlet agenda-files application/json ()
   "Endpoint: Return the list of org-agenda-files as JSON."
   (let* ((files (mapcar #'expand-file-name org-agenda-files))

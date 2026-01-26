@@ -1076,16 +1076,32 @@ Returns nil if KEY is not found or OBJ is nil."
         (gethash key obj)
       (cdr (assoc key obj)))))
 
+(defun org-agenda-api--unit-to-letter (unit)
+  "Convert UNIT to single letter for org repeater format.
+Accepts both full names (day, week, month, year) and single letters (d, w, m, y).
+Returns the single letter, or nil if UNIT is not recognized."
+  (when unit
+    (let ((unit-str (downcase (if (stringp unit) unit (format "%s" unit)))))
+      (pcase unit-str
+        ("d" "d") ("day" "d")
+        ("w" "w") ("week" "w")
+        ("m" "m") ("month" "m")
+        ("y" "y") ("year" "y")
+        (_ nil)))))
+
 (defun org-agenda-api--format-repeater (repeater)
   "Format REPEATER as org repeater string.
 REPEATER can be a hash-table or alist with keys \"type\", \"value\", and \"unit\".
+Unit can be full names (day, week, month, year) or single letters (d, w, m, y).
 Returns a string like \"+1w\" or \"++2d\", or nil if REPEATER is invalid."
   (when (and repeater (not (eq repeater :json-null)))
     (let ((type (org-agenda-api--get-field "type" repeater))
           (value (org-agenda-api--get-field "value" repeater))
           (unit (org-agenda-api--get-field "unit" repeater)))
       (when (and type value unit)
-        (format "%s%d%s" type value unit)))))
+        (let ((unit-letter (org-agenda-api--unit-to-letter unit)))
+          (when unit-letter
+            (format "%s%d%s" type value unit-letter)))))))
 
 (defun org-agenda-api--format-org-timestamp-with-repeater (time has-time repeater)
   "Format TIME as an org timestamp string, optionally with REPEATER.
@@ -1238,6 +1254,54 @@ Returns a list of integers (minutes before event)."
      ((listp alert-time) alert-time)
      ((integerp alert-time) (list alert-time))
      (t '(10)))))
+
+;;; Notifications
+
+(defun org-agenda-api--get-upcoming-notifications (&optional within-minutes)
+  "Get upcoming notifications.
+If WITHIN-MINUTES is provided, filter to notifications within that time window.
+Uses `org-wild-notifier-get-upcoming-notifications' if available.
+Returns a list of notification objects suitable for JSON encoding."
+  (if (fboundp 'org-wild-notifier-get-upcoming-notifications)
+      ;; Use org-wild-notifier's comprehensive notification logic
+      (let* ((now (current-time))
+             (window-end (when within-minutes
+                           (time-add now (seconds-to-time (* within-minutes 60)))))
+             (all-notifications (org-wild-notifier-get-upcoming-notifications))
+             (filtered-notifications
+              (if within-minutes
+                  (cl-remove-if-not
+                   (lambda (notif)
+                     (let ((notify-at (plist-get notif :notify-at)))
+                       (and (not (time-less-p notify-at now))
+                            (time-less-p notify-at window-end))))
+                   all-notifications)
+                ;; No filter - return all future notifications
+                (cl-remove-if
+                 (lambda (notif)
+                   (time-less-p (plist-get notif :notify-at) now))
+                 all-notifications))))
+        (mapcar
+         (lambda (notif)
+           (let ((notify-at (plist-get notif :notify-at))
+                 (event-time (plist-get notif :event-time))
+                 (event-time-string (plist-get notif :event-time-string))
+                 (minutes-before (plist-get notif :minutes-before))
+                 (notif-type (plist-get notif :type))
+                 (title (plist-get notif :title)))
+             `(("title" . ,title)
+               ("notifyAt" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" notify-at))
+               ("type" . ,(symbol-name notif-type))
+               ,@(when event-time
+                   `(("eventTime" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" event-time))))
+               ,@(when event-time-string
+                   `(("eventTimeString" . ,event-time-string)))
+               ,@(when minutes-before
+                   `(("minutesBefore" . ,minutes-before))))))
+         filtered-notifications))
+    ;; Fallback if org-wild-notifier is not available
+    (org-agenda-api--log 'warn "org-wild-notifier not available, notifications endpoint disabled")
+    nil))
 
 (provide 'org-agenda-api-data)
 ;;; org-agenda-api-data.el ends here
