@@ -26,6 +26,13 @@
 ;; Advise message function to also log to stderr
 (advice-add 'message :after #'org-agenda-api--log-to-stderr)
 
+;; === Auto-revert Configuration ===
+;; Automatically reload files when they change on disk (e.g., from git-sync)
+(global-auto-revert-mode 1)
+(setq auto-revert-interval 1)        ; Check every second
+(setq auto-revert-verbose nil)       ; Suppress "Reverting buffer" messages
+(setq auto-revert-check-vc-info t)   ; Also update VC info when reverting
+
 ;; Log startup
 (message "org-agenda-api container-init.el loading...")
 
