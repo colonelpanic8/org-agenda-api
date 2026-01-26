@@ -122,15 +122,16 @@ Returns an alist suitable for JSON encoding, or nil if not a window-habit."
          (org-agenda-api--log 'warn "Failed to get habit summary: %s" (error-message-string err))
          nil))))
 
-  (defun org-agenda-api--build-habit-graph-data (habit &optional preceding following)
+  (defun org-agenda-api--build-habit-graph-data (habit &optional preceding following reference-time)
     "Build semantic graph data for HABIT.
 PRECEDING is number of intervals before today (default 21).
 FOLLOWING is number of intervals after today (default 4).
+REFERENCE-TIME is the time to use as \"now\" (default current-time).
 Returns a list of alists suitable for JSON encoding."
     (setq preceding (or preceding org-window-habit-preceding-intervals))
     (setq following (or following org-window-habit-following-days))
-    (let* ((now (current-time))
-           (today-day (org-today))
+    (let* ((now (or reference-time (current-time)))
+           (today-day (time-to-days now))
            (window-specs (oref habit window-specs))
            (assessment-interval (oref habit assessment-interval))
            (assessment-decrement (org-window-habit-negate-plist assessment-interval))
@@ -187,8 +188,9 @@ Returns a list of alists suitable for JSON encoding."
 
   ;;; Endpoint Implementations
 
-  (defun org-agenda-api--habit-status-impl (id preceding following)
+  (defun org-agenda-api--habit-status-impl (id preceding following &optional reference-time)
     "Build habit status response for ID with PRECEDING and FOLLOWING params.
+REFERENCE-TIME is the time to use as \"today\" (default current-time).
 Returns a JSON-encodable alist."
     (let ((location (org-id-find id)))
       (if (not location)
@@ -204,7 +206,7 @@ Returns a JSON-encodable alist."
                        (title (org-get-heading t t t t))
                        (done-times (oref habit done-times))
                        (window-specs (oref habit window-specs))
-                       (graph (org-agenda-api--build-habit-graph-data habit preceding following))
+                       (graph (org-agenda-api--build-habit-graph-data habit preceding following reference-time))
                        (summary (org-agenda-api--get-habit-summary)))
                   `(("status" . "ok")
                     ("id" . ,id)
@@ -267,13 +269,17 @@ Returns a JSON-encodable alist."
 Accepts query params:
   - 'id' (required): org-id of the habit entry
   - 'preceding' (optional, default 21): intervals before today
-  - 'following' (optional, default 4): intervals after today"
+  - 'following' (optional, default 4): intervals after today
+  - 'date' (optional): reference date as YYYY-MM-DD (default: today)"
     (condition-case err
         (let* ((id (cadr (assoc "id" query)))
                (preceding (let ((p (cadr (assoc "preceding" query))))
                             (when p (string-to-number p))))
                (following (let ((f (cadr (assoc "following" query))))
-                            (when f (string-to-number f)))))
+                            (when f (string-to-number f))))
+               (date-str (cadr (assoc "date" query)))
+               (reference-time (when date-str
+                                 (org-agenda-api--parse-datetime date-str))))
           (insert
            (json-encode
             (cond
@@ -282,7 +288,7 @@ Accepts query params:
              ((not (org-agenda-api--window-habit-available-p))
               `(("status" . "error") ("message" . "org-window-habit-mode is not enabled")))
              (t
-              (org-agenda-api--habit-status-impl id preceding following))))))
+              (org-agenda-api--habit-status-impl id preceding following reference-time))))))
       (error
        (org-agenda-api--log-error-with-backtrace "/habit-status" err)
        (insert (json-encode `(("status" . "error")
