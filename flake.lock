@@ -162,11 +162,11 @@
     "org-wild-notifier": {
       "flake": false,
       "locked": {
-        "lastModified": 1769405113,
-        "narHash": "sha256-+PiXWPCrT8h+tq+sT00XdZFuc6mblYz1dULKQQWQBtw=",
+        "lastModified": 1769453166,
+        "narHash": "sha256-QGvYFIO/hQUmriWy3d7TKg+jMVSQi9Fhsfd+gRQPsjQ=",
         "owner": "emacsorphanage",
         "repo": "org-wild-notifier",
-        "rev": "4794a5345f50aa2538724508a65e59d82b0f4ad7",
+        "rev": "26ac71f5f5c1cd842b78841430e20cd03d5d4346",
         "type": "github"
       },
       "original": {
