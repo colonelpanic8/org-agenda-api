@@ -149,6 +149,18 @@ let
     then "ORG_API_CUSTOM_ELISP=${customElispFile}"
     else "";
 
+  # git-sync-rs configuration file (enables conflict_branch feature)
+  gitSyncConfig = pkgs.writeText "git-sync-rs-config.toml" ''
+    [defaults]
+    sync_interval = 60
+    sync_new_files = true
+    skip_hooks = false
+    commit_message = "changes from {hostname} on {timestamp}"
+    remote = "origin"
+    # Create fallback branch on merge conflicts instead of failing
+    conflict_branch = true
+  '';
+
   # Multi-repo git sync wrapper script
   gitSyncMultiScript = pkgs.writeShellScript "git-sync-multi" ''
     PIDS=""
@@ -167,7 +179,7 @@ let
     start_sync() {
       local repo_path="$1"
       echo "git-sync-multi: Starting sync for $repo_path"
-      ${gitSyncRs}/bin/git-sync-rs watch -d "$repo_path" &
+      ${gitSyncRs}/bin/git-sync-rs watch -d "$repo_path" --config ${gitSyncConfig} &
       PIDS="$PIDS $!"
     }
 
