@@ -1284,60 +1284,12 @@ Returns a list of integers (minutes before event)."
             ("pos" . ,pos)
             ,@(when id `(("id" . ,id)))))))))
 
-(defun org-wild-notifier-get-upcoming-notifications ()
-  "Get all upcoming notifications from org-agenda.
-Returns a list of notification plists from org-wild-notifier.
-This function is implemented here because org-wild-notifier doesn't
-provide a public API for querying future notifications."
-  (require 'org-wild-notifier)
-  (unless (fboundp 'org-wild-notifier--get-notifications-for-event)
-    (error "org-wild-notifier is not available"))
-  (let ((notifications nil)
-        (now (current-time))
-        ;; Get events for today and tomorrow to cover upcoming notifications
-        ;; org-wild-notifier--retrieve-events returns a FUNCTION, not events directly
-        ;; It uses org-agenda internally which creates read-only buffers
-        (events (condition-case err
-                    (let ((inhibit-read-only t)
-                          (events-fn (org-wild-notifier--retrieve-events)))
-                      (if (functionp events-fn)
-                          (funcall events-fn)
-                        events-fn))
-                  (error
-                   (message "[org-agenda-api] Error retrieving events: %S" err)
-                   nil))))
-    (dolist (event events)
-      (condition-case err
-          (let ((event-notifications (org-wild-notifier--get-notifications-for-event event)))
-            (dolist (notif event-notifications)
-              ;; Verify notification is a proper plist with :notify-at
-              (when (and (listp notif)
-                         (not (functionp notif))
-                         (plist-member notif :notify-at))
-                (let ((notify-at (plist-get notif :notify-at)))
-                  ;; Only include future notifications with valid time
-                  (when (and notify-at
-                             (or (numberp notify-at) (listp notify-at))
-                             (condition-case nil
-                                 (time-less-p now notify-at)
-                               (error nil)))
-                    (push notif notifications))))))
-        (error
-         (message "[org-agenda-api] Error processing event: %S" err))))
-    ;; Sort by notification time, with error handling
-    (condition-case nil
-        (sort notifications
-              (lambda (a b)
-                (let ((time-a (plist-get a :notify-at))
-                      (time-b (plist-get b :notify-at)))
-                  (and time-a time-b (time-less-p time-a time-b)))))
-      (error notifications))))
-
 (defun org-agenda-api--get-upcoming-notifications (&optional within-minutes)
   "Get upcoming notifications.
 If WITHIN-MINUTES is provided, filter to notifications within that time window.
 Uses `org-wild-notifier-get-upcoming-notifications'.
 Returns a list of notification objects suitable for JSON encoding."
+  (require 'org-wild-notifier)
   (let* ((now (current-time))
          (window-end (when within-minutes
                        (time-add now (seconds-to-time (* within-minutes 60)))))
