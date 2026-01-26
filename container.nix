@@ -218,7 +218,7 @@ let
   healthCheckerScript = pkgs.writeShellScript "health-checker" ''
     INTERVAL=''${HEALTH_CHECK_INTERVAL:-10}
     TIMEOUT=''${HEALTH_CHECK_TIMEOUT:-5}
-    GRACE_PERIOD=''${HEALTH_CHECK_GRACE_PERIOD:-45}
+    GRACE_PERIOD=''${HEALTH_CHECK_GRACE_PERIOD:-90}
     TIMESTAMP_FILE="/tmp/emacs_start_time"
 
     echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s, grace=''${GRACE_PERIOD}s)"
@@ -240,14 +240,19 @@ let
         fi
       fi
 
-      # First check
+      # Check health - require 3 consecutive failures with delays before restarting
       if ! ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
-        # Immediate retry
+        echo "Health check failed (1/3), waiting 5s..."
+        ${pkgs.coreutils}/bin/sleep 5
         if ! ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
-          echo "Emacs failed health check twice, restarting..."
-          # Record restart time BEFORE restarting so grace period starts immediately
-          ${pkgs.coreutils}/bin/date +%s > "$TIMESTAMP_FILE"
-          ${pkgs.python3Packages.supervisor}/bin/supervisorctl -s unix:///tmp/supervisor.sock restart emacs || true
+          echo "Health check failed (2/3), waiting 5s..."
+          ${pkgs.coreutils}/bin/sleep 5
+          if ! ${pkgs.curl}/bin/curl -sf --max-time $TIMEOUT "http://127.0.0.1:${toString port}/health" > /dev/null 2>&1; then
+            echo "Emacs failed health check 3 times, restarting..."
+            # Record restart time BEFORE restarting so grace period starts immediately
+            ${pkgs.coreutils}/bin/date +%s > "$TIMESTAMP_FILE"
+            ${pkgs.python3Packages.supervisor}/bin/supervisorctl -s unix:///tmp/supervisor.sock restart emacs || true
+          fi
         fi
       fi
 
