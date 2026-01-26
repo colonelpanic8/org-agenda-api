@@ -1310,10 +1310,22 @@ Returns a list of notification objects suitable for JSON encoding."
                              (title (plist-get notif :title))
                              (marker (plist-get notif :marker))
                              (event (plist-get notif :event))
-                             (marker-info (when marker
-                                            (condition-case nil
-                                                (org-agenda-api--get-marker-info marker)
-                                              (error nil))))
+                             ;; Use pre-extracted file/pos/id from notification plist
+                             ;; These are now extracted in org-wild-notifier--gather-info
+                             ;; while the marker is still valid
+                             (file (plist-get notif :file))
+                             (pos (plist-get notif :pos))
+                             (id (plist-get notif :id))
+                             ;; Fall back to marker-info if file/pos not in plist
+                             ;; (for backwards compatibility)
+                             (marker-info (if (and file pos)
+                                              `(("file" . ,file)
+                                                ("pos" . ,pos)
+                                                ,@(when id `(("id" . ,id))))
+                                            (when marker
+                                              (condition-case nil
+                                                  (org-agenda-api--get-marker-info marker)
+                                                (error nil)))))
                              ;; Safely extract all-times only if event is a proper alist
                              (all-times (when (and event
                                                    (listp event)
