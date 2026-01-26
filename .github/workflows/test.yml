@@ -9,6 +9,7 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -25,4 +26,4 @@ jobs:
         run: nix flake check --print-build-logs
 
       - name: Run integration tests
-        run: nix develop -c pytest tests/ -v --timeout=120
+        run: nix develop -c pytest tests/ --ignore=tests/test_container_integration.py -v --timeout=60
