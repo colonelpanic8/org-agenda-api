@@ -1296,8 +1296,10 @@ provide a public API for querying future notifications."
         (now (current-time))
         ;; Get events for today and tomorrow to cover upcoming notifications
         ;; org-wild-notifier--retrieve-events returns a FUNCTION, not events directly
+        ;; It uses org-agenda internally which creates read-only buffers
         (events (condition-case err
-                    (let ((events-fn (org-wild-notifier--retrieve-events)))
+                    (let ((inhibit-read-only t)
+                          (events-fn (org-wild-notifier--retrieve-events)))
                       (if (functionp events-fn)
                           (funcall events-fn)
                         events-fn))
