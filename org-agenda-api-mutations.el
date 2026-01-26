@@ -327,7 +327,8 @@ Returns alist with deletion result."
                        found))
                     ((and file position)
                      (cons file position))))
-         (target-file (car location))
+         ;; Expand file path to match org-agenda-files format
+         (target-file (expand-file-name (car location)))
          (target-pos (cdr location)))
 
     (unless (file-exists-p target-file)
