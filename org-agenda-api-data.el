@@ -1295,8 +1295,12 @@ provide a public API for querying future notifications."
   (let ((notifications nil)
         (now (current-time))
         ;; Get events for today and tomorrow to cover upcoming notifications
+        ;; org-wild-notifier--retrieve-events returns a FUNCTION, not events directly
         (events (condition-case err
-                    (org-wild-notifier--retrieve-events)
+                    (let ((events-fn (org-wild-notifier--retrieve-events)))
+                      (if (functionp events-fn)
+                          (funcall events-fn)
+                        events-fn))
                   (error
                    (message "[org-agenda-api] Error retrieving events: %S" err)
                    nil))))
