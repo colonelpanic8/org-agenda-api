@@ -1285,6 +1285,7 @@ Returns a list of integers (minutes before event)."
 Returns a list of notification plists from org-wild-notifier.
 This function is implemented here because org-wild-notifier doesn't
 provide a public API for querying future notifications."
+  (require 'org-wild-notifier)
   (unless (fboundp 'org-wild-notifier--get-notifications-for-event)
     (error "org-wild-notifier is not available"))
   (let ((notifications nil)
