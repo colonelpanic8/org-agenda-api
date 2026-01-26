@@ -289,13 +289,14 @@ Returns updated todo with new file and pos for cache update."
                (priority (gethash "priority" json-data))
                (tags (gethash "tags" json-data))
                (properties (gethash "properties" json-data))
+               (body (gethash "body" json-data))
                (location nil)
                (updates nil))
           ;; Log incoming request for debugging
         (message "[/update] Request: id=%s file=%s pos=%s title=%s new_title=%s scheduled=%s deadline=%s priority=%s"
                  id file pos title new-title scheduled deadline priority)
         ;; Check for unrecognized fields
-        (let ((allowed-fields '("id" "file" "pos" "title" "new_title" "scheduled" "deadline" "priority" "tags" "properties"))
+        (let ((allowed-fields '("id" "file" "pos" "title" "new_title" "scheduled" "deadline" "priority" "tags" "properties" "body"))
               (unrecognized nil))
           (maphash (lambda (key _value)
                      (unless (member key allowed-fields)
@@ -327,6 +328,9 @@ Returns updated todo with new file and pos for cache update."
                          (push (cons k (if (eq v :null) nil v)) props-alist))
                        properties))
             (push (cons "properties" props-alist) updates)))
+        ;; Handle body
+        (unless (eq (gethash "body" json-data :not-found) :not-found)
+          (push (cons "body" (if (eq body :null) nil body)) updates))
         (message "[/update] Updates to apply: %S" updates)
         ;; Try to find by ID first
         (setq location (org-agenda-api--find-todo-by-id id))

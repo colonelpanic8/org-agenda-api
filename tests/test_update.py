@@ -543,3 +543,75 @@ class TestUpdateErrors:
 
         assert data.get("status") == "error"
         assert "message" in data
+
+
+class TestUpdateBody:
+    """Tests for updating todo body content."""
+
+    def test_set_body(self, api):
+        """Should be able to set body content."""
+        unique_title = "Body update test todo"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        body_content = "- [ ] First item\n- [X] Second item\n\nSome notes here"
+        response = api.update_todo(todo, {"body": body_content})
+        data = response.json()
+
+        assert data.get("status") == "updated"
+        updates = data.get("updates", {})
+        if isinstance(updates, dict):
+            assert "body" in updates
+        else:
+            body_update = next((u for u in updates if u[0] == "body"), None)
+            assert body_update is not None
+
+    def test_clear_body(self, api):
+        """Should be able to clear body content with null."""
+        unique_title = "Body clear test todo"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # First set a body
+        api.update_todo(todo, {"body": "Some content"})
+
+        # Then clear it
+        response = api.update_todo(todo, {"body": None})
+        data = response.json()
+
+        assert data.get("status") == "updated"
+
+    def test_set_empty_body(self, api):
+        """Should be able to set empty body content."""
+        unique_title = "Body empty test todo"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        response = api.update_todo(todo, {"body": ""})
+        data = response.json()
+
+        assert data.get("status") == "updated"

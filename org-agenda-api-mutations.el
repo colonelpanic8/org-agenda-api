@@ -190,7 +190,7 @@ Returns alist with status and details."
 
 (defun org-agenda-api--update-todo-at (file pos updates)
   "Update the TODO at FILE and POS with UPDATES alist.
-UPDATES can contain: new_title, scheduled, deadline, priority, tags, properties.
+UPDATES can contain: new_title, scheduled, deadline, priority, tags, properties, body.
 Returns alist with status, details, and new position."
   (with-current-buffer (find-file-noselect file)
     (save-excursion
@@ -281,6 +281,51 @@ Returns alist with status, details, and new position."
                           (push (cons prop-name-upper prop-value) applied-props)))))
                   (when applied-props
                     (push `("properties" . ,applied-props) applied-updates)))))
+            ;; Handle body - the content after metadata, before next heading
+            (when (assoc "body" updates)
+              (let ((body-value (cdr (assoc "body" updates))))
+                (save-excursion
+                  ;; Go to end of heading line
+                  (org-back-to-heading t)
+                  (let ((heading-end (line-end-position))
+                        (entry-end (save-excursion
+                                     (org-end-of-subtree t t)
+                                     ;; Don't include the final newline before next heading
+                                     (skip-chars-backward "\n")
+                                     (point)))
+                        (content-start nil))
+                    ;; Move past heading line
+                    (goto-char heading-end)
+                    (forward-line 1)
+                    ;; Skip SCHEDULED, DEADLINE, CLOSED lines
+                    (while (and (< (point) entry-end)
+                                (looking-at "^\\s-*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):"))
+                      (forward-line 1))
+                    ;; Skip properties drawer if present
+                    (when (looking-at "^\\s-*:PROPERTIES:")
+                      (re-search-forward "^\\s-*:END:" entry-end t)
+                      (forward-line 1))
+                    ;; Skip logbook drawer if present
+                    (when (looking-at "^\\s-*:LOGBOOK:")
+                      (re-search-forward "^\\s-*:END:" entry-end t)
+                      (forward-line 1))
+                    ;; Now we're at the start of body content
+                    (setq content-start (point))
+                    ;; Find end of body (before child headings)
+                    (let ((body-end (save-excursion
+                                      (if (re-search-forward "^\\*+ " entry-end t)
+                                          (line-beginning-position)
+                                        entry-end))))
+                      ;; Delete existing body content
+                      (delete-region content-start body-end)
+                      ;; Insert new body if provided
+                      (goto-char content-start)
+                      (when (and body-value
+                                 (not (eq body-value :json-null))
+                                 (not (string-empty-p body-value)))
+                        (insert body-value)
+                        (unless (bolp) (insert "\n")))
+                      (push `("body" . ,body-value) applied-updates))))))
             ;; Run post-command-hook to trigger any deferred logging (e.g., reschedule/redeadline)
             (run-hooks 'post-command-hook)
             (save-buffer)
