@@ -130,6 +130,7 @@ Returns a list of alists suitable for JSON encoding."
     (setq preceding (or preceding org-window-habit-preceding-intervals))
     (setq following (or following org-window-habit-following-days))
     (let* ((now (current-time))
+           (today-day (org-today))
            (window-specs (oref habit window-specs))
            (assessment-interval (oref habit assessment-interval))
            (assessment-decrement (org-window-habit-negate-plist assessment-interval))
@@ -153,10 +154,11 @@ Returns a list of alists suitable for JSON encoding."
             (let* ((window (oref (car iterators) window))
                    (assessment-start (oref window assessment-start-time))
                    (assessment-end (oref window assessment-end-time))
-                   ;; Determine if this is past, present, or future
+                   ;; Determine if this is past, present, or future based on org-today
+                   (assessment-day (time-to-days assessment-start))
                    (time-type (cond
-                               ((time-less-p assessment-end now) 'past)
-                               ((time-less-p now assessment-start) 'future)
+                               ((< assessment-day today-day) 'past)
+                               ((> assessment-day today-day) 'future)
                                (t 'present)))
                    ;; Get assessments with and without completion
                    (assess-data (org-window-habit-assess-interval-with-and-without-completions
