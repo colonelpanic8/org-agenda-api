@@ -577,6 +577,8 @@ def api(emacs_server, org_test_dir) -> APIClient:
     Resets org files to pristine state before each test using git reset,
     then calls /reload to invalidate Emacs's cached buffers.
     """
+    import sys
+
     # Reset org files to initial state before each test
     subprocess.run(
         ["git", "reset", "--hard", "HEAD"],
@@ -597,12 +599,13 @@ def api(emacs_server, org_test_dir) -> APIClient:
             reload_succeeded = True
         else:
             print(
-                f"[api fixture] WARNING: /reload returned {reload_response.status_code}"
+                f"[api fixture] WARNING: /reload returned {reload_response.status_code}",
+                file=sys.stderr,
             )
     except requests.exceptions.Timeout:
-        print("[api fixture] WARNING: /reload timed out")
+        print("[api fixture] WARNING: /reload timed out", file=sys.stderr)
     except requests.exceptions.ConnectionError as e:
-        print(f"[api fixture] WARNING: /reload connection error: {e}")
+        print(f"[api fixture] WARNING: /reload connection error: {e}", file=sys.stderr)
 
     # If reload failed, verify server is still responsive with a simple health check
     if not reload_succeeded:
@@ -610,13 +613,20 @@ def api(emacs_server, org_test_dir) -> APIClient:
             # Try a simple GET request to verify server is responsive
             health_response = client.get("/get-all-todos", timeout=5.0)
             if health_response.status_code == 200:
-                print("[api fixture] Server still responsive after reload failure")
+                print(
+                    "[api fixture] Server still responsive after reload failure",
+                    file=sys.stderr,
+                )
             else:
                 print(
-                    f"[api fixture] WARNING: Health check returned {health_response.status_code}"
+                    f"[api fixture] WARNING: Health check returned {health_response.status_code}",
+                    file=sys.stderr,
                 )
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            print(f"[api fixture] ERROR: Server unresponsive after reload failure: {e}")
+            print(
+                f"[api fixture] ERROR: Server unresponsive after reload failure: {e}",
+                file=sys.stderr,
+            )
             # Server is hung - tests will likely fail
             # Could potentially restart the server here, but that's complex
 
