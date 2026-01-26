@@ -15,10 +15,14 @@
 ;;; Version
 
 (defconst org-agenda-api-version
-  (lm-version (or load-file-name
-                  (locate-library "org-agenda-api")
-                  buffer-file-name))
-  "Version of org-agenda-api, read from package header.")
+  (or (getenv "ORG_AGENDA_API_VERSION")
+      (lm-version (or load-file-name
+                      (locate-library "org-agenda-api")
+                      buffer-file-name))
+      "unknown")
+  "Version of org-agenda-api.
+Read from ORG_AGENDA_API_VERSION env var (set at build time by Nix flake),
+or extracted from package header at load time.")
 
 ;;; Logging
 

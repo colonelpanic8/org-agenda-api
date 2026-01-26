@@ -1,4 +1,4 @@
-{ pkgs, emacsWithPackages, gitSyncRs, orgAgendaApiSitelisp, containerInitEl, gitCommit ? "unknown", movaWeb }:
+{ pkgs, emacsWithPackages, gitSyncRs, orgAgendaApiSitelisp, containerInitEl, gitCommit ? "unknown", movaWeb, orgAgendaApiVersion ? "unknown" }:
 
 {
   name ? "org-agenda-api",
@@ -480,6 +480,7 @@ pkgs.dockerTools.buildImage {
       "ORG_INBOX_FILE=/data/org/inbox.org"
       "ORG_API_PORT=${toString port}"
       "ORG_AGENDA_API_GIT_COMMIT=${gitCommit}"
+      "ORG_AGENDA_API_VERSION=${orgAgendaApiVersion}"
       # Worker lifecycle - restart emacs periodically for freshness
       # Emacs exits after completing a request when lifetime is reached
       # Set to empty to disable, or override with your own value

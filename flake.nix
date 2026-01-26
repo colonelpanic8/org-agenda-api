@@ -42,6 +42,12 @@
         # Uses clean rev if available, otherwise dirtyRev for uncommitted changes
         gitCommit = if (self ? rev) then self.rev else self.dirtyRev or "unknown";
 
+        # Extract semantic version from package header (;; Version: X.Y.Z)
+        orgAgendaApiVersion = let
+          content = builtins.readFile ./org-agenda-api.el;
+          matches = builtins.match ".*;; Version: ([0-9]+\\.[0-9]+\\.[0-9]+).*" content;
+        in if matches != null then builtins.head matches else "unknown";
+
         # Mova git commit from flake input
         movaGitCommit = mova.rev or "unknown";
 
@@ -180,7 +186,7 @@
 
         # Import the container builder
         mkContainer = import ./container.nix {
-          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiSitelisp containerInitEl gitCommit movaWeb;
+          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiSitelisp containerInitEl gitCommit movaWeb orgAgendaApiVersion;
         };
 
         # Package an existing emacs config directory (with pre-populated straight/)
