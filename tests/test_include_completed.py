@@ -590,8 +590,9 @@ class TestHabitIncludeCompleted:
         )
 
         # Complete the habit - it will reschedule and go back to TODO
-        # Try completing WITHOUT override_date first to see if LOGBOOK entry is created
-        complete_response = api.complete_todo(habit)
+        # Use override_date=TEST_DATE to ensure the LOGBOOK entry has the fake date
+        # (otherwise it would use the real current time, which wouldn't match our query)
+        complete_response = api.complete_todo(habit, override_date=TEST_DATE)
         assert complete_response.status_code == 200, (
             f"Complete failed: {complete_response.text}"
         )

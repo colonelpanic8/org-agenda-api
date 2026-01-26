@@ -1257,51 +1257,80 @@ Returns a list of integers (minutes before event)."
 
 ;;; Notifications
 
+(defun org-agenda-api--format-notification-time-info (time-info)
+  "Format TIME-INFO plist from org-wild-notifier into JSON-friendly alist."
+  (let ((timestamp-type (plist-get time-info :timestamp-type))
+        (timestamp-string (plist-get time-info :timestamp-string))
+        (time (plist-get time-info :time)))
+    `(("timestampType" . ,(when timestamp-type (symbol-name timestamp-type)))
+      ("timestampString" . ,timestamp-string)
+      ,@(when time
+          `(("time" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" time)))))))
+
+(defun org-agenda-api--get-marker-info (marker)
+  "Extract file, position, and ID from MARKER."
+  (when (and marker (marker-buffer marker))
+    (with-current-buffer (marker-buffer marker)
+      (save-excursion
+        (goto-char (marker-position marker))
+        (let ((file (buffer-file-name))
+              (pos (marker-position marker))
+              (id (org-entry-get nil "ID")))
+          `(("file" . ,file)
+            ("pos" . ,pos)
+            ,@(when id `(("id" . ,id)))))))))
+
 (defun org-agenda-api--get-upcoming-notifications (&optional within-minutes)
   "Get upcoming notifications.
 If WITHIN-MINUTES is provided, filter to notifications within that time window.
-Uses `org-wild-notifier-get-upcoming-notifications' if available.
+Uses `org-wild-notifier-get-upcoming-notifications'.
 Returns a list of notification objects suitable for JSON encoding."
-  (if (fboundp 'org-wild-notifier-get-upcoming-notifications)
-      ;; Use org-wild-notifier's comprehensive notification logic
-      (let* ((now (current-time))
-             (window-end (when within-minutes
-                           (time-add now (seconds-to-time (* within-minutes 60)))))
-             (all-notifications (org-wild-notifier-get-upcoming-notifications))
-             (filtered-notifications
-              (if within-minutes
-                  (cl-remove-if-not
-                   (lambda (notif)
-                     (let ((notify-at (plist-get notif :notify-at)))
-                       (and (not (time-less-p notify-at now))
-                            (time-less-p notify-at window-end))))
-                   all-notifications)
-                ;; No filter - return all future notifications
-                (cl-remove-if
-                 (lambda (notif)
-                   (time-less-p (plist-get notif :notify-at) now))
-                 all-notifications))))
-        (mapcar
-         (lambda (notif)
-           (let ((notify-at (plist-get notif :notify-at))
-                 (event-time (plist-get notif :event-time))
-                 (event-time-string (plist-get notif :event-time-string))
-                 (minutes-before (plist-get notif :minutes-before))
-                 (notif-type (plist-get notif :type))
-                 (title (plist-get notif :title)))
-             `(("title" . ,title)
-               ("notifyAt" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" notify-at))
-               ("type" . ,(symbol-name notif-type))
-               ,@(when event-time
-                   `(("eventTime" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" event-time))))
-               ,@(when event-time-string
-                   `(("eventTimeString" . ,event-time-string)))
-               ,@(when minutes-before
-                   `(("minutesBefore" . ,minutes-before))))))
-         filtered-notifications))
-    ;; Fallback if org-wild-notifier is not available
-    (org-agenda-api--log 'warn "org-wild-notifier not available, notifications endpoint disabled")
-    nil))
+  (let* ((now (current-time))
+         (window-end (when within-minutes
+                       (time-add now (seconds-to-time (* within-minutes 60)))))
+         (all-notifications (org-wild-notifier-get-upcoming-notifications))
+         (filtered-notifications
+          (if within-minutes
+              (cl-remove-if-not
+               (lambda (notif)
+                 (let ((notify-at (plist-get notif :notify-at)))
+                   (and (not (time-less-p notify-at now))
+                        (time-less-p notify-at window-end))))
+               all-notifications)
+            ;; No filter - return all future notifications
+            (cl-remove-if
+             (lambda (notif)
+               (time-less-p (plist-get notif :notify-at) now))
+             all-notifications))))
+    (mapcar
+     (lambda (notif)
+       (let* ((notify-at (plist-get notif :notify-at))
+              (event-time (plist-get notif :event-time))
+              (event-time-string (plist-get notif :event-time-string))
+              (minutes-before (plist-get notif :minutes-before))
+              (notif-type (plist-get notif :type))
+              (timestamp-type (plist-get notif :timestamp-type))
+              (title (plist-get notif :title))
+              (marker (plist-get notif :marker))
+              (event (plist-get notif :event))
+              (marker-info (org-agenda-api--get-marker-info marker))
+              (all-times (cadr (assoc 'times event))))
+         `(("title" . ,title)
+           ("notifyAt" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" notify-at))
+           ("type" . ,(symbol-name notif-type))
+           ,@(when timestamp-type
+               `(("timestampType" . ,(symbol-name timestamp-type))))
+           ,@(when event-time
+               `(("eventTime" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" event-time))))
+           ,@(when event-time-string
+               `(("eventTimeString" . ,event-time-string)))
+           ,@(when minutes-before
+               `(("minutesBefore" . ,minutes-before)))
+           ,@marker-info
+           ,@(when all-times
+               `(("allTimes" . ,(vconcat (mapcar #'org-agenda-api--format-notification-time-info
+                                                  all-times))))))))
+     filtered-notifications)))
 
 (provide 'org-agenda-api-data)
 ;;; org-agenda-api-data.el ends here

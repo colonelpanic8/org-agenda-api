@@ -27,6 +27,11 @@
 (require 'org-agenda)
 (require 'simple-httpd)
 
+;; org-wild-notifier is optional - only load if available
+;; It provides notification-related features
+(when (require 'org-wild-notifier nil t)
+  (message "org-wild-notifier loaded"))
+
 ;; Override calendar-current-date and org-today BEFORE loading org-agenda-api
 ;; and BEFORE setting org-agenda-files. This ensures all date-related
 ;; operations use the fake date for deterministic tests.
@@ -51,6 +56,9 @@
 ;; Now load org-agenda-api (after date overrides are in place)
 (require 'org-agenda-api)
 
+;; Debug logging can cause performance issues/hangs, so leave at default level
+;; (setq org-agenda-api-log-level 'debug)
+
 ;; Load the window-habit integration module if org-window-habit is available
 (when (require 'org-window-habit nil t)
   (require 'org-agenda-api-window-habit)
@@ -74,6 +82,10 @@
 ;; Enable CLOSED timestamp when completing TODOs
 ;; This is required for include_completed feature to work correctly
 (setq org-log-done 'time)
+
+;; Enable logging for repeating tasks (habits)
+;; This creates LOGBOOK entries when completing repeating tasks
+(setq org-log-repeat 'time)
 
 ;; Configure custom agenda commands for testing
 (setq org-agenda-custom-commands

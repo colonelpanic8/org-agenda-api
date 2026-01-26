@@ -250,6 +250,16 @@ class APIClient:
             return self.get(f"/notifications?within={within}")
         return self.get("/notifications")
 
+    def reload(self, timeout: float = 10.0) -> requests.Response:
+        """GET /reload - Reload all org files from disk and invalidate cache.
+
+        Useful for testing when files are modified externally (e.g., git reset).
+
+        Args:
+            timeout: Request timeout in seconds (default 10s)
+        """
+        return self.get("/reload", timeout=timeout)
+
     def delete_logbook_entry(
         self, todo: dict, date: str, entry_type: str = None
     ) -> requests.Response:
@@ -396,14 +406,15 @@ def org_test_dir(tmp_path_factory):
   Just a regular task with no body timestamps.
 """)
 
-    # Create habits file for window habit tests
+    # Create window habits file for window habit tests
+    # (named differently from fixtures/habits.org to avoid overwriting it)
     # This habit was completed yesterday and has a deadline for today
     # Note: org-window-habit requires OWH_ prefixed property names
     # Note: org-window-habit uses DEADLINE by default (org-window-habit-repeat-to-deadline is t)
-    habits_org = test_dir / "habits.org"
-    habits_org.write_text(
+    window_habits_org = test_dir / "window_habits.org"
+    window_habits_org.write_text(
         f"""\
-#+TITLE: Test Habits
+#+TITLE: Test Window Habits
 
 * TODO Test Window Habit
   DEADLINE: <{TEST_DATE_ORG} .+1d>
@@ -436,6 +447,90 @@ def org_test_dir(tmp_path_factory):
 """
     )
 
+    # Create notifications test file with various notification types
+    notifications_org = test_dir / "notifications.org"
+    notifications_org.write_text(
+        f"""\
+#+TITLE: Notification Tests
+
+* TODO Task with timed deadline for relative notification
+  DEADLINE: <{TEST_DATE_ORG} 14:00>
+  :PROPERTIES:
+  :ID: notif-relative-deadline
+  :END:
+  This task has a deadline with a specific time, should trigger relative notifications.
+
+* TODO Task with timed schedule for relative notification
+  SCHEDULED: <{TEST_DATE_ORG} 15:30>
+  :PROPERTIES:
+  :ID: notif-relative-scheduled
+  :END:
+  This task has a scheduled time, should trigger relative notifications.
+
+* TODO Task with explicit notify-at time
+  SCHEDULED: <{TEST_DATE_ORG} 18:00>
+  :PROPERTIES:
+  :ID: notif-absolute
+  :WILD_NOTIFIER_NOTIFY_AT: <{TEST_DATE_ORG} 12:00>
+  :END:
+  This task has an explicit NOTIFY_AT time for absolute notification.
+
+* TODO Task with multiple notify-at times
+  SCHEDULED: <{TEST_DATE_ORG} 20:00>
+  :PROPERTIES:
+  :ID: notif-absolute-multiple
+  :WILD_NOTIFIER_NOTIFY_AT: <{TEST_DATE_ORG} 11:00> <{TEST_DATE_ORG} 13:00>
+  :END:
+  This task has multiple explicit NOTIFY_AT times.
+
+* TODO Day-wide task without specific time
+  SCHEDULED: <{TEST_DATE_ORG}>
+  :PROPERTIES:
+  :ID: notif-day-wide
+  :END:
+  This task is scheduled for today but has no specific time (day-wide).
+
+* TODO Task with custom notify-before intervals
+  DEADLINE: <{TEST_DATE_ORG} 16:00>
+  :PROPERTIES:
+  :ID: notif-custom-intervals
+  :WILD_NOTIFIER_NOTIFY_BEFORE: 5 30 60
+  :END:
+  This task has custom notification intervals: 5, 30, and 60 minutes before.
+"""
+    )
+
+    # Initialize git repo for fixture reset between tests
+    subprocess.run(
+        ["git", "init"],
+        cwd=test_dir,
+        capture_output=True,
+        check=True,
+    )
+    # Configure git user for commits (required for some systems)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=test_dir,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=test_dir,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "add", "."],
+        cwd=test_dir,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "Initial fixtures"],
+        cwd=test_dir,
+        capture_output=True,
+        check=True,
+    )
+
     return test_dir
 
 
@@ -463,9 +558,37 @@ def emacs_server(org_test_dir, inbox_file):
 
 
 @pytest.fixture
-def api(emacs_server) -> APIClient:
-    """HTTP client for making API requests."""
-    return APIClient(emacs_server.base_url)
+def api(emacs_server, org_test_dir) -> APIClient:
+    """HTTP client for making API requests.
+
+    Note: git reset + reload is disabled for now because it causes
+    /get-all-todos to hang in the pytest environment (but works fine
+    in standalone scripts). This means tests may have order dependencies.
+
+    TODO: Investigate why pytest environment behaves differently.
+    """
+    # Disabled - causes tests to hang in pytest environment
+    # subprocess.run(
+    #     ["git", "reset", "--hard", "HEAD"],
+    #     cwd=org_test_dir,
+    #     capture_output=True,
+    # )
+    # subprocess.run(
+    #     ["git", "clean", "-fd"],
+    #     cwd=org_test_dir,
+    #     capture_output=True,
+    # )
+    client = APIClient(emacs_server.base_url)
+    # Disabled - causes /get-all-todos to hang after reload
+    # try:
+    #     reload_response = client.reload(timeout=5.0)
+    #     if reload_response.status_code != 200:
+    #         print(f"[api fixture] WARNING: /reload returned {reload_response.status_code}")
+    # except requests.exceptions.Timeout:
+    #     print("[api fixture] WARNING: /reload timed out, continuing without reload")
+    # except requests.exceptions.ConnectionError as e:
+    #     print(f"[api fixture] WARNING: /reload connection error: {e}")
+    return client
 
 
 @pytest.fixture

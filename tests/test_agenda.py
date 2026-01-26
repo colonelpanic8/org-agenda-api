@@ -647,10 +647,11 @@ class TestAgendaIncludeOverdueParameter:
 
         titles = [entry.get("title", "").lower() for entry in data["entries"]]
 
-        # The overdue task from yesterday should NOT appear
-        assert not any("yesterday" in t for t in titles), (
+        # The overdue task "Task scheduled for yesterday" should NOT appear
+        # (but habits with "yesterday" in their name that are due today can appear)
+        assert not any("scheduled for yesterday" in t for t in titles), (
             f"With include_overdue=false (default), overdue items should not appear. "
-            f"Found 'yesterday' in titles: {titles}"
+            f"Found 'scheduled for yesterday' in titles: {titles}"
         )
 
     def test_include_overdue_true_includes_overdue_items(self, api):
@@ -664,8 +665,8 @@ class TestAgendaIncludeOverdueParameter:
 
         titles = [entry.get("title", "").lower() for entry in data["entries"]]
 
-        # The overdue task from yesterday SHOULD appear
-        assert any("yesterday" in t for t in titles), (
+        # The overdue task "Task scheduled for yesterday" SHOULD appear
+        assert any("scheduled for yesterday" in t for t in titles), (
             f"With include_overdue=true, overdue items should appear. "
             f"Expected 'Task scheduled for yesterday' in agenda. "
             f"Found titles: {titles}"
@@ -682,10 +683,11 @@ class TestAgendaIncludeOverdueParameter:
 
         titles = [entry.get("title", "").lower() for entry in data["entries"]]
 
-        # The overdue task from yesterday should NOT appear
-        assert not any("yesterday" in t for t in titles), (
+        # The overdue task "Task scheduled for yesterday" should NOT appear
+        # (but habits with "yesterday" in their name that are due today can appear)
+        assert not any("scheduled for yesterday" in t for t in titles), (
             f"With include_overdue=false, overdue items should not appear. "
-            f"Found 'yesterday' in titles: {titles}"
+            f"Found 'scheduled for yesterday' in titles: {titles}"
         )
 
     def test_include_overdue_still_shows_items_for_query_date(self, api):

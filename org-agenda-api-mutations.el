@@ -13,6 +13,36 @@
 (require 'org-agenda-api-core)
 (require 'org-agenda-api-data)
 
+(defun org-agenda-api--add-logbook-state-change (old-state new-state &optional time)
+  "Add a state change entry to the LOGBOOK drawer.
+OLD-STATE and NEW-STATE are the state strings.
+TIME is an optional encoded time (defaults to current time).
+Must be called with point at an org heading."
+  (let* ((time (or time (current-time)))
+         (time-str (format-time-string "[%Y-%m-%d %a %H:%M]" time))
+         (entry (format "- State %-13s from %-13s %s"
+                        (format "\"%s\"" new-state)
+                        (format "\"%s\"" old-state)
+                        time-str))
+         (drawer-name (or (and (boundp 'org-log-into-drawer)
+                               (stringp org-log-into-drawer)
+                               org-log-into-drawer)
+                          "LOGBOOK")))
+    (save-excursion
+      (org-back-to-heading t)
+      (let ((end-of-heading (save-excursion (outline-next-heading) (point))))
+        ;; Look for existing LOGBOOK drawer
+        (if (re-search-forward
+             (format "^[ \t]*:%s:[ \t]*$" (regexp-quote drawer-name))
+             end-of-heading t)
+            ;; Found existing drawer - insert at beginning
+            (progn
+              (forward-line 1)
+              (insert "  " entry "\n"))
+          ;; No drawer - create one after heading and properties
+          (org-end-of-meta-data t)
+          (insert "  :" drawer-name ":\n  " entry "\n  :END:\n"))))))
+
 (defun org-agenda-api--extract-logbook-entry-timestamp (entry-text)
   "Extract timestamp from ENTRY-TEXT (a logbook entry string).
 Returns an encoded time value for sorting, or nil if no timestamp found."
@@ -106,7 +136,9 @@ OVERRIDE-DATE, if provided, should be an encoded time value that will be used
 as the effective date for the state change (affects LOGBOOK timestamps).
 Returns alist with status and details."
   (let ((new-state (or new-state "DONE")))
-    (with-current-buffer (find-file-noselect file)
+    (with-current-buffer (find-file-noselect file t)  ; t = suppress warnings
+      ;; Force re-read from disk to avoid stale buffer issues
+      (revert-buffer t t t)
       (save-excursion
         (goto-char pos)
         (if (org-at-heading-p)
@@ -137,6 +169,8 @@ Returns alist with status and details."
                   ;; (LOGBOOK entries). In non-interactive contexts, org-add-log-note
                   ;; is added to post-command-hook but never runs without this.
                   (run-hooks 'post-command-hook)))
+              ;; Force save to disk using save-buffer (simpler, handles file modes correctly)
+              (set-buffer-modified-p t)
               (save-buffer)
               (org-agenda-api--invalidate-cache)
               ;; Check if this is a window-habit and get summary if so

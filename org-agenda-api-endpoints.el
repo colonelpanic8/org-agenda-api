@@ -388,9 +388,14 @@ Accepts JSON body with:
                                        (not (string-empty-p override-date-str)))
                               (org-agenda-api--parse-datetime override-date-str)))
              (location nil))
-        ;; Try to find by ID first
-        (setq location (org-agenda-api--find-todo-by-id id))
-        ;; Fall back to file+pos+title (includes lenient matching)
+        ;; If both file+pos AND id are provided, prefer file+pos since it's more
+        ;; reliable (org-id-find can return stale cached paths from previous runs)
+        (when (and file pos)
+          (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
+        ;; Fall back to ID lookup if file+pos wasn't found or not provided
+        (unless location
+          (setq location (org-agenda-api--find-todo-by-id id)))
+        ;; Fall back to file+title (for when position drifted)
         (unless location
           (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
         ;; Fall back to file+title strict match (handles position drift)
@@ -638,6 +643,28 @@ Exits gracefully, allowing supervisord to restart the process."
   (insert (json-encode `(("status" . "restarting"))))
   ;; Use run-at-time to allow the response to be sent before exiting
   (run-at-time 0.1 nil #'kill-emacs 0))
+
+(defservlet reload application/json ()
+  "Endpoint: Reload all org files from disk and invalidate cache.
+Useful for testing when files are modified externally (e.g., git reset).
+Kills all org-agenda-files buffers (they'll be re-read on next access)
+and clears the todo cache."
+  (let ((killed-count 0))
+    ;; Kill all org-agenda-files buffers so they'll be re-read from disk
+    (dolist (file (org-agenda-files))
+      (let ((buf (get-file-buffer file)))
+        (when buf
+          (with-current-buffer buf
+            ;; Mark buffer as not modified to avoid save prompts
+            (set-buffer-modified-p nil))
+          (kill-buffer buf)
+          (setq killed-count (1+ killed-count)))))
+    ;; Invalidate the cache
+    (org-agenda-api--invalidate-cache)
+    ;; Return status
+    (insert (json-encode
+             `(("status" . "ok")
+               ("killedBuffers" . ,killed-count))))))
 
 (provide 'org-agenda-api-endpoints)
 ;;; org-agenda-api-endpoints.el ends here
