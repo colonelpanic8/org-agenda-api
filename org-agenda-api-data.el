@@ -1280,6 +1280,30 @@ Returns a list of integers (minutes before event)."
             ("pos" . ,pos)
             ,@(when id `(("id" . ,id)))))))))
 
+(defun org-wild-notifier-get-upcoming-notifications ()
+  "Get all upcoming notifications from org-agenda.
+Returns a list of notification plists from org-wild-notifier.
+This function is implemented here because org-wild-notifier doesn't
+provide a public API for querying future notifications."
+  (unless (fboundp 'org-wild-notifier--get-notifications-for-event)
+    (error "org-wild-notifier is not available"))
+  (let ((notifications nil)
+        (now (current-time))
+        ;; Get events for today and tomorrow to cover upcoming notifications
+        (events (org-wild-notifier--retrieve-events)))
+    (dolist (event events)
+      (let ((event-notifications (org-wild-notifier--get-notifications-for-event event)))
+        (dolist (notif event-notifications)
+          (let ((notify-at (plist-get notif :notify-at)))
+            ;; Only include future notifications
+            (when (time-less-p now notify-at)
+              (push notif notifications))))))
+    ;; Sort by notification time
+    (sort notifications
+          (lambda (a b)
+            (time-less-p (plist-get a :notify-at)
+                         (plist-get b :notify-at))))))
+
 (defun org-agenda-api--get-upcoming-notifications (&optional within-minutes)
   "Get upcoming notifications.
 If WITHIN-MINUTES is provided, filter to notifications within that time window.
