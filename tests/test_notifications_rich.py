@@ -1,7 +1,5 @@
 """Integration tests for rich notification information from /notifications endpoint."""
 
-import pytest
-
 
 class TestNotificationTypes:
     """Tests for different notification types (relative, absolute, day-wide)."""
@@ -13,7 +11,8 @@ class TestNotificationTypes:
 
         # Find notifications for our test task with deadline
         deadline_notifs = [
-            n for n in data["notifications"]
+            n
+            for n in data["notifications"]
             if "notif-relative-deadline" in n.get("id", "")
             or "timed deadline" in n.get("title", "")
         ]
@@ -35,7 +34,8 @@ class TestNotificationTypes:
 
         # Find notifications for scheduled task
         scheduled_notifs = [
-            n for n in data["notifications"]
+            n
+            for n in data["notifications"]
             if "notif-relative-scheduled" in n.get("id", "")
             or "timed schedule" in n.get("title", "")
         ]
@@ -100,8 +100,7 @@ class TestNotificationRichFields:
 
         # Find notifications that should have IDs (from our test fixtures)
         notifs_with_expected_id = [
-            n for n in data["notifications"]
-            if "notif-" in n.get("id", "")
+            n for n in data["notifications"] if "notif-" in n.get("id", "")
         ]
 
         if notifs_with_expected_id:
@@ -134,11 +133,17 @@ class TestNotificationRichFields:
 
         if relative_notifs and relative_notifs[0].get("allTimes"):
             time_info = relative_notifs[0]["allTimes"][0]
-            assert "timestampType" in time_info, "allTimes entry should have timestampType"
-            assert "timestampString" in time_info, "allTimes entry should have timestampString"
-            assert time_info["timestampType"] in ("deadline", "scheduled", "timestamp"), (
-                f"Invalid timestampType: {time_info['timestampType']}"
+            assert "timestampType" in time_info, (
+                "allTimes entry should have timestampType"
             )
+            assert "timestampString" in time_info, (
+                "allTimes entry should have timestampString"
+            )
+            assert time_info["timestampType"] in (
+                "deadline",
+                "scheduled",
+                "timestamp",
+            ), f"Invalid timestampType: {time_info['timestampType']}"
 
     def test_notify_at_is_iso_format(self, api):
         """notifyAt should be in ISO 8601 format."""
@@ -220,8 +225,7 @@ class TestTimestampTypeField:
         data = response.json()
 
         deadline_notifs = [
-            n for n in data["notifications"]
-            if n.get("timestampType") == "deadline"
+            n for n in data["notifications"] if n.get("timestampType") == "deadline"
         ]
 
         for notif in deadline_notifs:
@@ -254,8 +258,6 @@ class TestMinutesBeforeField:
         response = api.get_notifications(within=1440)
         data = response.json()
 
-        default_intervals = set(data["defaultNotifyBefore"])
-
         relative_notifs = [n for n in data["notifications"] if n["type"] == "relative"]
 
         # At minimum, some notifications should use default intervals
@@ -264,7 +266,9 @@ class TestMinutesBeforeField:
 
         # There should be some overlap with defaults (unless all have custom intervals)
         # This is a loose check since custom intervals are possible
-        if relative_notifs and not any("custom" in n.get("title", "").lower() for n in relative_notifs):
+        if relative_notifs and not any(
+            "custom" in n.get("title", "").lower() for n in relative_notifs
+        ):
             assert minutes_values, "Should have some minutesBefore values"
 
 
@@ -279,7 +283,8 @@ class TestNotificationConsistency:
         data = response.json()
 
         relative_notifs = [
-            n for n in data["notifications"]
+            n
+            for n in data["notifications"]
             if n["type"] == "relative" and n.get("eventTime")
         ]
 

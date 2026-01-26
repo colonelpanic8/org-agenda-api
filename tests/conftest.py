@@ -586,7 +586,9 @@ def api(emacs_server, org_test_dir) -> APIClient:
     try:
         reload_response = client.reload(timeout=5.0)
         if reload_response.status_code != 200:
-            print(f"[api fixture] WARNING: /reload returned {reload_response.status_code}")
+            print(
+                f"[api fixture] WARNING: /reload returned {reload_response.status_code}"
+            )
     except requests.exceptions.Timeout:
         print("[api fixture] WARNING: /reload timed out, continuing without reload")
     except requests.exceptions.ConnectionError as e:
