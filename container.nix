@@ -421,6 +421,7 @@ pkgs.dockerTools.buildImage {
       pkgs.jq
       pkgs.cacert
       pkgs.python3Packages.supervisor
+      pkgs.tzdata
       gitSyncRs
       # QoL tools for interactive use
       pkgs.less
@@ -463,6 +464,8 @@ pkgs.dockerTools.buildImage {
       "/secrets" = {};
     };
     Env = [
+      # Timezone data for TZ environment variable support
+      "TZDIR=${pkgs.tzdata}/share/zoneinfo"
       # Global PATH for interactive shells (SSH, exec)
       "PATH=/bin"
       # Editor preference
