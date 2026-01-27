@@ -63,6 +63,8 @@ class EmacsServer:
         env["ORG_AGENDA_API_TEST_INBOX"] = str(self.inbox_file)
         env["ORG_AGENDA_API_PACKAGE_DIR"] = str(PROJECT_ROOT)
         env["ORG_AGENDA_API_TEST_FAKE_DATE"] = self.fake_date
+        # Use a timezone with DST to properly test DST-related bugs
+        env["TZ"] = "America/Los_Angeles"
 
         script_path = PROJECT_ROOT / "scripts" / "run-emacs-server.el"
 
@@ -259,6 +261,26 @@ class APIClient:
         if date is not None:
             params += f"&date={date}"
         return self.get(f"/habit-status{params}")
+
+    def get_all_habit_statuses(
+        self, preceding: int = None, following: int = None, date: str = None
+    ) -> requests.Response:
+        """GET /all-habit-statuses with optional range parameters.
+
+        Args:
+            preceding: Number of intervals before reference date
+            following: Number of intervals after reference date
+            date: Reference date as YYYY-MM-DD (default: today)
+        """
+        params = []
+        if preceding is not None:
+            params.append(f"preceding={preceding}")
+        if following is not None:
+            params.append(f"following={following}")
+        if date is not None:
+            params.append(f"date={date}")
+        query = f"?{'&'.join(params)}" if params else ""
+        return self.get(f"/all-habit-statuses{query}")
 
     def get_notifications(self, as_of: str = None) -> requests.Response:
         """GET /notifications with optional asOf parameter (ISO datetime)."""

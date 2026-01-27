@@ -295,6 +295,67 @@ Accepts query params:
                               ("message" . ,(error-message-string err)))))))
     (org-agenda-api--track-request))
 
+  (defun org-agenda-api--find-all-habits ()
+    "Find all org-window-habit entries in agenda files.
+Returns a list of (id . title) cons cells for each habit found."
+    (let ((results nil))
+      (dolist (file org-agenda-files)
+        (when (file-exists-p file)
+          (with-current-buffer (find-file-noselect file)
+            (save-excursion
+              (goto-char (point-min))
+              (while (re-search-forward org-heading-regexp nil t)
+                (when (and (org-at-heading-p)
+                           (org-agenda-api--is-window-habit-p))
+                  (let ((id (org-id-get))
+                        (title (org-get-heading t t t t)))
+                    (when id
+                      (push (cons id title) results)))))))))
+      (nreverse results)))
+
+  (defun org-agenda-api--all-habit-statuses-impl (preceding following &optional reference-time)
+    "Build all habit statuses response with PRECEDING and FOLLOWING params.
+REFERENCE-TIME is the time to use as \"today\" (default current-time).
+Returns a JSON-encodable alist with status for all habits."
+    (let ((habits (org-agenda-api--find-all-habits))
+          (habit-results nil))
+      (dolist (habit-entry habits)
+        (let* ((id (car habit-entry))
+               (result (condition-case err
+                           (org-agenda-api--habit-status-impl id preceding following reference-time)
+                         (error
+                          `(("id" . ,id)
+                            ("error" . ,(error-message-string err)))))))
+          ;; Only include if we got data (status ok) or error
+          (push result habit-results)))
+      `(("status" . "ok")
+        ("habits" . ,(vconcat (nreverse habit-results))))))
+
+  (defservlet all-habit-statuses application/json (_path query)
+    "Endpoint: Return detailed status for all habits.
+Accepts query params:
+  - 'preceding' (optional, default 21): intervals before today
+  - 'following' (optional, default 4): intervals after today
+  - 'date' (optional): reference date as YYYY-MM-DD (default: today)"
+    (condition-case err
+        (let* ((preceding (let ((p (cadr (assoc "preceding" query))))
+                            (when p (string-to-number p))))
+               (following (let ((f (cadr (assoc "following" query))))
+                            (when f (string-to-number f))))
+               (date-str (cadr (assoc "date" query)))
+               (reference-time (when date-str
+                                 (org-agenda-api--parse-datetime date-str))))
+          (insert
+           (json-encode
+            (if (not (org-agenda-api--window-habit-available-p))
+                `(("status" . "error") ("message" . "org-window-habit-mode is not enabled"))
+              (org-agenda-api--all-habit-statuses-impl preceding following reference-time)))))
+      (error
+       (org-agenda-api--log-error-with-backtrace "/all-habit-statuses" err)
+       (insert (json-encode `(("status" . "error")
+                              ("message" . ,(error-message-string err)))))))
+    (org-agenda-api--track-request))
+
   ;; Log that the module is loaded
   (org-agenda-api--log 'info "org-window-habit integration module loaded"))
 
