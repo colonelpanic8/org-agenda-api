@@ -82,11 +82,11 @@
     "mova": {
       "flake": false,
       "locked": {
-        "lastModified": 1769529901,
-        "narHash": "sha256-omiveT9M2MiFdfSsBlsUKNTeq1RKQi3z3UNm1mZ3uek=",
+        "lastModified": 1769533327,
+        "narHash": "sha256-AXRnS5I067kMLroj0aQOjF2HsKryoeNHJVuWaNQWccQ=",
         "owner": "colonelpanic8",
         "repo": "mova",
-        "rev": "21637b4a760d11db35f63fe15493dcabe8b11f77",
+        "rev": "16f4815d0c686fa1096e1993c234b4851d99ef8e",
         "type": "github"
       },
       "original": {
