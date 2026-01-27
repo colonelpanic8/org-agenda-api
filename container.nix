@@ -83,9 +83,8 @@ let
           # Handle preflight OPTIONS request
           if ($request_method = 'OPTIONS') {
             add_header 'Access-Control-Allow-Origin' '*' always;
-            add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
-            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Allow-Methods' '*' always;
+            add_header 'Access-Control-Allow-Headers' '*' always;
             add_header 'Access-Control-Max-Age' 86400 always;
             add_header 'Content-Length' 0;
             add_header 'Content-Type' 'text/plain';
@@ -97,10 +96,9 @@ let
 
           # CORS headers for actual requests
           add_header 'Access-Control-Allow-Origin' '*' always;
-          add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
-          add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
-          add_header 'Access-Control-Allow-Credentials' 'true' always;
-          add_header 'Access-Control-Expose-Headers' 'Content-Length, Content-Type, X-Request-Id' always;
+          add_header 'Access-Control-Allow-Methods' '*' always;
+          add_header 'Access-Control-Allow-Headers' '*' always;
+          add_header 'Access-Control-Expose-Headers' '*' always;
         }
 
         # API endpoints - proxy to emacs with auth
@@ -109,9 +107,8 @@ let
           # Handle preflight OPTIONS request (before auth check)
           if ($request_method = 'OPTIONS') {
             add_header 'Access-Control-Allow-Origin' '*' always;
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
-            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Allow-Methods' '*' always;
+            add_header 'Access-Control-Allow-Headers' '*' always;
             add_header 'Access-Control-Max-Age' 86400 always;
             add_header 'Content-Length' 0;
             add_header 'Content-Type' 'text/plain';
@@ -136,10 +133,9 @@ let
 
           # CORS headers for actual requests
           add_header 'Access-Control-Allow-Origin' '*' always;
-          add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
-          add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
-          add_header 'Access-Control-Allow-Credentials' 'true' always;
-          add_header 'Access-Control-Expose-Headers' 'Content-Length, Content-Type, X-Request-Id' always;
+          add_header 'Access-Control-Allow-Methods' '*' always;
+          add_header 'Access-Control-Allow-Headers' '*' always;
+          add_header 'Access-Control-Expose-Headers' '*' always;
         }
 
         # Static files - serve mova web app (no auth)
