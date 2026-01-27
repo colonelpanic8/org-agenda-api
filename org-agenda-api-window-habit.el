@@ -95,29 +95,46 @@ Returns a list of (file . pos) cons cells for each matching habit."
       (org-agenda-api--log 'debug "get-habits-completed-on-date: found %d results" (length results))
       (nreverse results)))
 
+  (defun org-agenda-api--format-window-spec-status (spec-status)
+    "Format a single window spec status alist for JSON output.
+Converts time values to ISO strings and plist to alist."
+    (let ((duration (cdr (assoc "duration" spec-status)))
+          (window-start (cdr (assoc "windowStart" spec-status)))
+          (window-end (cdr (assoc "windowEnd" spec-status))))
+      `(("conformingRatio" . ,(cdr (assoc "conformingRatio" spec-status)))
+        ("completionsInWindow" . ,(cdr (assoc "completionsInWindow" spec-status)))
+        ("targetRepetitions" . ,(cdr (assoc "targetRepetitions" spec-status)))
+        ("duration" . ,(org-agenda-api--plist-to-alist duration))
+        ("conformingValue" . ,(cdr (assoc "conformingValue" spec-status)))
+        ("windowStart" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" window-start))
+        ("windowEnd" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" window-end)))))
+
   (defun org-agenda-api--get-habit-summary ()
     "Get habit summary for the entry at point.
 Returns an alist suitable for JSON encoding, or nil if not a window-habit."
     (when (org-agenda-api--is-window-habit-p)
       (condition-case err
           (let* ((habit (org-window-habit-create-instance-from-heading-at-point))
-                 (window-specs (oref habit window-specs))
-                 (first-spec (car window-specs))
-                 (iterator (org-window-habit-iterator-from-time first-spec))
-                 (conforming-ratio (org-window-habit-conforming-ratio iterator))
                  (next-required (org-window-habit-get-next-required-interval habit))
+                 ;; Get per-window-spec conforming data using new function
+                 (specs-status (org-window-habit-get-window-specs-status habit))
+                 (window-specs-status (cdr (assoc "windowSpecsStatus" specs-status)))
+                 (aggregated-ratio (cdr (assoc "aggregatedConformingRatio" specs-status)))
+                 ;; Format each window spec status for JSON
+                 (formatted-specs (vconcat
+                                   (mapcar #'org-agenda-api--format-window-spec-status
+                                           window-specs-status)))
+                 ;; Get first spec's window for completion-needed-today check
+                 (first-spec (car (oref habit window-specs)))
+                 (iterator (org-window-habit-iterator-from-time first-spec))
                  (window (oref iterator window))
-                 (start-index (oref iterator start-index))
-                 (end-index (oref iterator end-index))
-                 (completions-in-window (- end-index start-index))
-                 (target-reps (oref first-spec target-repetitions))
                  (completion-needed-today
                   (org-window-habit-time-falls-in-assessment-interval window next-required)))
-            `(("conformingRatio" . ,conforming-ratio)
+            `(("conformingRatio" . ,aggregated-ratio)  ; backwards compatibility
+              ("aggregatedConformingRatio" . ,aggregated-ratio)
+              ("windowSpecsStatus" . ,formatted-specs)
               ("completionNeededToday" . ,(if completion-needed-today t :json-false))
-              ("nextRequiredInterval" . ,(format-time-string "%Y-%m-%d" next-required))
-              ("completionsInWindow" . ,completions-in-window)
-              ("targetRepetitions" . ,target-reps)))
+              ("nextRequiredInterval" . ,(format-time-string "%Y-%m-%d" next-required))))
         (error
          (org-agenda-api--log 'warn "Failed to get habit summary: %s" (error-message-string err))
          nil))))

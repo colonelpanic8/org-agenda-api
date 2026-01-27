@@ -97,3 +97,124 @@ class TestHabitStatus:
         data = response.json()
         done_times = data.get("doneTimes")
         assert isinstance(done_times, list)
+
+
+class TestWindowSpecsStatus:
+    """Tests for per-window-spec conforming data in habit status."""
+
+    def test_current_state_has_window_specs_status(self, api):
+        """Current state should contain windowSpecsStatus array."""
+        response = api.get_habit_status("habit-exercise-daily")
+        data = response.json()
+        state = data.get("currentState", {})
+        assert "windowSpecsStatus" in state
+        assert isinstance(state["windowSpecsStatus"], list)
+
+    def test_current_state_has_aggregated_ratio(self, api):
+        """Current state should contain aggregatedConformingRatio."""
+        response = api.get_habit_status("habit-exercise-daily")
+        data = response.json()
+        state = data.get("currentState", {})
+        assert "aggregatedConformingRatio" in state
+        ratio = state["aggregatedConformingRatio"]
+        assert isinstance(ratio, (int, float))
+        assert 0 <= ratio <= 1
+
+    def test_window_spec_status_has_required_fields(self, api):
+        """Each window spec status should have all required fields."""
+        response = api.get_habit_status("habit-exercise-daily")
+        data = response.json()
+        state = data.get("currentState", {})
+        specs_status = state.get("windowSpecsStatus", [])
+
+        assert len(specs_status) > 0, "Should have at least one window spec status"
+
+        for spec_status in specs_status:
+            assert "conformingRatio" in spec_status
+            assert "completionsInWindow" in spec_status
+            assert "targetRepetitions" in spec_status
+            assert "duration" in spec_status
+            assert "windowStart" in spec_status
+            assert "windowEnd" in spec_status
+
+    def test_window_spec_conforming_ratio_is_valid(self, api):
+        """Each window spec's conforming ratio should be between 0 and 1."""
+        response = api.get_habit_status("habit-exercise-daily")
+        data = response.json()
+        state = data.get("currentState", {})
+        specs_status = state.get("windowSpecsStatus", [])
+
+        for spec_status in specs_status:
+            ratio = spec_status.get("conformingRatio")
+            assert ratio is not None
+            assert 0 <= ratio <= 1
+
+    def test_window_spec_completions_is_non_negative(self, api):
+        """Completions in window should be non-negative integer."""
+        response = api.get_habit_status("habit-exercise-daily")
+        data = response.json()
+        state = data.get("currentState", {})
+        specs_status = state.get("windowSpecsStatus", [])
+
+        for spec_status in specs_status:
+            completions = spec_status.get("completionsInWindow")
+            assert isinstance(completions, int)
+            assert completions >= 0
+
+    def test_window_spec_target_is_positive(self, api):
+        """Target repetitions should be a positive integer."""
+        response = api.get_habit_status("habit-exercise-daily")
+        data = response.json()
+        state = data.get("currentState", {})
+        specs_status = state.get("windowSpecsStatus", [])
+
+        for spec_status in specs_status:
+            target = spec_status.get("targetRepetitions")
+            assert isinstance(target, int)
+            assert target > 0
+
+    def test_window_spec_duration_is_dict(self, api):
+        """Duration should be a dictionary with duration units."""
+        response = api.get_habit_status("habit-exercise-daily")
+        data = response.json()
+        state = data.get("currentState", {})
+        specs_status = state.get("windowSpecsStatus", [])
+
+        for spec_status in specs_status:
+            duration = spec_status.get("duration")
+            assert isinstance(duration, dict)
+            # Should have at least one duration key like "days", "weeks", etc.
+            assert len(duration) > 0
+
+    def test_window_times_are_iso_strings(self, api):
+        """Window start and end times should be ISO format strings."""
+        response = api.get_habit_status("habit-exercise-daily")
+        data = response.json()
+        state = data.get("currentState", {})
+        specs_status = state.get("windowSpecsStatus", [])
+
+        for spec_status in specs_status:
+            window_start = spec_status.get("windowStart")
+            window_end = spec_status.get("windowEnd")
+            assert isinstance(window_start, str)
+            assert isinstance(window_end, str)
+            # Basic ISO format check (YYYY-MM-DDTHH:MM:SS)
+            assert "T" in window_start
+            assert "T" in window_end
+
+    def test_conforming_ratio_matches_completions_divided_by_target(self, api):
+        """Conforming ratio should approximately equal completions/target (clamped to 1)."""
+        response = api.get_habit_status("habit-exercise-daily")
+        data = response.json()
+        state = data.get("currentState", {})
+        specs_status = state.get("windowSpecsStatus", [])
+
+        for spec_status in specs_status:
+            completions = spec_status.get("completionsInWindow")
+            target = spec_status.get("targetRepetitions")
+            ratio = spec_status.get("conformingRatio")
+            expected = min(1.0, completions / target) if target > 0 else 0
+            # Allow for some floating point tolerance
+            assert abs(ratio - expected) < 0.01, (
+                f"Expected ratio ~{expected}, got {ratio}"
+            )
