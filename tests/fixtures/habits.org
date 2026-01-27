@@ -31,3 +31,31 @@
   :PROPERTIES:
   :ID: regular-todo-no-habit
   :END:
+
+* TODO Habit with midnight completions
+  DEADLINE: <2024-06-15 Sat .+1d>
+  :PROPERTIES:
+  :ID: habit-midnight-test
+  :OWH_ASSESSMENT_INTERVAL: 1d
+  :OWH_WINDOW_DURATION: 7d
+  :OWH_REPETITIONS_REQUIRED: 3
+  :END:
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [2024-06-15 Sat 00:00]
+  - State "DONE"       from "TODO"       [2024-06-14 Fri 00:00]
+  - State "DONE"       from "TODO"       [2024-06-13 Thu 10:00]
+  :END:
+
+* TODO Habit with normal time completion for comparison
+  DEADLINE: <2024-06-15 Sat .+1d>
+  :PROPERTIES:
+  :ID: habit-normal-time-test
+  :OWH_ASSESSMENT_INTERVAL: 1d
+  :OWH_WINDOW_DURATION: 7d
+  :OWH_REPETITIONS_REQUIRED: 3
+  :END:
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [2024-06-15 Sat 10:00]
+  - State "DONE"       from "TODO"       [2024-06-14 Fri 10:00]
+  - State "DONE"       from "TODO"       [2024-06-13 Thu 10:00]
+  :END:

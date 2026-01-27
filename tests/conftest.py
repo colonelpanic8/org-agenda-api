@@ -241,14 +241,23 @@ class APIClient:
         return self.get(f"/custom-view?key={key}")
 
     def get_habit_status(
-        self, org_id: str, preceding: int = None, following: int = None
+        self, org_id: str, preceding: int = None, following: int = None, date: str = None
     ) -> requests.Response:
-        """GET /habit-status with id and optional range parameters."""
+        """GET /habit-status with id and optional range parameters.
+
+        Args:
+            org_id: The org ID of the habit
+            preceding: Number of intervals before reference date
+            following: Number of intervals after reference date
+            date: Reference date as YYYY-MM-DD (default: today)
+        """
         params = f"?id={org_id}"
         if preceding is not None:
             params += f"&preceding={preceding}"
         if following is not None:
             params += f"&following={following}"
+        if date is not None:
+            params += f"&date={date}"
         return self.get(f"/habit-status{params}")
 
     def get_notifications(self, as_of: str = None) -> requests.Response:
