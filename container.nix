@@ -80,29 +80,44 @@ let
 
         # Version endpoint - no auth required
         location = /version {
-          proxy_pass http://emacs;
-          proxy_http_version 1.1;
-
-          # CORS headers
-          add_header 'Access-Control-Allow-Origin' '*' always;
-          add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
-          add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization' always;
-
-          # Handle preflight
+          # Handle preflight OPTIONS request
           if ($request_method = 'OPTIONS') {
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS';
-            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization';
-            add_header 'Access-Control-Max-Age' 86400;
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' 86400 always;
             add_header 'Content-Length' 0;
             add_header 'Content-Type' 'text/plain';
             return 204;
           }
+
+          proxy_pass http://emacs;
+          proxy_http_version 1.1;
+
+          # CORS headers for actual requests
+          add_header 'Access-Control-Allow-Origin' '*' always;
+          add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
+          add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
+          add_header 'Access-Control-Allow-Credentials' 'true' always;
+          add_header 'Access-Control-Expose-Headers' 'Content-Length, Content-Type, X-Request-Id' always;
         }
 
         # API endpoints - proxy to emacs with auth
         # Support both /endpoint and /api/endpoint paths for backwards compatibility
         location ~ ^/(api/)?(agenda|agenda-files|get-all-todos|get-todays-agenda|complete|set-state|update|delete|delete-logbook-entry|reload|todo-states|capture-templates|capture|custom-views|custom-view|debug-config|filter-options|metadata|restart|category-types|categories|category-tasks|category-capture|habit-config|habit-status|all-habit-statuses|notifications)$ {
+          # Handle preflight OPTIONS request (before auth check)
+          if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' 86400 always;
+            add_header 'Content-Length' 0;
+            add_header 'Content-Type' 'text/plain';
+            return 204;
+          }
+
           include /tmp/nginx-auth.conf;
 
           # Clear WWW-Authenticate header to prevent browser's native auth popup
@@ -119,21 +134,12 @@ let
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
           proxy_set_header X-Forwarded-Proto $scheme;
 
-          # CORS headers
+          # CORS headers for actual requests
           add_header 'Access-Control-Allow-Origin' '*' always;
           add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
-          add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization' always;
-
-          # Handle preflight
-          if ($request_method = 'OPTIONS') {
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS';
-            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization';
-            add_header 'Access-Control-Max-Age' 86400;
-            add_header 'Content-Length' 0;
-            add_header 'Content-Type' 'text/plain';
-            return 204;
-          }
+          add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
+          add_header 'Access-Control-Allow-Credentials' 'true' always;
+          add_header 'Access-Control-Expose-Headers' 'Content-Length, Content-Type, X-Request-Id' always;
         }
 
         # Static files - serve mova web app (no auth)
