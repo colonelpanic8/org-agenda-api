@@ -1272,26 +1272,14 @@ Returns a list of integers (minutes before event)."
           `(("time" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" time)))))))
 
 (defun org-agenda-api--get-marker-info (marker)
-  "Extract file, position, and ID from MARKER.
-When `org-agenda-api-auto-add-org-id' is non-nil, creates and saves
-an ID for entries that don't have one."
+  "Extract file, position, and ID from MARKER."
   (when (and marker (marker-buffer marker))
     (with-current-buffer (marker-buffer marker)
       (save-excursion
         (goto-char (marker-position marker))
-        (let* ((file (buffer-file-name))
-               (pos (marker-position marker))
-               ;; Only auto-create ID if we're in a file-visiting buffer
-               ;; org-id-get-create requires a file-visiting buffer
-               (id (if (and org-agenda-api-auto-add-org-id file)
-                       (org-id-get-create)
-                     (org-entry-get nil "ID"))))
-          ;; Save buffer if we created a new ID
-          (when (and org-agenda-api-auto-add-org-id
-                     file
-                     id
-                     (buffer-modified-p))
-            (save-buffer))
+        (let ((file (buffer-file-name))
+              (pos (marker-position marker))
+              (id (org-entry-get nil "ID")))
           `(("file" . ,file)
             ("pos" . ,pos)
             ,@(when id `(("id" . ,id)))))))))

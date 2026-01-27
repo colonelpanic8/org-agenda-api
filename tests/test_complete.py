@@ -495,3 +495,87 @@ class TestCompleteHabitResponse:
         summary = data["habitSummary"]
         assert "conformingRatio" in summary
         assert "nextRequiredInterval" in summary
+
+
+class TestAutoAddOrgId:
+    """Tests for auto-adding org-id on complete/set-state operations."""
+
+    def test_complete_adds_org_id(self, api):
+        """Completing a todo without an ID should auto-create one."""
+        # Create a todo (capture does not add IDs)
+        unique_title = "Auto-id complete test todo 99999"
+        api.create_todo(unique_title)
+
+        # Find it in the list and verify it has no ID initially
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None, f"Created todo not found: {unique_title}"
+        assert todo.get("id") is None, "Newly created todo should not have an ID"
+
+        # Complete it
+        response = api.complete_todo(todo)
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "completed"
+
+        # Fetch again and verify ID was created
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        completed_todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert completed_todo is not None, "Completed todo not found"
+        assert completed_todo.get("id") is not None, (
+            "Completed todo should have an auto-created ID"
+        )
+        # Verify it looks like a valid UUID format
+        assert len(completed_todo["id"]) >= 32, (
+            f"ID should be UUID format, got: {completed_todo['id']}"
+        )
+
+    def test_set_state_adds_org_id(self, api):
+        """Setting state on a todo without an ID should auto-create one."""
+        # Create a todo (capture does not add IDs)
+        unique_title = "Auto-id set-state test todo 88888"
+        api.create_todo(unique_title)
+
+        # Find it in the list and verify it has no ID initially
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None, f"Created todo not found: {unique_title}"
+        assert todo.get("id") is None, "Newly created todo should not have an ID"
+
+        # Set state to DONE
+        response = api.set_state(todo, "DONE")
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "completed"
+
+        # Fetch again and verify ID was created
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        updated_todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert updated_todo is not None, "Updated todo not found"
+        assert updated_todo.get("id") is not None, (
+            "Todo should have an auto-created ID after set-state"
+        )
+        # Verify it looks like a valid UUID format
+        assert len(updated_todo["id"]) >= 32, (
+            f"ID should be UUID format, got: {updated_todo['id']}"
+        )

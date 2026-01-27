@@ -129,6 +129,15 @@ Returns t if entries were reordered, nil otherwise."
                     (insert line "\n")))
                 t))))))))
 
+(defun org-agenda-api--ensure-org-id ()
+  "Ensure current entry has an org-id, creating one if needed.
+Only creates ID when `org-agenda-api-auto-add-org-id' is non-nil.
+Must be called with point at an org heading.
+Returns the ID (existing or newly created), or nil if disabled."
+  (when (and org-agenda-api-auto-add-org-id
+             (buffer-file-name))
+    (org-id-get-create)))
+
 (defun org-agenda-api--complete-todo-at (file pos &optional new-state override-date)
   "Mark the TODO at FILE and POS as complete.
 NEW-STATE defaults to DONE if not specified.
@@ -144,6 +153,8 @@ Returns alist with status and details."
         (if (org-at-heading-p)
             (let ((old-state (org-get-todo-state))
                   (title (org-get-heading t t t t)))
+              ;; Ensure org-id exists (auto-create if enabled)
+              (org-agenda-api--ensure-org-id)
               ;; Call org-todo and run post-command-hook, optionally with date override.
               ;; The post-command-hook must be inside the cl-letf because org-add-log-note
               ;; is added to post-command-hook and uses org-current-effective-time when run.
@@ -199,6 +210,8 @@ Returns alist with status, details, and new position."
           (let ((title (org-get-heading t t t t))
                 (applied-updates nil)
                 (new-pos nil))
+            ;; Ensure org-id exists (auto-create if enabled)
+            (org-agenda-api--ensure-org-id)
             ;; Handle title update (must be done first as it changes heading structure)
             (when (assoc "new_title" updates)
               (let ((new-title-value (cdr (assoc "new_title" updates))))

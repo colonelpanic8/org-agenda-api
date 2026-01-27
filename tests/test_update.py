@@ -545,6 +545,85 @@ class TestUpdateErrors:
         assert "message" in data
 
 
+class TestAutoAddOrgId:
+    """Tests for auto-adding org-id on update operations."""
+
+    def test_update_adds_org_id(self, api):
+        """Updating a todo without an ID should auto-create one."""
+        # Create a todo (capture does not add IDs)
+        unique_title = "Auto-id update test todo 77777"
+        api.create_todo(unique_title)
+
+        # Find it in the list and verify it has no ID initially
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None, f"Created todo not found: {unique_title}"
+        assert todo.get("id") is None, "Newly created todo should not have an ID"
+
+        # Update it (e.g., set priority)
+        response = api.update_todo(todo, {"priority": "A"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "updated"
+
+        # Fetch again and verify ID was created
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        updated_todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert updated_todo is not None, "Updated todo not found"
+        assert updated_todo.get("id") is not None, (
+            "Updated todo should have an auto-created ID"
+        )
+        # Verify it looks like a valid UUID format
+        assert len(updated_todo["id"]) >= 32, (
+            f"ID should be UUID format, got: {updated_todo['id']}"
+        )
+
+    def test_update_preserves_existing_org_id(self, api):
+        """Updating a todo with an existing ID should not change it."""
+        # Find a todo that already has an ID (from fixtures)
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo_with_id = next(
+            (t for t in todos["todos"] if t.get("id") is not None),
+            None,
+        )
+
+        if todo_with_id is None:
+            import pytest
+
+            pytest.skip("No todos with org IDs in test fixtures")
+
+        original_id = todo_with_id["id"]
+
+        # Update the todo
+        response = api.update_todo(todo_with_id, {"priority": "B"})
+        assert response.status_code == 200
+
+        # Verify ID was not changed
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        updated_todo = next(
+            (t for t in todos["todos"] if t.get("id") == original_id),
+            None,
+        )
+        assert updated_todo is not None, "Todo with original ID not found"
+        assert updated_todo["id"] == original_id, (
+            f"ID changed from {original_id} to {updated_todo['id']}"
+        )
+
+
 class TestUpdateBody:
     """Tests for updating todo body content."""
 

@@ -363,49 +363,6 @@ class TestNotificationConsistency:
             assert isinstance(notif["title"], str)
 
 
-class TestAutoAddOrgId:
-    """Tests for automatic org-id generation feature."""
-
-    def test_all_notifications_have_id(self, api):
-        """All notifications should have an ID when auto-add is enabled (default).
-
-        With org-agenda-api-auto-add-org-id set to t (the default), entries
-        without an ID should get one automatically created and returned.
-        """
-        response = api.get_notifications()
-        data = response.json()
-
-        # Every notification should have an id field
-        for notif in data["notifications"]:
-            assert "id" in notif, (
-                f"Notification missing id (auto-add should have created one): "
-                f"{notif.get('title', 'unknown')}"
-            )
-            assert notif["id"], (
-                f"Notification id should not be empty: {notif.get('title', 'unknown')}"
-            )
-
-    def test_auto_added_ids_are_valid_uuids(self, api):
-        """Auto-generated IDs should be valid UUIDs."""
-        import re
-
-        response = api.get_notifications()
-        data = response.json()
-
-        uuid_pattern = re.compile(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            re.IGNORECASE,
-        )
-
-        for notif in data["notifications"]:
-            if "id" in notif and notif["id"]:
-                # IDs should either be pre-set (like 'notif-xxx') or be valid UUIDs
-                if not notif["id"].startswith("notif-"):
-                    assert uuid_pattern.match(notif["id"]), (
-                        f"Auto-generated ID should be a valid UUID: {notif['id']}"
-                    )
-
-
 class TestAsOfParameter:
     """Tests for the asOf parameter functionality."""
 
