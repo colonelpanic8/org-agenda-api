@@ -201,7 +201,7 @@ Returns alist with status and details."
 
 (defun org-agenda-api--update-todo-at (file pos updates)
   "Update the TODO at FILE and POS with UPDATES alist.
-UPDATES can contain: new_title, scheduled, deadline, priority, tags, properties, body.
+UPDATES can contain: state, new_title, scheduled, deadline, priority, tags, properties, body.
 Returns alist with status, details, and new position."
   (with-current-buffer (find-file-noselect file)
     (save-excursion
@@ -209,10 +209,18 @@ Returns alist with status, details, and new position."
       (if (org-at-heading-p)
           (let ((title (org-get-heading t t t t))
                 (applied-updates nil)
-                (new-pos nil))
+                (new-pos nil)
+                (old-state nil))
             ;; Ensure org-id exists (auto-create if enabled)
             (org-agenda-api--ensure-org-id)
-            ;; Handle title update (must be done first as it changes heading structure)
+            ;; Handle state change (do this early, before other changes)
+            (when (assoc "state" updates)
+              (let ((new-state (cdr (assoc "state" updates))))
+                (when (and new-state (not (string-empty-p new-state)))
+                  (setq old-state (org-get-todo-state))
+                  (org-todo new-state)
+                  (push `("state" . (("from" . ,old-state) ("to" . ,new-state))) applied-updates))))
+            ;; Handle title update (must be done before other changes as it changes heading structure)
             (when (assoc "new_title" updates)
               (let ((new-title-value (cdr (assoc "new_title" updates))))
                 (when (and new-title-value (not (string-empty-p new-title-value)))

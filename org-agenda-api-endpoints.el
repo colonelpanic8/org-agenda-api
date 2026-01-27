@@ -261,12 +261,13 @@ Accepts query params:
   (org-agenda-api--track-request))
 
 (defservlet update application/json (_path _query headers)
-  "Endpoint: Update a TODO's title, scheduled date, deadline, priority, tags, or properties.
+  "Endpoint: Update a TODO's state, title, scheduled date, deadline, priority, tags, or properties.
 Accepts JSON body with:
   - id: org-id of the todo (preferred)
   - file: file path (fallback)
   - pos: position in file (fallback)
   - title: heading title (can match by title alone or with file)
+  - state: new TODO state (e.g., TODO, DONE, STARTED, etc.)
   - new_title: new title to set for the heading
   - scheduled: object {date, time?, repeater?} or null to clear
     - date: YYYY-MM-DD (required)
@@ -285,6 +286,7 @@ Returns updated todo with new file and pos for cache update."
                (file (gethash "file" json-data))
                (pos (gethash "pos" json-data))
                (title (gethash "title" json-data))
+               (state (gethash "state" json-data))
                (new-title (gethash "new_title" json-data))
                (scheduled (gethash "scheduled" json-data))
                (deadline (gethash "deadline" json-data))
@@ -295,10 +297,10 @@ Returns updated todo with new file and pos for cache update."
                (location nil)
                (updates nil))
           ;; Log incoming request for debugging
-        (message "[/update] Request: id=%s file=%s pos=%s title=%s new_title=%s scheduled=%s deadline=%s priority=%s"
-                 id file pos title new-title scheduled deadline priority)
+        (message "[/update] Request: id=%s file=%s pos=%s title=%s state=%s new_title=%s scheduled=%s deadline=%s priority=%s"
+                 id file pos title state new-title scheduled deadline priority)
         ;; Check for unrecognized fields
-        (let ((allowed-fields '("id" "file" "pos" "title" "new_title" "scheduled" "deadline" "priority" "tags" "properties" "body"))
+        (let ((allowed-fields '("id" "file" "pos" "title" "state" "new_title" "scheduled" "deadline" "priority" "tags" "properties" "body"))
               (unrecognized nil))
           (maphash (lambda (key _value)
                      (unless (member key allowed-fields)
@@ -312,6 +314,8 @@ Returns updated todo with new file and pos for cache update."
             (throw 'done nil)))
         ;; Build updates alist (include keys even if value is nil, to signal clearing)
         ;; Use :not-found sentinel to properly detect if key exists in JSON
+        (unless (eq (gethash "state" json-data :not-found) :not-found)
+          (push (cons "state" (if (eq state :null) nil state)) updates))
         (unless (eq (gethash "new_title" json-data :not-found) :not-found)
           (push (cons "new_title" (if (eq new-title :null) nil new-title)) updates))
         (unless (eq (gethash "scheduled" json-data :not-found) :not-found)

@@ -694,3 +694,411 @@ class TestUpdateBody:
         data = response.json()
 
         assert data.get("status") == "updated"
+
+
+class TestUpdateState:
+    """Tests for updating todo state via /update endpoint."""
+
+    def test_update_state_basic(self, api):
+        """Should be able to change todo state."""
+        unique_title = "State update basic test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+        assert todo.get("todo") == "TODO"  # Initial state
+
+        response = api.update_todo(todo, {"state": "DONE"})
+        data = response.json()
+
+        assert data.get("status") == "updated"
+        # Verify state change is in updates
+        updates = data.get("updates", {})
+        if isinstance(updates, dict):
+            assert "state" in updates
+        else:
+            state_update = next((u for u in updates if u[0] == "state"), None)
+            assert state_update is not None
+
+    def test_update_state_persists(self, api):
+        """State change should persist when re-fetching todos."""
+        unique_title = "State persist test 12345"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        api.update_todo(todo, {"state": "DONE"})
+
+        # Re-fetch and verify
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        updated_todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert updated_todo is not None
+        assert updated_todo.get("todo") == "DONE"
+
+    def test_update_state_returns_old_state(self, api):
+        """State update should return the old state in response."""
+        unique_title = "State old value test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        response = api.update_todo(todo, {"state": "STARTED"})
+        data = response.json()
+
+        assert data.get("status") == "updated"
+        updates = data.get("updates", {})
+        # State update should include from/to
+        if isinstance(updates, dict):
+            state_info = updates.get("state", {})
+            assert state_info.get("from") == "TODO"
+            assert state_info.get("to") == "STARTED"
+        else:
+            state_update = next((u for u in updates if u[0] == "state"), None)
+            assert state_update is not None
+
+
+class TestUpdateStateAndTitle:
+    """Tests for updating both state and title in a single request."""
+
+    def test_update_state_and_title_without_id(self, api):
+        """Should update both state and title on a todo without an ID."""
+        unique_title = "State and title test no id 99999"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+        # Verify no ID initially
+        assert todo.get("id") is None, "Newly created todo should not have an ID"
+        assert todo.get("todo") == "TODO"
+
+        new_title = "Updated title and state 88888"
+        response = api.update_todo(todo, {"state": "DONE", "new_title": new_title})
+        data = response.json()
+
+        assert data.get("status") == "updated"
+        assert data.get("title") == new_title
+
+        # Re-fetch and verify both changes persisted
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        updated_todo = next(
+            (t for t in todos["todos"] if new_title in t.get("title", "")),
+            None,
+        )
+        assert updated_todo is not None, f"Todo with new title not found"
+        assert updated_todo.get("todo") == "DONE"
+        # Should have gotten an ID after update
+        assert updated_todo.get("id") is not None
+
+    def test_update_state_and_title_with_priority(self, api):
+        """Should update state, title, and priority together."""
+        unique_title = "Multi-update state title priority"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        new_title = "Completed high priority task"
+        response = api.update_todo(
+            todo, {"state": "DONE", "new_title": new_title, "priority": "A"}
+        )
+        data = response.json()
+
+        assert data.get("status") == "updated"
+
+        # Re-fetch and verify all changes
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        updated_todo = next(
+            (t for t in todos["todos"] if new_title in t.get("title", "")),
+            None,
+        )
+        assert updated_todo is not None
+        assert updated_todo.get("todo") == "DONE"
+        assert updated_todo.get("priority") == "A"
+
+    def test_update_state_title_and_scheduled(self, api):
+        """Should update state, title, and scheduled date together."""
+        unique_title = "State title scheduled combo test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        new_title = "Rescheduled and started task"
+        response = api.update_todo(
+            todo,
+            {
+                "state": "STARTED",
+                "new_title": new_title,
+                "scheduled": {"date": "2024-07-01"},
+            },
+        )
+        data = response.json()
+
+        assert data.get("status") == "updated"
+
+        # Re-fetch and verify all changes
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        updated_todo = next(
+            (t for t in todos["todos"] if new_title in t.get("title", "")),
+            None,
+        )
+        assert updated_todo is not None
+        assert updated_todo.get("todo") == "STARTED"
+        assert extract_date(updated_todo.get("scheduled")) == "2024-07-01"
+
+
+class TestUpdateStateTransitions:
+    """Tests for various state transitions."""
+
+    def test_todo_to_started(self, api):
+        """Should transition from TODO to STARTED."""
+        unique_title = "TODO to STARTED test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        response = api.update_todo(todo, {"state": "STARTED"})
+        assert response.status_code == 200
+
+        # Verify
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        updated = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert updated.get("todo") == "STARTED"
+
+    def test_todo_to_waiting(self, api):
+        """Should transition from TODO to WAITING."""
+        unique_title = "TODO to WAITING test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        response = api.update_todo(todo, {"state": "WAITING"})
+        assert response.status_code == 200
+
+        # Verify
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        updated = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert updated.get("todo") == "WAITING"
+
+    def test_started_to_done(self, api):
+        """Should transition from STARTED to DONE."""
+        unique_title = "STARTED to DONE test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # First go to STARTED
+        api.update_todo(todo, {"state": "STARTED"})
+
+        # Then to DONE
+        response = api.update_todo(todo, {"state": "DONE"})
+        assert response.status_code == 200
+
+        # Verify
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        updated = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert updated.get("todo") == "DONE"
+
+    def test_multiple_state_changes(self, api):
+        """Should handle multiple sequential state changes."""
+        unique_title = "Multiple state changes test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+
+        # Chain of state changes
+        states = ["STARTED", "WAITING", "STARTED", "DONE"]
+        for state in states:
+            response = api.update_todo(todo, {"state": state})
+            assert response.status_code == 200
+
+        # Verify final state
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        updated = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert updated.get("todo") == "DONE"
+
+
+class TestUpdateStateWithoutId:
+    """Tests specifically for state updates on todos without org-id."""
+
+    def test_state_update_without_id_adds_id(self, api):
+        """Updating state on todo without ID should auto-create ID."""
+        unique_title = "State no id auto-create test 77777"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+        assert todo.get("id") is None, "Newly created todo should not have an ID"
+
+        # Update state
+        response = api.update_todo(todo, {"state": "STARTED"})
+        assert response.status_code == 200
+
+        # Verify ID was created
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        updated_todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert updated_todo is not None
+        assert updated_todo.get("id") is not None, "Should have auto-created ID"
+        assert updated_todo.get("todo") == "STARTED"
+
+    def test_state_update_finds_by_file_and_pos(self, api):
+        """State update should work when finding todo by file and pos."""
+        unique_title = "State find by file pos test"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+        assert todo.get("file") is not None
+        assert todo.get("pos") is not None
+
+        # Update using file/pos (no id)
+        response = api.update_todo(
+            {"file": todo["file"], "pos": todo["pos"], "title": todo["title"]},
+            {"state": "DONE"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "updated"
+
+    def test_state_and_title_update_without_id(self, api):
+        """Combined state and title update should work on todo without ID."""
+        unique_title = "State title combined no id test 55555"
+        api.create_todo(unique_title)
+
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+
+        todo = next(
+            (t for t in todos["todos"] if unique_title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+        assert todo.get("id") is None, "Should not have ID initially"
+
+        # Update both state and title in one request
+        new_title = "New title after state change 55555"
+        response = api.update_todo(todo, {"state": "DONE", "new_title": new_title})
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "updated"
+
+        # Verify both changes
+        todos_response = api.get_all_todos()
+        todos = todos_response.json()
+        updated = next(
+            (t for t in todos["todos"] if new_title in t.get("title", "")),
+            None,
+        )
+        assert updated is not None
+        assert updated.get("todo") == "DONE"
+        assert updated.get("id") is not None, "Should have ID after update"
