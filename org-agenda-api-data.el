@@ -40,14 +40,22 @@ Returns nil if TS-ELEMENT is nil."
 
 (defun org-agenda-api--timestamp-end-to-time (ts-element)
   "Convert org-element timestamp TS-ELEMENT end to Emacs time.
-Returns nil if TS-ELEMENT is nil or has no end date."
-  (when (and ts-element (org-element-property :year-end ts-element))
-    (let ((year (org-element-property :year-end ts-element))
-          (month (org-element-property :month-end ts-element))
-          (day (org-element-property :day-end ts-element))
-          (hour (or (org-element-property :hour-end ts-element) 0))
-          (minute (or (org-element-property :minute-end ts-element) 0)))
-      (encode-time 0 minute hour day month year))))
+Returns nil if TS-ELEMENT is nil or has no end time/date.
+Handles both date ranges (<date>--<date>) and same-day time ranges (<date time-time>).
+For same-day time ranges, uses start date with end time."
+  (when ts-element
+    (let ((hour-end (org-element-property :hour-end ts-element))
+          (year-end (org-element-property :year-end ts-element)))
+      ;; Either we have an end date, or we have an end time (same-day range)
+      (when (or year-end hour-end)
+        (let ((year (or year-end (org-element-property :year-start ts-element)))
+              (month (or (org-element-property :month-end ts-element)
+                         (org-element-property :month-start ts-element)))
+              (day (or (org-element-property :day-end ts-element)
+                       (org-element-property :day-start ts-element)))
+              (hour (or hour-end 0))
+              (minute (or (org-element-property :minute-end ts-element) 0)))
+          (encode-time 0 minute hour day month year))))))
 
 (defun org-agenda-api--format-timestamp (time has-time)
   "Format TIME as ISO string.
@@ -129,16 +137,22 @@ Supports ranged timestamps like <2024-06-15>--<2024-06-20>."
         (when scheduled-ts
           (setq scheduled-has-time (not (null (org-element-property :hour-start scheduled-ts))))
           (setq scheduled-repeater (org-agenda-api--extract-repeater-from-element scheduled-ts))
-          ;; Check for range (:range-type is set for ranged timestamps like <date>--<date>)
-          (when (org-element-property :range-type scheduled-ts)
+          ;; Check for range - two formats:
+          ;; 1. <date>--<date> sets :range-type
+          ;; 2. <date time-time> sets :hour-end without :range-type (same-day time range)
+          (when (or (org-element-property :range-type scheduled-ts)
+                    (org-element-property :hour-end scheduled-ts))
             (setq scheduled-end-time (org-agenda-api--timestamp-end-to-time scheduled-ts))
             (setq scheduled-end-has-time (not (null (org-element-property :hour-end scheduled-ts))))))
         ;; Process DEADLINE timestamp
         (when deadline-ts
           (setq deadline-has-time (not (null (org-element-property :hour-start deadline-ts))))
           (setq deadline-repeater (org-agenda-api--extract-repeater-from-element deadline-ts))
-          ;; Check for range (:range-type is set for ranged timestamps like <date>--<date>)
-          (when (org-element-property :range-type deadline-ts)
+          ;; Check for range - two formats:
+          ;; 1. <date>--<date> sets :range-type
+          ;; 2. <date time-time> sets :hour-end without :range-type (same-day time range)
+          (when (or (org-element-property :range-type deadline-ts)
+                    (org-element-property :hour-end deadline-ts))
             (setq deadline-end-time (org-agenda-api--timestamp-end-to-time deadline-ts))
             (setq deadline-end-has-time (not (null (org-element-property :hour-end deadline-ts)))))))
       `((scheduled-time . ,scheduled-time)

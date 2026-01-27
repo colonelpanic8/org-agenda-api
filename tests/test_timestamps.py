@@ -40,14 +40,70 @@ class TestRangedScheduledTimestamps:
         assert task.get("scheduledEnd") is None
 
 
+class TestSameDayTimeRanges:
+    """Tests for same-day time ranges like SCHEDULED: <2024-01-15 09:00-11:30>."""
+
+    def test_same_day_scheduled_time_range_has_end(self, api):
+        """Task with same-day scheduled time range should have scheduledEnd."""
+        todos = api.get_all_todos().json()["todos"]
+        task = next(
+            (t for t in todos if "same-day scheduled time range" in t.get("title", "").lower()),
+            None,
+        )
+        assert task is not None, "Test fixture 'Task with same-day scheduled time range' not found"
+        assert task.get("scheduled") is not None
+        assert task.get("scheduledEnd") is not None
+
+    def test_same_day_scheduled_time_range_values(self, api):
+        """Same-day scheduled time range should have correct start and end times."""
+        todos = api.get_all_todos().json()["todos"]
+        task = next(
+            (t for t in todos if "same-day scheduled time range" in t.get("title", "").lower()),
+            None,
+        )
+        assert task is not None
+        # Start time: 09:00
+        assert task["scheduled"]["date"] == TEST_DATE
+        assert task["scheduled"]["time"] == "09:00"
+        # End time: 11:30 (same day)
+        assert task["scheduledEnd"]["date"] == TEST_DATE
+        assert task["scheduledEnd"]["time"] == "11:30"
+
+    def test_same_day_deadline_time_range_has_end(self, api):
+        """Task with same-day deadline time range should have deadlineEnd."""
+        todos = api.get_all_todos().json()["todos"]
+        task = next(
+            (t for t in todos if "same-day deadline time range" in t.get("title", "").lower()),
+            None,
+        )
+        assert task is not None, "Test fixture 'Task with same-day deadline time range' not found"
+        assert task.get("deadline") is not None
+        assert task.get("deadlineEnd") is not None
+
+    def test_same_day_deadline_time_range_values(self, api):
+        """Same-day deadline time range should have correct start and end times."""
+        todos = api.get_all_todos().json()["todos"]
+        task = next(
+            (t for t in todos if "same-day deadline time range" in t.get("title", "").lower()),
+            None,
+        )
+        assert task is not None
+        # Start time: 14:00
+        assert task["deadline"]["date"] == TEST_DATE
+        assert task["deadline"]["time"] == "14:00"
+        # End time: 16:00 (same day)
+        assert task["deadlineEnd"]["date"] == TEST_DATE
+        assert task["deadlineEnd"]["time"] == "16:00"
+
+
 class TestRangedDeadlineTimestamps:
-    """Tests for ranged DEADLINE timestamps."""
+    """Tests for ranged DEADLINE timestamps (using -- syntax)."""
 
     def test_ranged_deadline_has_deadline_end(self, api):
         """Task with ranged deadline should have deadlineEnd field."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "ranged deadline" in t.get("title", "").lower()), None
+            (t for t in todos if t.get("title", "").lower() == "task with ranged deadline"), None
         )
         assert task is not None, "Test fixture 'Task with ranged deadline' not found"
         assert task.get("deadline") is not None
@@ -57,11 +113,11 @@ class TestRangedDeadlineTimestamps:
         """Ranged deadline with time components should preserve times."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "ranged deadline" in t.get("title", "").lower()), None
+            (t for t in todos if t.get("title", "").lower() == "task with ranged deadline"), None
         )
         assert task is not None
         # deadline is now an object with "date" and "time" keys
-        # Note: fixture has same-day time range (10:00-14:00 on TEST_DATE)
+        # Note: fixture has same-day time range (10:00-14:00 on TEST_DATE) using -- syntax
         assert task["deadline"]["date"] == TEST_DATE
         assert task["deadline"]["time"] == "10:00"
         assert task["deadlineEnd"]["date"] == TEST_DATE  # Same day, different time

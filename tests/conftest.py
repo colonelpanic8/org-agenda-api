@@ -421,6 +421,14 @@ def org_test_dir(tmp_path_factory):
   SCHEDULED: <{TEST_DATE_ORG}>--<{TEST_DATE_NEXT_DAY_ORG}>
   This task spans multiple days.
 
+* TODO Task with same-day scheduled time range
+  SCHEDULED: <{TEST_DATE_ORG} 09:00-11:30>
+  Meeting scheduled from 9am to 11:30am.
+
+* TODO Task with same-day deadline time range
+  DEADLINE: <{TEST_DATE_ORG} 14:00-16:00>
+  Must be completed during this window.
+
 * TODO Task with ranged deadline
   DEADLINE: <{TEST_DATE_ORG} 10:00>--<{TEST_DATE_ORG} 14:00>
   This task has a time range deadline.
