@@ -168,6 +168,14 @@ The API will then expose endpoints:
   :type '(alist :key-type string :value-type sexp)
   :group 'org-agenda-api)
 
+(defcustom org-agenda-api-auto-add-org-id t
+  "Automatically add org-id to entries that don't have one.
+When non-nil (the default), entries without an ID property will
+automatically have one generated and saved when they are processed
+for notifications. This provides stable identifiers for API consumers."
+  :type 'boolean
+  :group 'org-agenda-api)
+
 ;;; Worker Lifecycle
 
 (defvar org-agenda-api--request-count 0
