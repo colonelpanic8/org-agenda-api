@@ -485,6 +485,44 @@ def org_test_dir(tmp_path_factory):
 """
     )
 
+    # Create DST test habits file for testing across daylight saving transitions
+    # These habits started in summer (PDT) and have completions in winter (PST)
+    # to test that anchor drift doesn't cause midnight completions to be miscounted
+    dst_habits_org = test_dir / "dst_habits.org"
+    dst_habits_org.write_text(
+        """\
+#+TITLE: DST Test Habits
+
+* TODO Habit started in summer for DST testing
+  DEADLINE: <2024-01-26 Fri .+1d>
+  :PROPERTIES:
+  :STYLE: habit
+  :OWH_WINDOW_DURATION: 7d
+  :OWH_REPETITIONS_REQUIRED: 3
+  :OWH_ASSESSMENT_INTERVAL: 1d
+  :ID: habit-dst-summer-start
+  :CREATED: [2023-08-16 Wed]
+  :END:
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [2024-11-04 Mon 00:00]
+  - State "DONE"       from "TODO"       [2024-11-03 Sun 10:00]
+  - State "DONE"       from "TODO"       [2024-11-02 Sat 10:00]
+  - State "DONE"       from "TODO"       [2024-03-11 Mon 00:00]
+  - State "DONE"       from "TODO"       [2024-03-10 Sun 10:00]
+  - State "DONE"       from "TODO"       [2024-03-09 Sat 10:00]
+  - State "DONE"       from "TODO"       [2024-01-26 Fri 00:00]
+  - State "DONE"       from "TODO"       [2024-01-25 Thu 10:00]
+  - State "DONE"       from "TODO"       [2024-01-24 Wed 10:00]
+  - State "DONE"       from "TODO"       [2023-08-17 Thu 10:00]
+  - State "DONE"       from "TODO"       [2023-08-16 Wed 10:00]
+  :END:
+  This habit was created in summer 2023 (PDT, UTC-7) and has completions
+  at midnight during winter (PST, UTC-8) to test DST handling.
+  The midnight completions should be counted for the correct date,
+  not the previous day due to anchor drift.
+"""
+    )
+
     # Create notifications test file with various notification types
     notifications_org = test_dir / "notifications.org"
     notifications_org.write_text(

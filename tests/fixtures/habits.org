@@ -59,3 +59,21 @@
   - State "DONE"       from "TODO"       [2024-06-14 Fri 10:00]
   - State "DONE"       from "TODO"       [2024-06-13 Thu 10:00]
   :END:
+
+* TODO Habit crossing DST boundary
+  DEADLINE: <2024-01-15 Mon .+1d>
+  :PROPERTIES:
+  :ID: habit-dst-test
+  :OWH_ASSESSMENT_INTERVAL: 1d
+  :OWH_WINDOW_DURATION: 7d
+  :OWH_REPETITIONS_REQUIRED: 3
+  :END:
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [2024-06-15 Sat 00:00]
+  - State "DONE"       from "TODO"       [2024-06-14 Fri 00:00]
+  - State "DONE"       from "TODO"       [2024-06-13 Thu 10:00]
+  - State "DONE"       from "TODO"       [2024-03-01 Fri 10:00]
+  :END:
+  This habit has completions spanning the DST transition (March 10, 2024).
+  The earliest completion is March 1 (PST), latest is June 15 (PDT).
+  Without proper calendar arithmetic, assessment boundaries would drift by 1 hour.

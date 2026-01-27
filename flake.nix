@@ -317,7 +317,11 @@
             pkgs.jq
             pkgs.just
             pkgs.ruff
+            pkgs.tzdata  # Required for DST-related tests
           ];
+
+          # Set TZDIR so Emacs can use set-time-zone-rule with DST timezones
+          TZDIR = "${pkgs.tzdata}/share/zoneinfo";
 
           shellHook = ''
             echo "org-agenda-api dev shell"
