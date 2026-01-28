@@ -338,6 +338,25 @@ let
     ${pkgs.coreutils}/bin/mkdir -p /tmp/nginx_client_body /tmp/nginx_proxy /tmp/nginx_fastcgi /tmp/nginx_uwsgi /tmp/nginx_scgi
     ${pkgs.coreutils}/bin/mkdir -p /data/org
     ${pkgs.coreutils}/bin/mkdir -p /root/.ssh
+    ${pkgs.coreutils}/bin/chmod 700 /root/.ssh
+
+    # Setup SSH for git operations
+    # Add GitHub's host keys to known_hosts
+    ${pkgs.coreutils}/bin/echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > /root/.ssh/known_hosts
+    ${pkgs.coreutils}/bin/echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=" >> /root/.ssh/known_hosts
+    ${pkgs.coreutils}/bin/echo "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=" >> /root/.ssh/known_hosts
+    ${pkgs.coreutils}/bin/chmod 644 /root/.ssh/known_hosts
+
+    # Setup SSH private key from env var or mounted file
+    if [ -n "$GIT_SSH_PRIVATE_KEY" ]; then
+      ${pkgs.coreutils}/bin/echo "Setting up SSH key from environment variable..."
+      ${pkgs.coreutils}/bin/echo "$GIT_SSH_PRIVATE_KEY" > /root/.ssh/id_rsa
+      ${pkgs.coreutils}/bin/chmod 600 /root/.ssh/id_rsa
+    elif [ -f "/secrets/ssh_key" ]; then
+      ${pkgs.coreutils}/bin/echo "Setting up SSH key from /secrets/ssh_key..."
+      ${pkgs.coreutils}/bin/cp /secrets/ssh_key /root/.ssh/id_rsa
+      ${pkgs.coreutils}/bin/chmod 600 /root/.ssh/id_rsa
+    fi
 
     # Setup nginx authentication
     setup_nginx_auth() {
