@@ -1,19 +1,7 @@
 { pkgs, emacsWithPackages, gitSyncRs, orgAgendaApiSitelisp, containerInitEl, gitCommit ? "unknown", movaWeb, orgAgendaApiVersion ? "unknown" }:
 
-{
-  name ? "org-agenda-api",
-  tag ? "latest",
-  customElispFile ? null,
-  # Directory containing emacs config with straight/ subdirectory
-  # Should include: README.el, org-config.el, org-config-*.el, straight/
-  emacsConfigDir ? null,
-  # Entry point elisp file within emacsConfigDir (relative path)
-  # This file should load org-agenda-api and start the server
-  emacsConfigEntryPoint ? "org-config.el",
-  extraPackages ? [],
-}:
-
 let
+  lib = pkgs.lib;
   port = 2025;
 
   # Nginx with headers-more module for clearing WWW-Authenticate header
@@ -21,25 +9,10 @@ let
     modules = [ pkgs.nginxModules.moreheaders ];
   };
 
-  # Package the emacs config directory if provided
-  emacsConfigPackage = if emacsConfigDir != null then
-    pkgs.runCommand "emacs-config" {} ''
-      mkdir -p $out
-      # Copy elisp files
-      for f in ${emacsConfigDir}/*.el; do
-        if [ -f "$f" ]; then
-          cp "$f" $out/
-        fi
-      done
-      # Copy straight directory (repos and build)
-      if [ -d "${emacsConfigDir}/straight" ]; then
-        cp -r ${emacsConfigDir}/straight $out/
-      fi
-    ''
-  else null;
-
   # Path where config will be in the container
   containerConfigPath = "/emacs-config";
+  orgAgendaApiLoadPathDefault = "/share/emacs/site-lisp";
+  containerInitPath = "/etc/org-agenda-api/container-init.el";
 
   # Nginx config that proxies to emacs
   # Auth is configured dynamically via /tmp/nginx-auth.conf include
@@ -146,11 +119,6 @@ let
     }
   '';
 
-  # Custom elisp environment variable (baked into image if provided)
-  customElispEnv = if customElispFile != null
-    then "ORG_API_CUSTOM_ELISP=${customElispFile}"
-    else "";
-
   # git-sync-rs configuration file (enables conflict_branch feature)
   gitSyncConfig = pkgs.writeText "git-sync-rs-config.toml" ''
     [defaults]
@@ -164,7 +132,7 @@ let
   '';
 
   # Multi-repo git sync wrapper script
-  gitSyncMultiScript = pkgs.writeShellScript "git-sync-multi" ''
+  gitSyncMultiScript = pkgs.writeShellScriptBin "git-sync-multi" ''
     PIDS=""
 
     cleanup() {
@@ -217,29 +185,41 @@ let
   # Health checker script that monitors emacs and restarts if unhealthy
   # Uses unix socket at /tmp/supervisor.sock (defined in supervisord config)
   # Tracks emacs restart times via timestamp file to reset grace period on each restart
-  healthCheckerScript = pkgs.writeShellScript "health-checker" ''
-    INTERVAL=''${HEALTH_CHECK_INTERVAL:-10}
-    TIMEOUT=''${HEALTH_CHECK_TIMEOUT:-5}
-    GRACE_PERIOD=''${HEALTH_CHECK_GRACE_PERIOD:-600}
-    TIMESTAMP_FILE="/tmp/emacs_start_time"
+  healthCheckerScript = pkgs.writeShellScriptBin "health-checker" ''
+    set -e
 
-    echo "Health checker starting (interval=''${INTERVAL}s, timeout=''${TIMEOUT}s, grace=''${GRACE_PERIOD}s)"
+    # Health check parameters
+    INTERVAL="''${HEALTH_CHECK_INTERVAL:-10}"
+    TIMEOUT="''${HEALTH_CHECK_TIMEOUT:-5}"
+    # Grace period after emacs restart (seconds)
+    GRACE_PERIOD=30
+    # Timestamp file for tracking last restart
+    TIMESTAMP_FILE="/tmp/emacs-restart-timestamp"
 
-    # Record initial start time
-    ${pkgs.coreutils}/bin/date +%s > "$TIMESTAMP_FILE"
+    echo "Health checker starting with interval=$INTERVAL timeout=$TIMEOUT"
+
+    # Initialize timestamp file if it doesn't exist
+    if [ ! -f "$TIMESTAMP_FILE" ]; then
+      ${pkgs.coreutils}/bin/date +%s > "$TIMESTAMP_FILE"
+    fi
 
     while true; do
-      # Check if we're still in the grace period after emacs (re)start
-      if [ -f "$TIMESTAMP_FILE" ]; then
-        start_time=$(${pkgs.coreutils}/bin/cat "$TIMESTAMP_FILE")
-        current_time=$(${pkgs.coreutils}/bin/date +%s)
-        elapsed=$((current_time - start_time))
-        if [ "$elapsed" -lt "$GRACE_PERIOD" ]; then
-          remaining=$((GRACE_PERIOD - elapsed))
-          echo "Grace period: ''${remaining}s remaining before health checks"
-          ${pkgs.coreutils}/bin/sleep $INTERVAL
-          continue
-        fi
+      # Check if emacs process exists
+      if ! ${pkgs.python3Packages.supervisor}/bin/supervisorctl -s unix:///tmp/supervisor.sock status emacs > /dev/null 2>&1; then
+        echo "Emacs not running, skipping health check"
+        ${pkgs.coreutils}/bin/sleep $INTERVAL
+        continue
+      fi
+
+      # Check grace period - only check health after grace period following restart
+      LAST_RESTART=$(${pkgs.coreutils}/bin/cat "$TIMESTAMP_FILE" 2>/dev/null || ${pkgs.coreutils}/bin/echo 0)
+      CURRENT_TIME=$(${pkgs.coreutils}/bin/date +%s)
+      TIME_SINCE_RESTART=$((CURRENT_TIME - LAST_RESTART))
+
+      if [ $TIME_SINCE_RESTART -lt $GRACE_PERIOD ]; then
+        # Still within grace period
+        ${pkgs.coreutils}/bin/sleep $INTERVAL
+        continue
       fi
 
       # Check health - require 3 consecutive failures with delays before restarting
@@ -262,17 +242,30 @@ let
     done
   '';
 
-  # Path to org-agenda-api site-lisp directory
-  orgAgendaApiLoadPath = "${orgAgendaApiSitelisp}/share/emacs/site-lisp";
+  # Start emacs using runtime env, so the base image doesn't depend on org-agenda-api code.
+  emacsStartScript = pkgs.writeShellScriptBin "start-emacs" ''
+    set -e
 
-  # Emacs command varies based on whether we have a custom config dir
-  # Note: Using single quotes around --eval args so double quotes are literal
-  emacsCommand = if emacsConfigDir != null then
-    # With custom config: set user-emacs-directory and load the entry point
-    "${emacsWithPackages}/bin/emacs --fg-daemon=org-api --eval '(setq user-emacs-directory \"${containerConfigPath}/\")' --eval '(add-to-list (quote load-path) \"${orgAgendaApiLoadPath}\")' --eval '(require (quote org-agenda-api))' --load ${containerConfigPath}/${emacsConfigEntryPoint} --load ${containerInitEl}"
-  else
-    # Without custom config: just load org-agenda-api and container-init
-    "${emacsWithPackages}/bin/emacs --fg-daemon=org-api --eval '(add-to-list (quote load-path) \"${orgAgendaApiLoadPath}\")' --eval '(require (quote org-agenda-api))' --load ${containerInitEl}";
+    EMACS_BIN="${emacsWithPackages}/bin/emacs"
+    LOAD_PATH="''${ORG_AGENDA_API_LOAD_PATH:-${orgAgendaApiLoadPathDefault}}"
+    INIT_FILE="''${ORG_AGENDA_API_INIT:-${containerInitPath}}"
+    CONFIG_DIR="''${ORG_AGENDA_API_CONFIG_DIR:-${containerConfigPath}}"
+    CONFIG_ENTRY="''${ORG_AGENDA_API_CONFIG_ENTRYPOINT:-org-config.el}"
+
+    if [ -f "$CONFIG_DIR/$CONFIG_ENTRY" ]; then
+      exec "$EMACS_BIN" --fg-daemon=org-api \
+        --eval "(setq user-emacs-directory \"$CONFIG_DIR/\")" \
+        --eval "(add-to-list 'load-path \"$LOAD_PATH\")" \
+        --eval "(require 'org-agenda-api)" \
+        --load "$CONFIG_DIR/$CONFIG_ENTRY" \
+        --load "$INIT_FILE"
+    else
+      exec "$EMACS_BIN" --fg-daemon=org-api \
+        --eval "(add-to-list 'load-path \"$LOAD_PATH\")" \
+        --eval "(require 'org-agenda-api)" \
+        --load "$INIT_FILE"
+    fi
+  '';
 
   containerSupervisordConf = pkgs.writeText "supervisord.conf" ''
     [supervisord]
@@ -292,7 +285,7 @@ let
     supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
     [program:git-sync]
-    command=${gitSyncMultiScript}
+    command=${gitSyncMultiScript}/bin/git-sync-multi
     autostart=true
     autorestart=true
     startretries=3
@@ -304,7 +297,7 @@ let
     environment=PATH="${pkgs.git}/bin:${pkgs.openssh}/bin",GIT_SYNC_INTERVAL="%(ENV_GIT_SYNC_INTERVAL)s",GIT_SYNC_NEW_FILES="%(ENV_GIT_SYNC_NEW_FILES)s",GIT_SYNC_REMOTE="%(ENV_GIT_SYNC_REMOTE)s"
 
     [program:emacs]
-    command=${emacsCommand}
+    command=${emacsStartScript}/bin/start-emacs
     autostart=true
     autorestart=true
     startretries=3
@@ -313,7 +306,7 @@ let
     stdout_logfile_maxbytes=0
     stderr_logfile=/dev/stderr
     stderr_logfile_maxbytes=0
-    environment=PATH="${pkgs.coreutils}/bin:${pkgs.git}/bin:${pkgs.openssh}/bin"${if customElispFile != null then ",${customElispEnv}" else ""}
+    environment=PATH="${pkgs.coreutils}/bin:${pkgs.git}/bin:${pkgs.openssh}/bin"
 
     [program:nginx]
     command=${nginxWithModules}/bin/nginx -c ${nginxConf}
@@ -327,7 +320,7 @@ let
     stderr_logfile_maxbytes=0
 
     [program:health-checker]
-    command=${healthCheckerScript}
+    command=${healthCheckerScript}/bin/health-checker
     autostart=true
     autorestart=true
     startretries=3
@@ -338,7 +331,7 @@ let
     stderr_logfile_maxbytes=0
   '';
 
-  containerStartupScript = pkgs.writeShellScript "start-org-agenda-api" ''
+  containerStartupScript = pkgs.writeShellScriptBin "start-org-agenda-api" ''
     set -e
 
     # Create necessary directories
@@ -358,65 +351,28 @@ let
       elif [ -n "$AUTH_USER" ] && [ -n "$AUTH_PASSWORD" ]; then
         # Generate htpasswd from env vars
         ${pkgs.coreutils}/bin/echo "Generating htpasswd for user: $AUTH_USER"
-        ${pkgs.apacheHttpd}/bin/htpasswd -cb /tmp/.htpasswd "$AUTH_USER" "$AUTH_PASSWORD"
-        ${pkgs.coreutils}/bin/chmod 644 /tmp/.htpasswd
+        # Create htpasswd file using openssl
+        ${pkgs.openssl}/bin/openssl passwd -apr1 "$AUTH_PASSWORD" > /tmp/htpasswd.tmp
+        ${pkgs.coreutils}/bin/echo "$AUTH_USER:$(cat /tmp/htpasswd.tmp)" > /tmp/htpasswd
+        rm /tmp/htpasswd.tmp
         ${pkgs.coreutils}/bin/cat > /tmp/nginx-auth.conf << EOF
     auth_basic "org-agenda-api";
-    auth_basic_user_file /tmp/.htpasswd;
+    auth_basic_user_file /tmp/htpasswd;
     EOF
       else
         # No auth configured
-        ${pkgs.coreutils}/bin/echo "Warning: No authentication configured. API is open."
-        ${pkgs.coreutils}/bin/echo "# No auth configured" > /tmp/nginx-auth.conf
+        ${pkgs.coreutils}/bin/echo "No auth configured"
+        ${pkgs.coreutils}/bin/cat > /tmp/nginx-auth.conf << EOF
+    auth_basic off;
+    EOF
       fi
     }
 
+    # Call auth setup
     setup_nginx_auth
 
-    # Setup SSH configuration
-    setup_ssh_key() {
-      local key_path="$1"
-      ${pkgs.coreutils}/bin/cat > /root/.ssh/config << EOF
-    Host *
-      StrictHostKeyChecking no
-      UserKnownHostsFile /dev/null
-      IdentityFile $key_path
-    EOF
-      ${pkgs.coreutils}/bin/chmod 600 /root/.ssh/config
-    }
-
-    # If SSH key content is provided via env var, write it to a file
-    if [ -n "$GIT_SSH_PRIVATE_KEY" ]; then
-      ${pkgs.coreutils}/bin/echo "$GIT_SSH_PRIVATE_KEY" > /root/.ssh/key
-      ${pkgs.coreutils}/bin/chmod 600 /root/.ssh/key
-      setup_ssh_key /root/.ssh/key
-    # If SSH key file is mounted at /secrets/ssh_key
-    elif [ -f "/secrets/ssh_key" ]; then
-      ${pkgs.coreutils}/bin/chmod 600 /secrets/ssh_key 2>/dev/null || true
-      setup_ssh_key /secrets/ssh_key
-    fi
-
-    # Set git config for commits
-    ${pkgs.git}/bin/git config --global user.email "''${GIT_USER_EMAIL:-org-agenda-api@localhost}"
-    ${pkgs.git}/bin/git config --global user.name "''${GIT_USER_NAME:-org-agenda-api}"
-
-    # Clone and configure repositories
-    if [ -n "$GIT_SYNC_REPOSITORIES" ]; then
-      ${pkgs.coreutils}/bin/echo "Configuring multiple repositories..."
-      ${pkgs.jq}/bin/jq -c '.[]' <<< "$GIT_SYNC_REPOSITORIES" 2>/dev/null | while read -r repo; do
-        url=$(${pkgs.jq}/bin/jq -r '.url' <<< "$repo")
-        path=$(${pkgs.jq}/bin/jq -r '.path' <<< "$repo")
-        repo_dir="/data/$path"
-        ${pkgs.coreutils}/bin/mkdir -p "$repo_dir"
-        ${pkgs.git}/bin/git config --global --add safe.directory "$repo_dir"
-        if [ ! -d "$repo_dir/.git" ]; then
-          ${pkgs.coreutils}/bin/echo "Cloning $url to $repo_dir..."
-          ${pkgs.git}/bin/git clone "$url" "$repo_dir"
-        else
-          ${pkgs.coreutils}/bin/echo "Repository already exists at $repo_dir"
-        fi
-      done
-    elif [ -n "$GIT_SYNC_REPOSITORY" ]; then
+    # Handle git repository setup if provided
+    if [ -n "$GIT_SYNC_REPOSITORY" ]; then
       ${pkgs.git}/bin/git config --global --add safe.directory /data/org
       if [ ! -d "/data/org/.git" ]; then
         ${pkgs.coreutils}/bin/echo "Cloning repository from $GIT_SYNC_REPOSITORY..."
@@ -430,106 +386,194 @@ let
     exec ${pkgs.python3Packages.supervisor}/bin/supervisord -c ${containerSupervisordConf}
   '';
 
-in
-pkgs.dockerTools.buildImage {
-  inherit name tag;
-
-  copyToRoot = pkgs.buildEnv {
-    name = "org-agenda-api-root";
-    paths = [
-      emacsWithPackages
-      nginxWithModules
-      pkgs.curl
-      pkgs.coreutils
-      pkgs.bash
-      pkgs.git
-      pkgs.openssh
-      pkgs.jq
-      pkgs.cacert
-      pkgs.python3Packages.supervisor
-      pkgs.tzdata
-      gitSyncRs
-      # QoL tools for interactive use
-      pkgs.less
-      pkgs.ncurses
-      pkgs.readline
-    ] ++ extraPackages;
-    pathsToLink = [ "/bin" "/lib" "/share" "/etc" ];
-  };
-
-  runAsRoot = ''
-    ${pkgs.dockerTools.shadowSetup}
-    groupadd --system nginx
-    useradd --system --gid nginx nginx
-    mkdir -p /data/org
-    mkdir -p /tmp
-    mkdir -p /root/.ssh
-    mkdir -p /secrets
-    mkdir -p /var/log/nginx
-    mkdir -p /var/cache/nginx
-    mkdir -p /var/www/mova
-    chmod 1777 /tmp
-    chmod 700 /root/.ssh
-    chown nginx:nginx /var/log/nginx /var/cache/nginx
-    # Copy mova web app
-    cp -r ${movaWeb}/* /var/www/mova/
-    ${if emacsConfigPackage != null then ''
-      # Copy emacs config into container
-      mkdir -p ${containerConfigPath}
-      cp -r ${emacsConfigPackage}/* ${containerConfigPath}/
-    '' else ""}
+  containerInitRoot = pkgs.runCommand "org-agenda-api-container-init" {} ''
+    mkdir -p $out/etc/org-agenda-api
+    cp ${containerInitEl} $out${containerInitPath}
   '';
 
-  config = {
-    Cmd = [ "${containerStartupScript}" ];
-    ExposedPorts = {
-      "80/tcp" = {};
+  mkContainerBase = {
+    name ? "org-agenda-api-base",
+    tag ? "latest",
+    extraPackages ? [],
+  }:
+    let
+      baseEnv = pkgs.buildEnv {
+        name = "org-agenda-api-base-env";
+        paths = [
+          emacsWithPackages
+          nginxWithModules
+          pkgs.curl
+          pkgs.coreutils
+          pkgs.bash
+          pkgs.git
+          pkgs.openssh
+          pkgs.jq
+          pkgs.cacert
+          pkgs.python3Packages.supervisor
+          pkgs.tzdata
+          gitSyncRs
+          # QoL tools for interactive use
+          pkgs.less
+          pkgs.ncurses
+          pkgs.readline
+          # Runtime scripts
+          gitSyncMultiScript
+          healthCheckerScript
+          emacsStartScript
+          containerStartupScript
+        ] ++ extraPackages;
+        pathsToLink = [ "/bin" ];
+      };
+    in
+    pkgs.dockerTools.buildLayeredImage {
+      inherit name tag;
+
+      contents = [ baseEnv ];
+
+      fakeRootCommands = ''
+        ${pkgs.dockerTools.shadowSetup}
+        groupadd --system nginx
+        useradd --system --gid nginx nginx
+        mkdir -p /data/org
+        mkdir -p /tmp
+        mkdir -p /root/.ssh
+        mkdir -p /secrets
+        mkdir -p /var/log/nginx
+        mkdir -p /var/cache/nginx
+        mkdir -p /var/www/mova
+        chmod 1777 /tmp
+        chmod 700 /root/.ssh
+        chown nginx:nginx /var/log/nginx /var/cache/nginx
+        # Copy mova web app
+        cp -r ${movaWeb}/* /var/www/mova/
+      '';
+      enableFakechroot = true;
+
+      # Maximum number of layers (default 100)
+      maxLayers = 100;
     };
-    Volumes = {
-      "/data" = {};
-      "/secrets" = {};
+
+  mkContainer = {
+    name ? "org-agenda-api",
+    tag ? "latest",
+    baseImage ? null,
+    customElispFile ? null,
+    # Directory containing emacs config with straight/ subdirectory
+    # Should include: README.el, org-config.el, org-config-*.el, straight/
+    emacsConfigDir ? null,
+    # Entry point elisp file within emacsConfigDir (relative path)
+    # This file should load org-agenda-api and start the server
+    emacsConfigEntryPoint ? "org-config.el",
+    extraPackages ? [],
+  }:
+    let
+      emacsConfigPackage = if emacsConfigDir != null then
+        pkgs.runCommand "emacs-config" {} ''
+          mkdir -p $out
+          # Copy elisp files
+          for f in ${emacsConfigDir}/*.el; do
+            if [ -f "$f" ]; then
+              cp "$f" $out/
+            fi
+          done
+          # Copy straight directory (repos and build)
+          if [ -d "${emacsConfigDir}/straight" ]; then
+            cp -r ${emacsConfigDir}/straight $out/
+          fi
+        ''
+      else null;
+
+      emacsConfigRoot = if emacsConfigPackage != null then
+        pkgs.runCommand "emacs-config-root" {} ''
+          mkdir -p $out${containerConfigPath}
+          cp -r ${emacsConfigPackage}/* $out${containerConfigPath}/
+        ''
+      else null;
+
+      baseImageResolved = if baseImage != null then
+        baseImage
+      else
+        mkContainerBase {
+          name = "${name}-base";
+          tag = tag;
+          extraPackages = extraPackages;
+        };
+
+      overlayExtras = if baseImage != null then extraPackages else [];
+
+      copyToRoot =
+        [ orgAgendaApiSitelisp containerInitRoot ]
+        ++ lib.optional (emacsConfigRoot != null) emacsConfigRoot
+        ++ overlayExtras;
+
+      env = [
+        # Timezone data for TZ environment variable support
+        "TZDIR=${pkgs.tzdata}/share/zoneinfo"
+        # Global PATH for interactive shells (SSH, exec)
+        "PATH=/bin"
+        # Editor preference
+        "EDITOR=emacs"
+        # Terminal type for readline/ncurses
+        "TERM=xterm-256color"
+        # SSL certificates for HTTPS git repos
+        "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+        "NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+        # Org agenda API settings
+        "ORG_AGENDA_FILES=/data/org"
+        "ORG_INBOX_FILE=/data/org/inbox.org"
+        "ORG_API_PORT=${toString port}"
+        "ORG_AGENDA_API_GIT_COMMIT=${gitCommit}"
+        "ORG_AGENDA_API_VERSION=${orgAgendaApiVersion}"
+        # Worker lifecycle - restart emacs periodically for freshness
+        # Emacs exits after completing a request when lifetime is reached
+        # Set to empty to disable, or override with your own value
+        "ORG_API_MAX_LIFETIME=900"
+        # Health checker settings - monitors emacs and restarts if unhealthy
+        # Checks every INTERVAL seconds; if check fails, retries immediately once
+        "HEALTH_CHECK_INTERVAL=10"
+        "HEALTH_CHECK_TIMEOUT=5"
+        # Git sync settings
+        "GIT_SYNC_INTERVAL=60"
+        "GIT_SYNC_NEW_FILES=true"
+        "GIT_SYNC_REMOTE=origin"
+        # Git user (for commits)
+        "GIT_USER_EMAIL=org-agenda-api@localhost"
+        "GIT_USER_NAME=org-agenda-api"
+        # Emacs runtime configuration
+        "ORG_AGENDA_API_LOAD_PATH=${orgAgendaApiLoadPathDefault}"
+        "ORG_AGENDA_API_INIT=${containerInitPath}"
+        "ORG_AGENDA_API_CONFIG_DIR=${containerConfigPath}"
+        "ORG_AGENDA_API_CONFIG_ENTRYPOINT=${emacsConfigEntryPoint}"
+        # Git repository options (choose one):
+        # GIT_SYNC_REPOSITORIES - JSON array for multiple repos:
+        #   [{"url": "git@github.com:user/org.git", "path": "org"},
+        #    {"url": "git@github.com:user/work.git", "path": "work"}]
+        #   Repos are cloned to /data/<path>/
+        # GIT_SYNC_REPOSITORY - single repo URL (legacy), clones to /data/org
+        # GIT_SSH_PRIVATE_KEY - or mount key to /secrets/ssh_key
+        # ORG_API_CUSTOM_ELISP - path to custom elisp file
+      ] ++ lib.optional (customElispFile != null) "ORG_API_CUSTOM_ELISP=${customElispFile}";
+    in
+    pkgs.dockerTools.buildImage {
+      inherit name tag;
+      fromImage = baseImageResolved;
+
+      copyToRoot = copyToRoot;
+
+      config = {
+        Cmd = [ "${containerStartupScript}/bin/start-org-agenda-api" ];
+        ExposedPorts = {
+          "80/tcp" = {};
+        };
+        Volumes = {
+          "/data" = {};
+          "/secrets" = {};
+        };
+        Env = env;
+      };
     };
-    Env = [
-      # Timezone data for TZ environment variable support
-      "TZDIR=${pkgs.tzdata}/share/zoneinfo"
-      # Global PATH for interactive shells (SSH, exec)
-      "PATH=/bin"
-      # Editor preference
-      "EDITOR=emacs"
-      # Terminal type for readline/ncurses
-      "TERM=xterm-256color"
-      # SSL certificates for HTTPS git repos
-      "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-      "NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-      # Org agenda API settings
-      "ORG_AGENDA_FILES=/data/org"
-      "ORG_INBOX_FILE=/data/org/inbox.org"
-      "ORG_API_PORT=${toString port}"
-      "ORG_AGENDA_API_GIT_COMMIT=${gitCommit}"
-      "ORG_AGENDA_API_VERSION=${orgAgendaApiVersion}"
-      # Worker lifecycle - restart emacs periodically for freshness
-      # Emacs exits after completing a request when lifetime is reached
-      # Set to empty to disable, or override with your own value
-      "ORG_API_MAX_LIFETIME=900"
-      # Health checker settings - monitors emacs and restarts if unhealthy
-      # Checks every INTERVAL seconds; if check fails, retries immediately once
-      "HEALTH_CHECK_INTERVAL=10"
-      "HEALTH_CHECK_TIMEOUT=5"
-      # Git sync settings
-      "GIT_SYNC_INTERVAL=60"
-      "GIT_SYNC_NEW_FILES=true"
-      "GIT_SYNC_REMOTE=origin"
-      # Git user (for commits)
-      "GIT_USER_EMAIL=org-agenda-api@localhost"
-      "GIT_USER_NAME=org-agenda-api"
-      # Git repository options (choose one):
-      # GIT_SYNC_REPOSITORIES - JSON array for multiple repos:
-      #   [{"url": "git@github.com:user/org.git", "path": "org"},
-      #    {"url": "git@github.com:user/work.git", "path": "work"}]
-      #   Repos are cloned to /data/<path>/
-      # GIT_SYNC_REPOSITORY - single repo URL (legacy), clones to /data/org
-      # GIT_SSH_PRIVATE_KEY - or mount key to /secrets/ssh_key
-      # ORG_API_CUSTOM_ELISP - path to custom elisp file
-    ];
-  };
+
+in
+{
+  inherit mkContainerBase mkContainer;
 }

@@ -185,9 +185,11 @@
         '';
 
         # Import the container builder
-        mkContainer = import ./container.nix {
+        containerLib = import ./container.nix {
           inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiSitelisp containerInitEl gitCommit movaWeb orgAgendaApiVersion;
         };
+        mkContainer = containerLib.mkContainer;
+        mkContainerBase = containerLib.mkContainerBase;
 
         # Package an existing emacs config directory (with pre-populated straight/)
         # The straight/ directory should already have packages installed
@@ -287,7 +289,7 @@
 
       in {
         # Expose builder functions
-        lib = { inherit mkContainer mkEmacsConfig; };
+        lib = { inherit mkContainer mkContainerBase mkEmacsConfig; };
 
         packages = {
           # The elisp package (all modules)
@@ -298,6 +300,8 @@
 
           # Default Docker container image (minimal, no custom config)
           container = mkContainer {};
+          # Cached base image (no org-agenda-api code or emacs config)
+          container-base = mkContainerBase {};
 
           # Bootstrap script for populating straight.el packages
           bootstrap-emacs-config = bootstrapScript;

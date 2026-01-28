@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v25
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Use Cachix
+        uses: cachix/cachix-action@v14
+        with:
+          name: org-agenda-api
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+      - name: Build base container
+        run: nix build .#container-base --no-link
+
+      - name: Build container
+        run: nix build .#container --no-link
+
+      - name: Run container integration tests
+        run: nix develop -c pytest tests/test_container_integration.py -v -s
