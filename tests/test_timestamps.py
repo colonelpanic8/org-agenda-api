@@ -47,10 +47,16 @@ class TestSameDayTimeRanges:
         """Task with same-day scheduled time range should have scheduledEnd."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "same-day scheduled time range" in t.get("title", "").lower()),
+            (
+                t
+                for t in todos
+                if "same-day scheduled time range" in t.get("title", "").lower()
+            ),
             None,
         )
-        assert task is not None, "Test fixture 'Task with same-day scheduled time range' not found"
+        assert task is not None, (
+            "Test fixture 'Task with same-day scheduled time range' not found"
+        )
         assert task.get("scheduled") is not None
         assert task.get("scheduledEnd") is not None
 
@@ -58,7 +64,11 @@ class TestSameDayTimeRanges:
         """Same-day scheduled time range should have correct start and end times."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "same-day scheduled time range" in t.get("title", "").lower()),
+            (
+                t
+                for t in todos
+                if "same-day scheduled time range" in t.get("title", "").lower()
+            ),
             None,
         )
         assert task is not None
@@ -73,10 +83,16 @@ class TestSameDayTimeRanges:
         """Task with same-day deadline time range should have deadlineEnd."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "same-day deadline time range" in t.get("title", "").lower()),
+            (
+                t
+                for t in todos
+                if "same-day deadline time range" in t.get("title", "").lower()
+            ),
             None,
         )
-        assert task is not None, "Test fixture 'Task with same-day deadline time range' not found"
+        assert task is not None, (
+            "Test fixture 'Task with same-day deadline time range' not found"
+        )
         assert task.get("deadline") is not None
         assert task.get("deadlineEnd") is not None
 
@@ -84,7 +100,11 @@ class TestSameDayTimeRanges:
         """Same-day deadline time range should have correct start and end times."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if "same-day deadline time range" in t.get("title", "").lower()),
+            (
+                t
+                for t in todos
+                if "same-day deadline time range" in t.get("title", "").lower()
+            ),
             None,
         )
         assert task is not None
@@ -103,7 +123,12 @@ class TestRangedDeadlineTimestamps:
         """Task with ranged deadline should have deadlineEnd field."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if t.get("title", "").lower() == "task with ranged deadline"), None
+            (
+                t
+                for t in todos
+                if t.get("title", "").lower() == "task with ranged deadline"
+            ),
+            None,
         )
         assert task is not None, "Test fixture 'Task with ranged deadline' not found"
         assert task.get("deadline") is not None
@@ -113,7 +138,12 @@ class TestRangedDeadlineTimestamps:
         """Ranged deadline with time components should preserve times."""
         todos = api.get_all_todos().json()["todos"]
         task = next(
-            (t for t in todos if t.get("title", "").lower() == "task with ranged deadline"), None
+            (
+                t
+                for t in todos
+                if t.get("title", "").lower() == "task with ranged deadline"
+            ),
+            None,
         )
         assert task is not None
         # deadline is now an object with "date" and "time" keys

@@ -72,10 +72,16 @@ class TestAllHabitStatuses:
 
         # Find a common habit and compare graph lengths
         for default_habit in default_habits:
-            if default_habit.get("id") == "habit-exercise-daily" and "graph" in default_habit:
+            if (
+                default_habit.get("id") == "habit-exercise-daily"
+                and "graph" in default_habit
+            ):
                 default_graph = default_habit.get("graph", [])
                 for short_habit in short_habits:
-                    if short_habit.get("id") == "habit-exercise-daily" and "graph" in short_habit:
+                    if (
+                        short_habit.get("id") == "habit-exercise-daily"
+                        and "graph" in short_habit
+                    ):
                         short_graph = short_habit.get("graph", [])
                         assert len(short_graph) <= len(default_graph)
                         return

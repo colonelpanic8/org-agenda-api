@@ -243,7 +243,11 @@ class APIClient:
         return self.get(f"/custom-view?key={key}")
 
     def get_habit_status(
-        self, org_id: str, preceding: int = None, following: int = None, date: str = None
+        self,
+        org_id: str,
+        preceding: int = None,
+        following: int = None,
+        date: str = None,
     ) -> requests.Response:
         """GET /habit-status with id and optional range parameters.
 

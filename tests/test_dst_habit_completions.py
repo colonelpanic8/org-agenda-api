@@ -35,10 +35,7 @@ class TestDSTHabitCompletions:
         """
         # Query habit status for Jan 26, 2024 (winter, PST)
         response = api.get_habit_status(
-            "habit-dst-summer-start",
-            preceding=3,
-            following=1,
-            date="2024-01-26"
+            "habit-dst-summer-start", preceding=3, following=1, date="2024-01-26"
         )
         assert response.status_code == 200, f"Failed: {response.text}"
 
@@ -70,7 +67,7 @@ class TestDSTHabitCompletions:
             "habit-dst-summer-start",
             preceding=3,
             following=1,
-            date="2024-03-11"  # Day after spring forward
+            date="2024-03-11",  # Day after spring forward
         )
         assert response.status_code == 200, f"Failed: {response.text}"
 
@@ -102,7 +99,7 @@ class TestDSTHabitCompletions:
             "habit-dst-summer-start",
             preceding=3,
             following=1,
-            date="2024-11-04"  # Day after fall back
+            date="2024-11-04",  # Day after fall back
         )
         assert response.status_code == 200, f"Failed: {response.text}"
 
@@ -135,7 +132,7 @@ class TestDSTHabitCompletions:
             "habit-dst-summer-start",
             preceding=5,
             following=5,
-            date="2024-03-10"  # DST transition day
+            date="2024-03-10",  # DST transition day
         )
         assert response.status_code == 200, f"Failed: {response.text}"
 
