@@ -2,33 +2,74 @@ name: CI
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [master, main]
   pull_request:
 
 jobs:
-  build-test:
+  check:
+    name: Lint & Compile
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@v25
+      - uses: cachix/install-nix-action@v27
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Use Cachix
-        uses: cachix/cachix-action@v14
+      - uses: cachix/cachix-action@v14
         with:
           name: org-agenda-api
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Run nix flake check (elisp compile, ruff)
+        run: nix flake check --print-build-logs
+
+  test:
+    name: Integration Tests
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - uses: cachix/cachix-action@v14
+        with:
+          name: org-agenda-api
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Run integration tests
+        run: nix develop -c pytest tests/ --ignore=tests/test_container_integration.py -v -s --tb=short --timeout=60
+
+  container:
+    name: Container Build & Test
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - uses: cachix/cachix-action@v14
+        with:
+          name: org-agenda-api
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Build base container
-        run: nix build .#container-base --no-link
+        run: nix build .#container-base -o result-base
 
       - name: Build container
-        run: nix build .#container --no-link
+        run: nix build .#container -o result
 
       - name: Run container integration tests
         run: nix develop -c pytest tests/test_container_integration.py -v -s
