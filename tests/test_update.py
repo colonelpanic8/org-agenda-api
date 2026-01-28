@@ -817,7 +817,7 @@ class TestUpdateStateAndTitle:
             (t for t in todos["todos"] if new_title in t.get("title", "")),
             None,
         )
-        assert updated_todo is not None, f"Todo with new title not found"
+        assert updated_todo is not None, "Todo with new title not found"
         assert updated_todo.get("todo") == "DONE"
         # Should have gotten an ID after update
         assert updated_todo.get("id") is not None
