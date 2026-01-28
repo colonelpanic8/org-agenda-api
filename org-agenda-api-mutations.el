@@ -322,23 +322,31 @@ Returns alist with status, details, and new position."
                     (while (and (< (point) entry-end)
                                 (looking-at "^\\s-*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):"))
                       (forward-line 1))
-                    ;; Skip properties drawer if present
-                    (when (looking-at "^\\s-*:PROPERTIES:")
+                    ;; Skip properties drawer if present (with boundary check)
+                    (when (and (< (point) entry-end)
+                               (looking-at "^\\s-*:PROPERTIES:"))
                       (re-search-forward "^\\s-*:END:" entry-end t)
                       (forward-line 1))
-                    ;; Skip logbook drawer if present
-                    (when (looking-at "^\\s-*:LOGBOOK:")
+                    ;; Skip logbook drawer if present (with boundary check)
+                    (when (and (< (point) entry-end)
+                               (looking-at "^\\s-*:LOGBOOK:"))
                       (re-search-forward "^\\s-*:END:" entry-end t)
                       (forward-line 1))
                     ;; Now we're at the start of body content
-                    (setq content-start (point))
+                    ;; Ensure content-start is not past entry-end
+                    (setq content-start (min (point) entry-end))
                     ;; Find end of body (before child headings)
-                    (let ((body-end (save-excursion
-                                      (if (re-search-forward "^\\*+ " entry-end t)
-                                          (line-beginning-position)
-                                        entry-end))))
-                      ;; Delete existing body content
-                      (delete-region content-start body-end)
+                    ;; Only search if content-start is before entry-end
+                    (let ((body-end (if (>= content-start entry-end)
+                                        entry-end
+                                      (save-excursion
+                                        (goto-char content-start)
+                                        (if (re-search-forward "^\\*+ " entry-end t)
+                                            (line-beginning-position)
+                                          entry-end)))))
+                      ;; Delete existing body content (only if there's something to delete)
+                      (when (< content-start body-end)
+                        (delete-region content-start body-end))
                       ;; Insert new body if provided
                       (goto-char content-start)
                       (when (and body-value

@@ -507,15 +507,23 @@ class TestStateChangeLogBug:
             deadline_date = extract_date(deadline)
             completed_at_date = completed_at[:10] if completed_at else None
 
+            # For habits, the completion is tracked in the logbook via habitCompletedOnQueryDate
+            is_habit_completed_on_date = entry.get(
+                "isWindowHabit", False
+            ) and entry.get("habitCompletedOnQueryDate", False)
+
             has_matching_date = (
                 scheduled_date == query_date
                 or deadline_date == query_date
                 or completed_at_date == query_date
+                or is_habit_completed_on_date
             )
             assert has_matching_date, (
                 f"Entry has no date matching {query_date}: "
                 f"title={entry.get('title')}, "
-                f"scheduled={scheduled}, deadline={deadline}, completedAt={completed_at}"
+                f"scheduled={scheduled}, deadline={deadline}, completedAt={completed_at}, "
+                f"isWindowHabit={entry.get('isWindowHabit')}, "
+                f"habitCompletedOnQueryDate={entry.get('habitCompletedOnQueryDate')}"
             )
 
 

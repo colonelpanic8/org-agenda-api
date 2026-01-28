@@ -645,7 +645,7 @@ class TestUpdateBody:
         response = api.update_todo(todo, {"body": body_content})
         data = response.json()
 
-        assert data.get("status") == "updated"
+        assert data.get("status") == "updated", f"Expected 'updated' but got: {data}"
         updates = data.get("updates", {})
         if isinstance(updates, dict):
             assert "body" in updates
