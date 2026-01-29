@@ -1,12 +1,10 @@
-# Habit Integration for Multi-Day Agenda - COMPLETED
+# Habit Integration for Multi-Day Agenda - WIP
 
-## Summary
+## Current State
 
-The habit integration for multi-day agenda is now complete. Habits appear only on
-dates where completion is required, using `org-window-habit-get-future-required-intervals`
-for prospective scheduling.
+The basic multi-day agenda is implemented and working (tests pass). Now integrating habits to appear only on their required dates using `org-window-habit-get-future-required-intervals`.
 
-## What Was Implemented
+## What's Done
 
 1. **Multi-day response builder** (`org-agenda-api-data.el`):
    - `org-agenda-api--build-multi-day-response` updated to:
@@ -25,14 +23,41 @@ for prospective scheduling.
      - `org-agenda-api--get-habit-entry-for-date` - creates entry for a habit on specific date
      - `org-agenda-api--collect-habits-for-date-range` - main function to collect all habits
 
-3. **Test coverage** (`tests/test_agenda.py`):
-   - `TestMultiDayAgendaHabits` class with tests for:
-     - Habits appearing on required dates with `dateRelevance: "habit_required"`
-     - `habitCompletedOnQueryDate` field for completion tracking
+## What Needs to Be Done
 
-## Test Results
+1. **Fix and test the implementation**:
+   - Run `nix develop -c pytest tests/test_agenda.py::TestMultiDayAgenda tests/test_agenda.py::TestMultiDayAgendaHabits -v`
+   - Debug any remaining errors
+   - The last error was `void-function org-agenda-api--priority-to-letter` - FIXED (changed to use `org-entry-get`)
 
-All 366 tests pass, with 7 skipped (unrelated to this feature).
+2. **Handle past dates**:
+   - Current implementation uses `org-window-habit-get-future-required-intervals` which is for future dates
+   - For past dates relative to `today`, we need different logic:
+     - Walk backwards through assessment windows
+     - Determine which days required completion based on done-times
+   - May need a new function in org-window-habit or custom logic here
+
+3. **Test edge cases**:
+   - Habits with no completions
+   - Habits with `only-days` restrictions
+   - Multiple window specs
+   - Date ranges spanning past and future relative to `today`
+
+4. **Run full test suite** to ensure no regressions
+
+## To Continue
+
+```bash
+cd /home/imalison/dotfiles/dotfiles/emacs.d/straight/repos/org-agenda-api
+git checkout wip/habit-multiday-integration
+
+# Run tests
+nix develop -c pytest tests/test_agenda.py::TestMultiDayAgenda tests/test_agenda.py::TestMultiDayAgendaHabits -v
+
+# Debug errors, iterate until tests pass
+# Then run full suite:
+nix develop -c pytest tests/ -v
+```
 
 ## Key Files
 
