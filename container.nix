@@ -390,6 +390,14 @@ let
     # Call auth setup
     setup_nginx_auth
 
+    # Configure git user identity from environment
+    if [ -n "$GIT_USER_EMAIL" ]; then
+      ${pkgs.git}/bin/git config --global user.email "$GIT_USER_EMAIL"
+    fi
+    if [ -n "$GIT_USER_NAME" ]; then
+      ${pkgs.git}/bin/git config --global user.name "$GIT_USER_NAME"
+    fi
+
     # Handle git repository setup if provided
     if [ -n "$GIT_SYNC_REPOSITORY" ]; then
       ${pkgs.git}/bin/git config --global --add safe.directory /data/org
