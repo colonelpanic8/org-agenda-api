@@ -18,6 +18,7 @@
 ;;; Code:
 
 (require 'org-agenda-api-core)
+(require 'org-agenda-api-data)  ; For date utility functions
 (require 'simple-httpd)  ; For defservlet macro
 
 ;; Only proceed if org-window-habit is available
@@ -372,6 +373,116 @@ Accepts query params:
        (insert (json-encode `(("status" . "error")
                               ("message" . ,(error-message-string err)))))))
     (org-agenda-api--track-request))
+
+  ;;; Multi-Day Agenda Habit Integration
+
+  (defun org-agenda-api--get-habit-required-dates-in-range (habit start-date end-date reference-time)
+    "Get dates when HABIT requires completion within START-DATE to END-DATE range.
+REFERENCE-TIME is the time to treat as 'now' for calculations.
+Returns a list of date strings (YYYY-MM-DD) when completion is required."
+    (let* ((now reference-time)
+           ;; Calculate how many days in the range
+           (start-time (org-agenda-api--date-string-to-time start-date))
+           (end-time (org-agenda-api--date-string-to-time end-date))
+           (days-in-range (1+ (/ (float-time (time-subtract end-time start-time)) 86400)))
+           ;; Get enough future intervals to cover the range
+           (future-intervals (condition-case err
+                                 (org-window-habit-get-future-required-intervals
+                                  habit (ceiling (* days-in-range 2)) now)
+                               (error
+                                (org-agenda-api--log 'warn "Failed to get future intervals: %s" err)
+                                nil)))
+           (required-dates nil))
+      ;; Filter to dates within range
+      (dolist (interval future-intervals)
+        (let ((date-str (format-time-string "%Y-%m-%d" interval)))
+          (when (and (or (string< start-date date-str)
+                         (string= start-date date-str))
+                     (or (string< date-str end-date)
+                         (string= date-str end-date)))
+            (push date-str required-dates))))
+      (nreverse required-dates)))
+
+  (defun org-agenda-api--date-string-to-time (date-string)
+    "Convert DATE-STRING (YYYY-MM-DD) to Emacs time."
+    (let* ((parts (split-string date-string "-"))
+           (year (string-to-number (nth 0 parts)))
+           (month (string-to-number (nth 1 parts)))
+           (day (string-to-number (nth 2 parts))))
+      (encode-time 0 0 12 day month year)))
+
+  (defun org-agenda-api--get-habit-entry-for-date (habit file pos date-str reference-time)
+    "Create agenda entry for HABIT at FILE/POS for DATE-STR.
+REFERENCE-TIME is used for calculations."
+    (with-current-buffer (find-file-noselect file)
+      (save-excursion
+        (goto-char pos)
+        (let* ((title (org-get-heading t t t t))
+               (tags (org-get-tags))
+               (todo-state (org-get-todo-state))
+               (org-id (org-id-get))
+               (priority (org-entry-get (point) "PRIORITY"))
+               (habit-summary (org-agenda-api--get-habit-summary))
+               ;; Check if completed on this date
+               (completed-on-date (org-agenda-api--habit-completed-on-date-p date-str)))
+          `(("title" . ,title)
+            ("todo" . ,todo-state)
+            ("file" . ,file)
+            ("pos" . ,pos)
+            ("id" . ,org-id)
+            ("tags" . ,(when tags (vconcat tags)))
+            ("priority" . ,priority)
+            ("isWindowHabit" . t)
+            ("dateRelevance" . "habit_required")
+            ,@(when habit-summary
+                `(("habitSummary" . ,habit-summary)))
+            ,@(when completed-on-date
+                `(("habitCompletedOnQueryDate" . t))))))))
+
+  (defun org-agenda-api--collect-habits-for-date-range (start-date end-date today-str)
+    "Collect habit entries for each date in range START-DATE to END-DATE.
+TODAY-STR is the reference date for calculations.
+Returns an alist of (date-str . entries-list)."
+    (unless (org-agenda-api--window-habit-available-p)
+      (org-agenda-api--log 'debug "org-window-habit not available, skipping habit collection")
+      (cl-return-from org-agenda-api--collect-habits-for-date-range nil))
+    (let* ((reference-time (org-agenda-api--date-string-to-time today-str))
+           (habits-by-date (make-hash-table :test 'equal))
+           (dates (org-agenda-api--date-range start-date end-date)))
+      ;; Initialize hash table with empty lists for each date
+      (dolist (date-str dates)
+        (puthash date-str nil habits-by-date))
+      ;; Find all habits and compute their required dates
+      (dolist (file org-agenda-files)
+        (when (file-exists-p file)
+          (with-current-buffer (find-file-noselect file)
+            (save-excursion
+              (goto-char (point-min))
+              (while (re-search-forward org-heading-regexp nil t)
+                (when (and (org-at-heading-p)
+                           (org-agenda-api--is-window-habit-p))
+                  (let* ((pos (line-beginning-position))
+                         (habit (condition-case nil
+                                    (org-window-habit-create-instance-from-heading-at-point)
+                                  (error nil))))
+                    (when habit
+                      ;; Get required dates for this habit
+                      (let ((required-dates
+                             (org-agenda-api--get-habit-required-dates-in-range
+                              habit start-date end-date reference-time)))
+                        ;; Add entry for each required date
+                        (dolist (date-str required-dates)
+                          (let ((entry (org-agenda-api--get-habit-entry-for-date
+                                        habit file pos date-str reference-time)))
+                            (puthash date-str
+                                     (cons entry (gethash date-str habits-by-date))
+                                     habits-by-date))))))))))))
+      ;; Convert hash table to alist
+      (let ((result nil))
+        (maphash (lambda (date entries)
+                   (push (cons date (nreverse entries)) result))
+                 habits-by-date)
+        (nreverse result))))
 
   ;; Log that the module is loaded
   (org-agenda-api--log 'info "org-window-habit integration module loaded"))

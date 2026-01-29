@@ -1440,6 +1440,32 @@ Returns entry with dateRelevance added."
   "Collect agenda entries for a single DATE-STR."
   (org-agenda-api--run-agenda 'day date-str include-overdue include-completed))
 
+(defun org-agenda-api--entry-is-window-habit-p (entry)
+  "Return non-nil if ENTRY is a window habit."
+  (eq t (cdr (assoc "isWindowHabit" entry))))
+
+(defun org-agenda-api--merge-habit-entries (regular-entries habit-entries)
+  "Merge HABIT-ENTRIES into REGULAR-ENTRIES, avoiding duplicates.
+Returns combined list with habits that weren't already present."
+  (let ((seen-habits (make-hash-table :test 'equal)))
+    ;; Track habits already in regular entries by file+pos
+    (dolist (entry regular-entries)
+      (when (org-agenda-api--entry-is-window-habit-p entry)
+        (let ((key (format "%s:%s"
+                           (cdr (assoc "file" entry))
+                           (cdr (assoc "pos" entry)))))
+          (puthash key t seen-habits))))
+    ;; Add habit entries that aren't duplicates
+    (let ((new-habits nil))
+      (dolist (entry habit-entries)
+        (let ((key (format "%s:%s"
+                           (cdr (assoc "file" entry))
+                           (cdr (assoc "pos" entry)))))
+          (unless (gethash key seen-habits)
+            (push entry new-habits)
+            (puthash key t seen-habits))))
+      (append regular-entries (nreverse new-habits)))))
+
 (defun org-agenda-api--build-multi-day-response
     (span start-date end-date-param today-str include-overdue include-completed overdue-behavior)
   "Build multi-day agenda response.
@@ -1451,16 +1477,32 @@ INCLUDE-OVERDUE and INCLUDE-COMPLETED control item inclusion.
 OVERDUE-BEHAVIOR is 'original', 'today', or 'both'."
   (let* ((end-date (org-agenda-api--compute-end-date start-date span end-date-param))
          (dates (org-agenda-api--date-range start-date end-date))
+         ;; Collect habits separately using prospective scheduling
+         (habits-by-date (when (fboundp 'org-agenda-api--collect-habits-for-date-range)
+                           (org-agenda-api--collect-habits-for-date-range
+                            start-date end-date today-str)))
          (days-alist '()))
     ;; Collect entries for each day
     (dolist (date-str dates)
       (let* ((day-entries (org-agenda-api--collect-entries-for-date
                            date-str include-overdue include-completed))
-             ;; Add dateRelevance to each entry
+             ;; Filter out window habits from regular entries (they'll be added from habits-by-date)
+             (non-habit-entries (if habits-by-date
+                                    (cl-remove-if #'org-agenda-api--entry-is-window-habit-p day-entries)
+                                  day-entries))
+             ;; Get habit entries for this date
+             (habit-entries (cdr (assoc date-str habits-by-date)))
+             ;; Merge regular entries with habit entries
+             (all-entries (if habit-entries
+                              (org-agenda-api--merge-habit-entries non-habit-entries habit-entries)
+                            non-habit-entries))
+             ;; Add dateRelevance to each entry (habits already have it)
              (entries-with-relevance
               (mapcar (lambda (entry)
-                        (org-agenda-api--add-date-relevance entry date-str today-str))
-                      day-entries)))
+                        (if (assoc "dateRelevance" entry)
+                            entry
+                          (org-agenda-api--add-date-relevance entry date-str today-str)))
+                      all-entries)))
         (push (cons date-str (vconcat entries-with-relevance)) days-alist)))
     ;; Build response
     `(("span" . ,(symbol-name span))

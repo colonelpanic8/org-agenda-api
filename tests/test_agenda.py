@@ -7,7 +7,6 @@ from conftest import (
     TEST_DATE_PREV_DAY,
     TEST_DATE_ORG,
     TEST_WEEK_START,
-    TEST_WEEK_END,
     TEST_WEEK_DATES,
     extract_date,
 )
@@ -929,7 +928,6 @@ class TestMultiDayAgenda:
     def test_overdue_behavior_original(self, api):
         """overdue_behavior=original should place items on original date."""
         response = api.get_agenda(span="week", overdue_behavior="original")
-        data = response.json()
 
         assert response.status_code == 200
         # Just verify the parameter is accepted; detailed behavior tested elsewhere
@@ -957,7 +955,13 @@ class TestMultiDayAgenda:
 
     def test_date_relevance_values(self, api):
         """dateRelevance should be one of the expected values."""
-        valid_values = {"scheduled", "deadline", "overdue", "habit_required", "completed"}
+        valid_values = {
+            "scheduled",
+            "deadline",
+            "overdue",
+            "habit_required",
+            "completed",
+        }
         response = api.get_agenda(span="week")
         data = response.json()
 
@@ -1014,7 +1018,6 @@ class TestMultiDayAgendaCompleted:
     def test_completed_items_with_include_completed(self, api):
         """include_completed=true should include completed items."""
         response = api.get_agenda(span="week", include_completed=True)
-        data = response.json()
 
         assert response.status_code == 200
         # Should have the parameter reflected or at least work
