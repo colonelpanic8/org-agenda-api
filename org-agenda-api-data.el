@@ -1370,5 +1370,104 @@ Returns a list of notification objects suitable for JSON encoding."
                      nil)))
                 all-notifications))))
 
+;;; Multi-Day Agenda Support
+
+(defun org-agenda-api--date-add-days (date-string days)
+  "Add DAYS to DATE-STRING (YYYY-MM-DD format), return new date string."
+  (let* ((parts (split-string date-string "-"))
+         (year (string-to-number (nth 0 parts)))
+         (month (string-to-number (nth 1 parts)))
+         (day (string-to-number (nth 2 parts)))
+         (time (encode-time 0 0 12 day month year))
+         (new-time (time-add time (days-to-time days)))
+         (decoded (decode-time new-time)))
+    (format "%04d-%02d-%02d"
+            (nth 5 decoded) (nth 4 decoded) (nth 3 decoded))))
+
+(defun org-agenda-api--date-range (start-date end-date)
+  "Return list of date strings from START-DATE to END-DATE (inclusive)."
+  (let ((dates '())
+        (current start-date))
+    (while (or (string< current end-date)
+               (string= current end-date))
+      (push current dates)
+      (setq current (org-agenda-api--date-add-days current 1)))
+    (nreverse dates)))
+
+(defun org-agenda-api--compute-end-date (start-date span end-date-param)
+  "Compute end date given START-DATE, SPAN, and optional END-DATE-PARAM."
+  (cond
+   (end-date-param end-date-param)
+   ((eq span 'week) (org-agenda-api--date-add-days start-date 6))
+   (t start-date)))
+
+(defun org-agenda-api--add-date-relevance (entry date-str today-str)
+  "Add dateRelevance field to ENTRY for DATE-STR, with TODAY-STR as reference.
+Returns entry with dateRelevance added."
+  (let* ((scheduled (cdr (assoc "scheduled" entry)))
+         (deadline (cdr (assoc "deadline" entry)))
+         (completed-at (cdr (assoc "completedAt" entry)))
+         (is-habit (eq t (cdr (assoc "isWindowHabit" entry))))
+         (scheduled-date (when scheduled
+                           (if (stringp scheduled)
+                               (substring scheduled 0 10)
+                             (cdr (assoc "date" scheduled)))))
+         (deadline-date (when deadline
+                          (if (stringp deadline)
+                              (substring deadline 0 10)
+                            (cdr (assoc "date" deadline)))))
+         (completed-date (when completed-at
+                           (substring completed-at 0 10)))
+         (relevance
+          (cond
+           ;; Habit appearing on this date
+           (is-habit "habit_required")
+           ;; Completed on this date
+           ((and completed-date (string= completed-date date-str)) "completed")
+           ;; Scheduled for this date
+           ((and scheduled-date (string= scheduled-date date-str)) "scheduled")
+           ;; Deadline on this date
+           ((and deadline-date (string= deadline-date date-str)) "deadline")
+           ;; Overdue (scheduled/deadline before today, appearing on a different date)
+           ((or (and scheduled-date (string< scheduled-date today-str))
+                (and deadline-date (string< deadline-date today-str)))
+            "overdue")
+           ;; Default to scheduled if we can't determine
+           (t "scheduled"))))
+    (cons `("dateRelevance" . ,relevance) entry)))
+
+(defun org-agenda-api--collect-entries-for-date (date-str include-overdue include-completed)
+  "Collect agenda entries for a single DATE-STR."
+  (org-agenda-api--run-agenda 'day date-str include-overdue include-completed))
+
+(defun org-agenda-api--build-multi-day-response
+    (span start-date end-date-param today-str include-overdue include-completed overdue-behavior)
+  "Build multi-day agenda response.
+SPAN is 'day or 'week.
+START-DATE is the first date (YYYY-MM-DD).
+END-DATE-PARAM is optional end date override.
+TODAY-STR is the date to treat as today.
+INCLUDE-OVERDUE and INCLUDE-COMPLETED control item inclusion.
+OVERDUE-BEHAVIOR is 'original', 'today', or 'both'."
+  (let* ((end-date (org-agenda-api--compute-end-date start-date span end-date-param))
+         (dates (org-agenda-api--date-range start-date end-date))
+         (days-alist '()))
+    ;; Collect entries for each day
+    (dolist (date-str dates)
+      (let* ((day-entries (org-agenda-api--collect-entries-for-date
+                           date-str include-overdue include-completed))
+             ;; Add dateRelevance to each entry
+             (entries-with-relevance
+              (mapcar (lambda (entry)
+                        (org-agenda-api--add-date-relevance entry date-str today-str))
+                      day-entries)))
+        (push (cons date-str (vconcat entries-with-relevance)) days-alist)))
+    ;; Build response
+    `(("span" . ,(symbol-name span))
+      ("startDate" . ,start-date)
+      ("endDate" . ,end-date)
+      ("today" . ,today-str)
+      ("days" . ,(nreverse days-alist)))))
+
 (provide 'org-agenda-api-data)
 ;;; org-agenda-api-data.el ends here

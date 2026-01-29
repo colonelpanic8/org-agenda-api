@@ -23,6 +23,19 @@ TEST_DATE_NEXT_DAY_ORG = "2024-06-16 Sun"
 TEST_DATE_PREV_DAY = "2024-06-14"
 TEST_DATE_PREV_DAY_ORG = "2024-06-14 Fri"
 
+# Week range for multi-day tests (TEST_DATE is Saturday, so week is Sat-Fri)
+TEST_WEEK_START = "2024-06-15"  # Saturday
+TEST_WEEK_END = "2024-06-21"  # Friday
+TEST_WEEK_DATES = [
+    "2024-06-15",
+    "2024-06-16",
+    "2024-06-17",
+    "2024-06-18",
+    "2024-06-19",
+    "2024-06-20",
+    "2024-06-21",
+]
+
 
 def extract_date(timestamp):
     """Extract the date string from a timestamp.
@@ -139,14 +152,43 @@ class APIClient:
         return self.get("/get-todays-agenda")
 
     def get_agenda(
-        self, span: str = "day", date: str = None, include_overdue: bool = None
+        self,
+        span: str = "day",
+        date: str = None,
+        include_overdue: bool = None,
+        include_completed: bool = None,
+        start_date: str = None,
+        end_date: str = None,
+        today: str = None,
+        overdue_behavior: str = None,
     ) -> requests.Response:
-        """GET /agenda with optional span, date, and include_overdue parameters."""
+        """GET /agenda with optional parameters.
+
+        Args:
+            span: 'day' or 'week' (default: 'day')
+            date: Date for single-day agenda (YYYY-MM-DD)
+            include_overdue: Include overdue items
+            include_completed: Include completed items
+            start_date: Start of date range (YYYY-MM-DD)
+            end_date: End of date range (YYYY-MM-DD)
+            today: Date to treat as "today" for overdue calculations
+            overdue_behavior: 'original', 'today', or 'both'
+        """
         params = f"?span={span}"
         if date:
             params += f"&date={date}"
         if include_overdue is not None:
             params += f"&include_overdue={'true' if include_overdue else 'false'}"
+        if include_completed is not None:
+            params += f"&include_completed={'true' if include_completed else 'false'}"
+        if start_date:
+            params += f"&start_date={start_date}"
+        if end_date:
+            params += f"&end_date={end_date}"
+        if today:
+            params += f"&today={today}"
+        if overdue_behavior:
+            params += f"&overdue_behavior={overdue_behavior}"
         return self.get(f"/agenda{params}")
 
     def create_todo(self, title: str) -> requests.Response:

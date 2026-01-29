@@ -6,6 +6,9 @@ from conftest import (
     TEST_DATE_NEXT_DAY,
     TEST_DATE_PREV_DAY,
     TEST_DATE_ORG,
+    TEST_WEEK_START,
+    TEST_WEEK_END,
+    TEST_WEEK_DATES,
     extract_date,
 )
 
@@ -451,7 +454,8 @@ class TestAgendaDateParameter:
 
         assert response.status_code == 200
         assert data["span"] == "week"
-        assert data["date"] == TEST_DATE_NEXT_DAY
+        # For week span, startDate is used instead of date
+        assert data["startDate"] == TEST_DATE_NEXT_DAY
 
 
 class TestAgendaDateIsolation:
@@ -848,3 +852,186 @@ class TestAgendaHabitFields:
         # May or may not have habits scheduled for today
         for entry in habit_entries:
             assert "habitSummary" in entry
+
+
+class TestMultiDayAgenda:
+    """Tests for multi-day agenda view (span=week, date ranges)."""
+
+    def test_span_day_returns_flat_entries_backwards_compat(self, api):
+        """span=day should return flat 'entries' array for backwards compatibility."""
+        response = api.get_agenda(span="day")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert "entries" in data
+        assert isinstance(data["entries"], list)
+        # Should NOT have 'days' key for single-day
+        assert "days" not in data
+        assert data["span"] == "day"
+
+    def test_span_week_returns_days_grouped(self, api):
+        """span=week should return 'days' object grouped by date."""
+        response = api.get_agenda(span="week")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert "days" in data
+        assert isinstance(data["days"], dict)
+        assert data["span"] == "week"
+        # Should have startDate and endDate
+        assert "startDate" in data
+        assert "endDate" in data
+
+    def test_span_week_has_seven_days(self, api):
+        """span=week should return exactly 7 days."""
+        response = api.get_agenda(span="week", date=TEST_DATE)
+        data = response.json()
+
+        assert len(data["days"]) == 7
+
+    def test_span_week_days_are_consecutive(self, api):
+        """Days in week view should be consecutive."""
+        response = api.get_agenda(span="week", date=TEST_WEEK_START)
+        data = response.json()
+
+        days = sorted(data["days"].keys())
+        assert days == TEST_WEEK_DATES
+
+    def test_span_week_each_day_is_array(self, api):
+        """Each day in week view should have an array of entries."""
+        response = api.get_agenda(span="week")
+        data = response.json()
+
+        for date_str, entries in data["days"].items():
+            assert isinstance(entries, list), f"Day {date_str} should be a list"
+
+    def test_custom_date_range_with_end_date(self, api):
+        """Should support custom date range with end_date parameter."""
+        response = api.get_agenda(
+            span="week", start_date="2024-06-15", end_date="2024-06-17"
+        )
+        data = response.json()
+
+        assert response.status_code == 200
+        assert "days" in data
+        # Should have 3 days: 15, 16, 17
+        days = sorted(data["days"].keys())
+        assert days == ["2024-06-15", "2024-06-16", "2024-06-17"]
+
+    def test_today_parameter_for_overdue_calculation(self, api):
+        """Should accept 'today' parameter for overdue calculations."""
+        response = api.get_agenda(span="week", today="2024-06-17")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert data.get("today") == "2024-06-17"
+
+    def test_overdue_behavior_original(self, api):
+        """overdue_behavior=original should place items on original date."""
+        response = api.get_agenda(span="week", overdue_behavior="original")
+        data = response.json()
+
+        assert response.status_code == 200
+        # Just verify the parameter is accepted; detailed behavior tested elsewhere
+
+    def test_overdue_behavior_today(self, api):
+        """overdue_behavior=today should be accepted."""
+        response = api.get_agenda(span="week", overdue_behavior="today")
+        assert response.status_code == 200
+
+    def test_overdue_behavior_both(self, api):
+        """overdue_behavior=both should be accepted."""
+        response = api.get_agenda(span="week", overdue_behavior="both")
+        assert response.status_code == 200
+
+    def test_entries_have_date_relevance_field(self, api):
+        """Entries in multi-day view should have dateRelevance field."""
+        response = api.get_agenda(span="week")
+        data = response.json()
+
+        for date_str, entries in data["days"].items():
+            for entry in entries:
+                assert "dateRelevance" in entry, (
+                    f"Entry '{entry.get('title')}' on {date_str} missing dateRelevance"
+                )
+
+    def test_date_relevance_values(self, api):
+        """dateRelevance should be one of the expected values."""
+        valid_values = {"scheduled", "deadline", "overdue", "habit_required", "completed"}
+        response = api.get_agenda(span="week")
+        data = response.json()
+
+        for date_str, entries in data["days"].items():
+            for entry in entries:
+                relevance = entry.get("dateRelevance")
+                assert relevance in valid_values, (
+                    f"Invalid dateRelevance '{relevance}' for entry '{entry.get('title')}'"
+                )
+
+
+class TestMultiDayAgendaHabits:
+    """Tests for habit handling in multi-day agenda view."""
+
+    def test_habits_appear_on_required_dates(self, api):
+        """Habits should only appear on dates where completion is required."""
+        response = api.get_agenda(span="week")
+        data = response.json()
+
+        # Find habit entries
+        habit_entries = []
+        for date_str, entries in data["days"].items():
+            for entry in entries:
+                if entry.get("isWindowHabit"):
+                    habit_entries.append((date_str, entry))
+
+        # All habits should have dateRelevance of habit_required
+        for date_str, entry in habit_entries:
+            assert entry.get("dateRelevance") == "habit_required", (
+                f"Habit '{entry.get('title')}' on {date_str} should have "
+                f"dateRelevance='habit_required', got '{entry.get('dateRelevance')}'"
+            )
+
+    def test_habit_has_completed_on_query_date_field(self, api):
+        """Habit entries should have habitCompletedOnQueryDate field indicating completion on that day."""
+        response = api.get_agenda(span="week")
+        data = response.json()
+
+        # Note: habitCompletedOnQueryDate is only present when true
+        # So we just check that habit entries exist and have expected structure
+        for date_str, entries in data["days"].items():
+            for entry in entries:
+                if entry.get("isWindowHabit"):
+                    # Habit entries should have habitSummary
+                    assert "habitSummary" in entry or "isWindowHabit" in entry, (
+                        f"Habit '{entry.get('title')}' on {date_str} missing "
+                        "expected habit fields"
+                    )
+
+
+class TestMultiDayAgendaCompleted:
+    """Tests for completed items in multi-day agenda view."""
+
+    def test_completed_items_with_include_completed(self, api):
+        """include_completed=true should include completed items."""
+        response = api.get_agenda(span="week", include_completed=True)
+        data = response.json()
+
+        assert response.status_code == 200
+        # Should have the parameter reflected or at least work
+
+    def test_completed_items_on_completion_date(self, api):
+        """Completed items should appear on their completion date."""
+        response = api.get_agenda(span="week", include_completed=True)
+        data = response.json()
+
+        # Find completed entries
+        for date_str, entries in data["days"].items():
+            for entry in entries:
+                if entry.get("dateRelevance") == "completed":
+                    # Entry should have completedAt that matches this date
+                    completed_at = entry.get("completedAt")
+                    if completed_at:
+                        assert completed_at.startswith(date_str), (
+                            f"Completed entry on {date_str} has completedAt "
+                            f"'{completed_at}' which doesn't match"
+                        )

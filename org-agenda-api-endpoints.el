@@ -45,27 +45,50 @@ Accepts optional query param 'refresh' (true/1) to git pull repos first."
 Accepts optional query params:
   - 'span' (day or week, defaults to day)
   - 'date' (YYYY-MM-DD format, defaults to today)
+  - 'start_date' (YYYY-MM-DD, start of date range, defaults to date)
+  - 'end_date' (YYYY-MM-DD, end of date range for custom ranges)
+  - 'today' (YYYY-MM-DD, date to treat as 'today' for overdue calculations)
   - 'include_overdue' (true/1) to include overdue items from previous days (default: false)
   - 'include_completed' (true/1) to include items completed on this date (default: false)
-  - 'refresh' (true/1) to git pull repos first."
+  - 'overdue_behavior' (original/today/both, controls where overdue items appear)
+  - 'refresh' (true/1) to git pull repos first.
+
+For span=day (default), returns flat 'entries' array for backwards compatibility.
+For span=week or when end_date is provided, returns 'days' object grouped by date."
   (let* ((span-param (cadr (assoc "span" query)))
          (date-param (cadr (assoc "date" query)))
+         (start-date-param (cadr (assoc "start_date" query)))
+         (end-date-param (cadr (assoc "end_date" query)))
+         (today-param (cadr (assoc "today" query)))
          (include-overdue-param (cadr (assoc "include_overdue" query)))
          (include-completed-param (cadr (assoc "include_completed" query)))
+         (overdue-behavior-param (cadr (assoc "overdue_behavior" query)))
          (refresh-param (cadr (assoc "refresh" query)))
          (git-results (when (member refresh-param '("true" "1"))
                         (org-agenda-api--git-refresh-all)))
          (span (if (string= span-param "week") 'week 'day))
          (include-overdue (member include-overdue-param '("true" "1")))
          (include-completed (member include-completed-param '("true" "1")))
+         (overdue-behavior (or overdue-behavior-param "original"))
          ;; Use requested date or default to today (using calendar-current-date for testability)
-         (today (calendar-current-date))
-         (today-str (format "%04d-%02d-%02d" (nth 2 today) (nth 0 today) (nth 1 today)))
-         (effective-date (or date-param today-str))
-         (entries (org-agenda-api--run-agenda span effective-date include-overdue include-completed))
-         (response `(("span" . ,(symbol-name span))
-                     ("date" . ,effective-date)
-                     ("entries" . ,(vconcat entries)))))
+         (calendar-today (calendar-current-date))
+         (today-str (format "%04d-%02d-%02d"
+                            (nth 2 calendar-today) (nth 0 calendar-today) (nth 1 calendar-today)))
+         (effective-today (or today-param today-str))
+         (effective-start (or start-date-param date-param today-str))
+         ;; Determine if multi-day mode
+         (multi-day-p (or end-date-param (eq span 'week)))
+         (response
+          (if multi-day-p
+              ;; Multi-day: return grouped by day
+              (org-agenda-api--build-multi-day-response
+               span effective-start end-date-param effective-today
+               include-overdue include-completed overdue-behavior)
+            ;; Single day: backwards compatible flat format
+            (let ((entries (org-agenda-api--run-agenda span effective-start include-overdue include-completed)))
+              `(("span" . ,(symbol-name span))
+                ("date" . ,effective-start)
+                ("entries" . ,(vconcat entries)))))))
     (when git-results
       (push `("gitRefresh" . ,(vconcat git-results)) response))
     (insert (json-encode response)))
