@@ -29,7 +29,9 @@ class TestHabitGraphStartDate:
         )
         data = response.json()
 
-        assert data.get("status") == "ok", f"Expected ok, got error: {data.get('message')}"
+        assert data.get("status") == "ok", (
+            f"Expected ok, got error: {data.get('message')}"
+        )
 
         graph = data.get("graph", [])
         assert len(graph) > 0, "Graph should not be empty"
@@ -39,8 +41,7 @@ class TestHabitGraphStartDate:
 
         # The start date (2024-06-14) should be in the graph
         assert "2024-06-14" in graph_dates, (
-            f"Start date 2024-06-14 should be in graph. "
-            f"Graph dates: {graph_dates}"
+            f"Start date 2024-06-14 should be in graph. Graph dates: {graph_dates}"
         )
 
         # The first date in the graph should be the start date
@@ -61,7 +62,9 @@ class TestHabitGraphStartDate:
         )
         data = response.json()
 
-        assert data.get("status") == "ok", f"Expected ok, got error: {data.get('message')}"
+        assert data.get("status") == "ok", (
+            f"Expected ok, got error: {data.get('message')}"
+        )
 
         graph = data.get("graph", [])
 
@@ -90,15 +93,15 @@ class TestHabitGraphStartDate:
         response = api.get_habit_status("habit-newly-started", date=TEST_DATE)
         data = response.json()
 
-        assert data.get("status") == "ok", f"Expected ok, got error: {data.get('message')}"
+        assert data.get("status") == "ok", (
+            f"Expected ok, got error: {data.get('message')}"
+        )
 
         done_times = data.get("doneTimes", [])
         assert len(done_times) > 0, "Should have at least one done time"
 
         # Check that there's a completion on 2024-06-14
-        june_14_completions = [
-            dt for dt in done_times if dt.startswith("2024-06-14")
-        ]
+        june_14_completions = [dt for dt in done_times if dt.startswith("2024-06-14")]
         assert len(june_14_completions) > 0, (
             f"Should have completion on 2024-06-14. Done times: {done_times}"
         )
@@ -131,6 +134,5 @@ class TestAllHabitStatusesStartDate:
         graph_dates = [entry["date"] for entry in graph]
 
         assert "2024-06-14" in graph_dates, (
-            f"Start date 2024-06-14 should be in graph. "
-            f"Graph dates: {graph_dates}"
+            f"Start date 2024-06-14 should be in graph. Graph dates: {graph_dates}"
         )
