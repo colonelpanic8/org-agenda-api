@@ -160,7 +160,9 @@ Returns a list of alists suitable for JSON encoding."
       (let* ((target-start (org-window-habit-normalize-time-to-duration now assessment-interval)))
         (dotimes (_ preceding)
           (let ((new-time (org-window-habit-keyed-duration-add-plist target-start assessment-decrement)))
-            (when (time-less-p start-time new-time)
+            ;; Use >= comparison to include the start date itself
+            ;; (time-less-or-equal-p from org-window-habit provides this)
+            (when (org-window-habit-time-less-or-equal-p start-time new-time)
               (setq target-start new-time))))
         ;; Build iterators starting at target-start
         (let ((iterators (mapcar (lambda (spec)
