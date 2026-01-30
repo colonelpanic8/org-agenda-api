@@ -699,5 +699,18 @@ and clears the todo cache."
              `(("status" . "ok")
                ("killedBuffers" . ,killed-count))))))
 
+(defservlet trigger-sync application/json ()
+  "Endpoint: Touch an org file to trigger git-sync-rs to sync.
+This is useful when you want to force git-sync-rs to run a sync cycle
+without waiting for its normal interval."
+  (condition-case err
+      (let ((result (org-agenda-api--trigger-sync)))
+        (insert (json-encode result)))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/trigger-sync" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
 (provide 'org-agenda-api-endpoints)
 ;;; org-agenda-api-endpoints.el ends here

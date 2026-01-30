@@ -283,6 +283,24 @@ Returns list of results for each repo."
       (org-agenda-api--invalidate-cache)
       (mapcar #'org-agenda-api--git-refresh-repo repos))))
 
+(defun org-agenda-api--trigger-sync ()
+  "Touch an org file to trigger git-sync-rs to sync.
+Returns alist with status and touched file path."
+  (let ((file (car org-agenda-files)))
+    (if file
+        (let ((expanded-file (expand-file-name file)))
+          (if (file-exists-p expanded-file)
+              (progn
+                (set-file-times expanded-file)
+                (org-agenda-api--log 'info "trigger-sync: touched %s" expanded-file)
+                `(("status" . "success")
+                  ("touchedFile" . ,expanded-file)
+                  ("message" . "File touched to trigger git-sync-rs")))
+            `(("status" . "error")
+              ("message" . ,(format "File does not exist: %s" expanded-file)))))
+      `(("status" . "error")
+        ("message" . "No org-agenda-files configured")))))
+
 ;;; Utility Functions
 
 (defun org-agenda-api--plist-to-alist (plist)
