@@ -1,6 +1,11 @@
 {
   description = "JSON HTTP API for org-agenda";
 
+  nixConfig = {
+    extra-substituters = [ "https://org-agenda-api.cachix.org" ];
+    extra-trusted-public-keys = [ "org-agenda-api.cachix.org-1:MzzlSeQpJ/erP9/qYU6EiS4LM4AHA/mpc8s4thtEvNI=" ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
