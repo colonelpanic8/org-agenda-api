@@ -157,11 +157,15 @@ Uses occ-map-entries-for-category to traverse entries."
 
 (defun org-agenda-api--build-category-capture-template (values)
   "Build a capture template string from VALUES.
-VALUES is an alist with title, todo, scheduled, deadline, priority, tags, properties.
+VALUES is an alist with title, state, scheduled, deadline, priority, tags, properties.
 scheduled and deadline are objects with {date, time?, repeater?}.
+Accepts both \"state\" and \"todo\" for the TODO state (for backwards compatibility).
 Returns a template string with all values pre-filled (no interactive prompts)."
   (let* ((title (or (cdr (assoc "title" values)) ""))
-         (todo-state (or (cdr (assoc "todo" values)) "TODO"))
+         ;; Accept both "state" and "todo" for backwards compatibility
+         (todo-state (or (cdr (assoc "state" values))
+                         (cdr (assoc "todo" values))
+                         "TODO"))
          (scheduled (cdr (assoc "scheduled" values)))
          (deadline (cdr (assoc "deadline" values)))
          (priority (cdr (assoc "priority" values)))
@@ -206,7 +210,7 @@ Returns a template string with all values pre-filled (no interactive prompts)."
   "Capture a new entry to CATEGORY using STRATEGY.
 VALUES is an alist that may contain:
   - title: The entry title (required)
-  - todo: TODO state (default: TODO)
+  - state: TODO state (default: TODO), also accepts \"todo\" for backwards compatibility
   - scheduled: ISO date/datetime string
   - deadline: ISO date/datetime string
   - priority: A, B, or C

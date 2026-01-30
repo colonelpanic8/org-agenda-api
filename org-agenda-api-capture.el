@@ -175,7 +175,7 @@ In addition to template prompts, VALUES may contain universal org fields:
   - deadline: object {date, time?, repeater?}
   - priority: A, B, or C
   - tags: list of tag strings
-  - todo: TODO state keyword
+  - state: TODO state keyword (also accepts \"todo\" for backwards compatibility)
 These are applied after the entry is created.
 Returns an alist with status information."
   (let ((template-entry (org-agenda-api--get-template template-key)))
@@ -196,7 +196,9 @@ Returns an alist with status information."
            (deadline (cdr (assoc "deadline" values)))
            (priority (cdr (assoc "priority" values)))
            (tags (cdr (assoc "tags" values)))
-           (todo-state (cdr (assoc "todo" values)))
+           ;; Accept both "state" and "todo" for backwards compatibility
+           (todo-state (or (cdr (assoc "state" values))
+                           (cdr (assoc "todo" values))))
            (entry-pos nil))
       ;; Append entry to target file
       (with-current-buffer (find-file-noselect target-file)
