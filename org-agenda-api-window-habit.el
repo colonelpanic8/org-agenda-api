@@ -486,6 +486,96 @@ Returns an alist of (date-str . entries-list)."
                  habits-by-date)
         (nreverse result))))
 
+  ;;; Meta-Evaluation Endpoints
+
+  (defun org-agenda-api--convert-meta-habit-for-json (habit-data)
+    "Convert HABIT-DATA from meta-evaluate for JSON serialization.
+Removes non-serializable marker and extracts useful info."
+    (let ((marker (cdr (assoc "marker" habit-data))))
+      `(("title" . ,(cdr (assoc "title" habit-data)))
+        ("weight" . ,(cdr (assoc "weight" habit-data)))
+        ("conformingRatio" . ,(cdr (assoc "conformingRatio" habit-data)))
+        ("file" . ,(when (and marker (marker-buffer marker))
+                     (buffer-file-name (marker-buffer marker))))
+        ("pos" . ,(when marker (marker-position marker)))
+        ("windowSpecsStatus" . ,(cdr (assoc "windowSpecsStatus" habit-data))))))
+
+  (defun org-agenda-api--convert-meta-result-for-json (result)
+    "Convert RESULT from meta-evaluate for JSON serialization."
+    (let ((habits (cdr (assoc "habits" result)))
+          (eval-time (cdr (assoc "evaluationTime" result))))
+      `(("score" . ,(cdr (assoc "score" result)))
+        ("habitCount" . ,(cdr (assoc "habitCount" result)))
+        ("evaluationTime" . ,(format-time-string "%Y-%m-%dT%H:%M:%S%z" eval-time))
+        ("habits" . ,(vconcat (mapcar #'org-agenda-api--convert-meta-habit-for-json habits))))))
+
+  (defservlet meta-score application/json (_path query)
+    "Endpoint: Return aggregated meta-score across all habits.
+Query params:
+  - 'date' (optional): reference date as YYYY-MM-DD (default: today)
+
+Returns the overall habit score (0.0-1.0+) computed as weighted geometric mean
+of all habit conforming ratios, plus per-habit breakdown."
+    (condition-case err
+        (let* ((date-str (cadr (assoc "date" query)))
+               (reference-time (if date-str
+                                   (org-agenda-api--parse-datetime date-str)
+                                 (current-time))))
+          (insert
+           (json-encode
+            (if (not (org-agenda-api--window-habit-available-p))
+                `(("status" . "error") ("message" . "org-window-habit-mode is not enabled"))
+              (let ((result (org-window-habit-meta-score nil reference-time)))
+                `(("status" . "ok")
+                  ,@(org-agenda-api--convert-meta-result-for-json result)))))))
+      (error
+       (org-agenda-api--log-error-with-backtrace "/meta-score" err)
+       (insert (json-encode `(("status" . "error")
+                              ("message" . ,(error-message-string err)))))))
+    (org-agenda-api--track-request))
+
+  (defservlet meta-score-series application/json (_path query)
+    "Endpoint: Return meta-score time series for graphing.
+Query params:
+  - 'start' (required): start date as YYYY-MM-DD
+  - 'end' (required): end date as YYYY-MM-DD
+  - 'step' (optional): step in days (default: 1)
+
+Returns a list of {time, score} entries for plotting habit performance over time."
+    (condition-case err
+        (let* ((start-str (cadr (assoc "start" query)))
+               (end-str (cadr (assoc "end" query)))
+               (step-str (cadr (assoc "step" query)))
+               (step-days (if step-str (string-to-number step-str) 1)))
+          (insert
+           (json-encode
+            (cond
+             ((not (org-agenda-api--window-habit-available-p))
+              `(("status" . "error") ("message" . "org-window-habit-mode is not enabled")))
+             ((not start-str)
+              `(("status" . "error") ("message" . "Missing required 'start' parameter")))
+             ((not end-str)
+              `(("status" . "error") ("message" . "Missing required 'end' parameter")))
+             (t
+              (let* ((start-time (org-agenda-api--parse-datetime start-str))
+                     (end-time (org-agenda-api--parse-datetime end-str))
+                     (step `(:days ,step-days))
+                     (series (org-window-habit-meta-score-series start-time end-time step)))
+                `(("status" . "ok")
+                  ("startDate" . ,start-str)
+                  ("endDate" . ,end-str)
+                  ("stepDays" . ,step-days)
+                  ("series" . ,(vconcat
+                                (mapcar (lambda (pair)
+                                          `(("date" . ,(format-time-string "%Y-%m-%d" (car pair)))
+                                            ("score" . ,(cdr pair))))
+                                        series))))))))))
+      (error
+       (org-agenda-api--log-error-with-backtrace "/meta-score-series" err)
+       (insert (json-encode `(("status" . "error")
+                              ("message" . ,(error-message-string err)))))))
+    (org-agenda-api--track-request))
+
   ;; Log that the module is loaded
   (org-agenda-api--log 'info "org-window-habit integration module loaded"))
 
