@@ -232,6 +232,12 @@ Returns templates, filterOptions, todoStates, customViews, categoryTypes, habitC
       (error
        (push (format "habitConfig: %s" (error-message-string err)) errors)
        (push '("habitConfig" . nil) result)))
+    ;; Collect exposed functions
+    (condition-case err
+        (push `("exposedFunctions" . ,(vconcat (org-agenda-api--get-exposed-functions))) result)
+      (error
+       (push (format "exposedFunctions: %s" (error-message-string err)) errors)
+       (push '("exposedFunctions" . []) result)))
     ;; Add errors array
     (push `("errors" . ,(vconcat (nreverse errors))) result)
     (insert (json-encode (nreverse result))))
@@ -708,6 +714,41 @@ without waiting for its normal interval."
         (insert (json-encode result)))
     (error
      (org-agenda-api--log-error-with-backtrace "/trigger-sync" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
+  (org-agenda-api--track-request))
+
+(defservlet call-function application/json (_path _query headers)
+  "Endpoint: Call a whitelisted elisp function.
+Accepts JSON body with:
+  - function: name of the function to call (must be in org-agenda-api-exposed-functions)
+
+The function is called with no arguments. Returns immediately with status ok.
+This is fire-and-forget - use for batch operations like rescheduling."
+  (condition-case err
+      (let* ((content-header (cadr (assoc "Content" headers)))
+             (json-data (json-parse-string content-header))
+             (func-name (gethash "function" json-data)))
+        (cond
+         ((null func-name)
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required 'function' parameter")))))
+         ((not (org-agenda-api--function-whitelisted-p func-name))
+          (org-agenda-api--log 'warn "/call-function: Attempted to call non-whitelisted function: %s" func-name)
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . ,(format "Function not in whitelist: %s" func-name))))))
+         (t
+          (let ((func-sym (intern func-name)))
+            (if (fboundp func-sym)
+                (progn
+                  (org-agenda-api--log 'info "/call-function: Calling %s" func-name)
+                  (funcall func-sym)
+                  (insert (json-encode `(("status" . "ok")
+                                         ("function" . ,func-name)))))
+              (insert (json-encode `(("status" . "error")
+                                     ("message" . ,(format "Function not defined: %s" func-name))))))))))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/call-function" err)
      (insert (json-encode `(("status" . "error")
                             ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))

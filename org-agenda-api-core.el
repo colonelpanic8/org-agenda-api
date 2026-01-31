@@ -176,6 +176,44 @@ for notifications. This provides stable identifiers for API consumers."
   :type 'boolean
   :group 'org-agenda-api)
 
+(defcustom org-agenda-api-exposed-functions nil
+  "List of elisp functions exposed for remote execution via the API.
+Each entry can be either:
+  - A symbol: function name (display name derived from symbol)
+  - A list: (SYMBOL :name \"Display Name\")
+
+Only functions in this whitelist can be called via the /call-function endpoint.
+
+Example:
+  (setq org-agenda-api-exposed-functions
+        \\='(org-reschedule-past-to-today
+          (imalison:lower-todo-priorities :name \"Lower Priorities\")))"
+  :type '(repeat (choice symbol (list symbol (plist :key-type keyword :value-type string))))
+  :group 'org-agenda-api)
+
+(defun org-agenda-api--get-exposed-functions ()
+  "Return exposed functions as a list of alists for JSON encoding.
+Each entry has \"id\" (function symbol name) and \"name\" (display name)."
+  (mapcar (lambda (entry)
+            (if (symbolp entry)
+                `(("id" . ,(symbol-name entry))
+                  ("name" . ,(symbol-name entry)))
+              (let* ((sym (car entry))
+                     (plist (cdr entry))
+                     (name (or (plist-get plist :name) (symbol-name sym))))
+                `(("id" . ,(symbol-name sym))
+                  ("name" . ,name)))))
+          org-agenda-api-exposed-functions))
+
+(defun org-agenda-api--function-whitelisted-p (func-name)
+  "Return t if FUNC-NAME (string) is in the exposed functions whitelist."
+  (let ((func-sym (intern func-name)))
+    (cl-some (lambda (entry)
+               (if (symbolp entry)
+                   (eq entry func-sym)
+                 (eq (car entry) func-sym)))
+             org-agenda-api-exposed-functions)))
+
 ;;; Worker Lifecycle
 
 (defvar org-agenda-api--request-count 0
