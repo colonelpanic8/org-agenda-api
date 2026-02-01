@@ -24,9 +24,7 @@ class TestProspectiveHabitFields:
         response = api.get_agenda(span="day", date=TEST_DATE)
         data = response.json()
 
-        habit_entries = [
-            e for e in data.get("entries", []) if e.get("isWindowHabit")
-        ]
+        habit_entries = [e for e in data.get("entries", []) if e.get("isWindowHabit")]
 
         # Skip if no habits on this day (test data may vary)
         if not habit_entries:
@@ -43,9 +41,7 @@ class TestProspectiveHabitFields:
         response = api.get_agenda(span="day", date=TEST_DATE)
         data = response.json()
 
-        habit_entries = [
-            e for e in data.get("entries", []) if e.get("isWindowHabit")
-        ]
+        habit_entries = [e for e in data.get("entries", []) if e.get("isWindowHabit")]
 
         if not habit_entries:
             pytest.skip("No habit entries found in day view for test date")
@@ -80,13 +76,11 @@ class TestProspectiveHabitFields:
         missing_category = []
         for date_str, entry in habit_entries:
             if entry.get("effectiveCategory") is None:
-                missing_category.append(
-                    f"  - '{entry.get('title')}' on {date_str}"
-                )
+                missing_category.append(f"  - '{entry.get('title')}' on {date_str}")
 
         assert not missing_category, (
-            f"Prospective habit entries should have effectiveCategory, "
-            f"but these entries have null:\n" + "\n".join(missing_category)
+            "Prospective habit entries should have effectiveCategory, "
+            "but these entries have null:\n" + "\n".join(missing_category)
         )
 
     def test_prospective_habit_has_properties_in_week_view(self, api):
@@ -112,13 +106,11 @@ class TestProspectiveHabitFields:
         missing_properties = []
         for date_str, entry in habit_entries:
             if entry.get("properties") is None:
-                missing_properties.append(
-                    f"  - '{entry.get('title')}' on {date_str}"
-                )
+                missing_properties.append(f"  - '{entry.get('title')}' on {date_str}")
 
         assert not missing_properties, (
-            f"Prospective habit entries should have properties, "
-            f"but these entries have null:\n" + "\n".join(missing_properties)
+            "Prospective habit entries should have properties, "
+            "but these entries have null:\n" + "\n".join(missing_properties)
         )
 
     def test_prospective_habit_category_matches_original(self, api, org_dir):
@@ -186,5 +178,6 @@ class TestProspectiveHabitFields:
 
         assert has_owh_props, (
             "At least one habit entry should have OWH_ properties. "
-            "Sample properties: " + str([e[1].get("properties") for e in habit_entries[:3]])
+            "Sample properties: "
+            + str([e[1].get("properties") for e in habit_entries[:3]])
         )
