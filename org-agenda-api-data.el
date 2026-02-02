@@ -1466,6 +1466,42 @@ Returns combined list with habits that weren't already present."
             (puthash key t seen-habits))))
       (append regular-entries (nreverse new-habits)))))
 
+(defun org-agenda-api--entry-is-overdue-p (entry today-str)
+  "Return non-nil if ENTRY is overdue relative to TODAY-STR.
+An entry is overdue if its scheduled or deadline date is before today."
+  (let* ((scheduled (cdr (assoc "scheduled" entry)))
+         (deadline (cdr (assoc "deadline" entry)))
+         (scheduled-date (when scheduled
+                           (if (stringp scheduled)
+                               (substring scheduled 0 10)
+                             (cdr (assoc "date" scheduled)))))
+         (deadline-date (when deadline
+                          (if (stringp deadline)
+                              (substring deadline 0 10)
+                            (cdr (assoc "date" deadline))))))
+    (or (and scheduled-date (string< scheduled-date today-str))
+        (and deadline-date (string< deadline-date today-str)))))
+
+(defun org-agenda-api--filter-entries-by-overdue-behavior
+    (entries date-str today-str overdue-behavior)
+  "Filter ENTRIES for DATE-STR based on OVERDUE-BEHAVIOR.
+TODAY-STR is the reference date for overdue calculations.
+OVERDUE-BEHAVIOR is \"original\", \"today\", or \"both\":
+  - \"original\": no filtering (items appear on queried date)
+  - \"today\": remove overdue items from dates that are not today
+  - \"both\": no filtering (overdue items appear on all dates)"
+  (cond
+   ;; "today" behavior: only show overdue items on today, filter them from other dates
+   ((and (equal overdue-behavior "today")
+         (not (string= date-str today-str)))
+    ;; This date is not today, so filter out overdue items
+    (cl-remove-if (lambda (entry)
+                    (org-agenda-api--entry-is-overdue-p entry today-str))
+                  entries))
+   ;; "original" and "both" behavior: no filtering needed
+   ;; (entries already appear on their queried dates)
+   (t entries)))
+
 (defun org-agenda-api--build-multi-day-response
     (span start-date end-date-param today-str include-overdue include-completed overdue-behavior)
   "Build multi-day agenda response.
@@ -1474,7 +1510,10 @@ START-DATE is the first date (YYYY-MM-DD).
 END-DATE-PARAM is optional end date override.
 TODAY-STR is the date to treat as today.
 INCLUDE-OVERDUE and INCLUDE-COMPLETED control item inclusion.
-OVERDUE-BEHAVIOR is 'original', 'today', or 'both'."
+OVERDUE-BEHAVIOR is \"original\", \"today\", or \"both\":
+  - \"original\": overdue items appear on their original scheduled date
+  - \"today\": overdue items only appear on today's date
+  - \"both\": overdue items appear on both original and today's date"
   (let* ((end-date (org-agenda-api--compute-end-date start-date span end-date-param))
          (dates (org-agenda-api--date-range start-date end-date))
          ;; Collect habits separately using prospective scheduling
@@ -1502,8 +1541,12 @@ OVERDUE-BEHAVIOR is 'original', 'today', or 'both'."
                         (if (assoc "dateRelevance" entry)
                             entry
                           (org-agenda-api--add-date-relevance entry date-str today-str)))
-                      all-entries)))
-        (push (cons date-str (vconcat entries-with-relevance)) days-alist)))
+                      all-entries))
+             ;; Apply overdue-behavior filtering
+             (filtered-entries
+              (org-agenda-api--filter-entries-by-overdue-behavior
+               entries-with-relevance date-str today-str overdue-behavior)))
+        (push (cons date-str (vconcat filtered-entries)) days-alist)))
     ;; Build response
     `(("span" . ,(symbol-name span))
       ("startDate" . ,start-date)

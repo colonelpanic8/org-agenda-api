@@ -933,14 +933,115 @@ class TestMultiDayAgenda:
         # Just verify the parameter is accepted; detailed behavior tested elsewhere
 
     def test_overdue_behavior_today(self, api):
-        """overdue_behavior=today should be accepted."""
-        response = api.get_agenda(span="week", overdue_behavior="today")
+        """overdue_behavior=today should place overdue items ONLY on today's date.
+
+        When using overdue_behavior=today:
+        - Overdue items (scheduled before today) should appear in today's entry
+        - Overdue items should NOT appear on future dates (tomorrow, day after, etc.)
+
+        This is important for multi-day views where showing overdue items on
+        every future day clutters the interface.
+
+        Test fixture 'today.org' contains:
+        - 'Task scheduled for yesterday' SCHEDULED: <2024-06-14>
+        - 'Task scheduled for today' SCHEDULED: <2024-06-15>
+        - 'Task scheduled for tomorrow' SCHEDULED: <2024-06-16>
+        """
+        response = api.get_agenda(
+            span="week",
+            include_overdue=True,
+            overdue_behavior="today",
+        )
         assert response.status_code == 200
+        data = response.json()
+
+        # Helper to find titles containing a substring
+        def titles_for_date(date_str):
+            entries = data["days"].get(date_str, [])
+            return [e.get("title", "") for e in entries]
+
+        # The overdue item "Task scheduled for yesterday" SHOULD appear on today
+        today_titles = titles_for_date(TEST_DATE)  # 2024-06-15
+        assert any("scheduled for yesterday" in t.lower() for t in today_titles), (
+            f"With overdue_behavior=today, overdue item 'Task scheduled for yesterday' "
+            f"should appear on today ({TEST_DATE}). Found titles: {today_titles}"
+        )
+
+        # The overdue item should NOT appear on tomorrow or later dates
+        tomorrow = TEST_DATE_NEXT_DAY  # 2024-06-16
+        tomorrow_titles = titles_for_date(tomorrow)
+        assert not any("scheduled for yesterday" in t.lower() for t in tomorrow_titles), (
+            f"With overdue_behavior=today, overdue item 'Task scheduled for yesterday' "
+            f"should NOT appear on {tomorrow}. Found titles: {tomorrow_titles}"
+        )
+
+        # Also check it doesn't appear on any other future dates in the week
+        for date_str in data["days"].keys():
+            if date_str > TEST_DATE:  # Any date after today
+                future_titles = titles_for_date(date_str)
+                assert not any("scheduled for yesterday" in t.lower() for t in future_titles), (
+                    f"With overdue_behavior=today, overdue item should NOT appear on "
+                    f"future date {date_str}. Found titles: {future_titles}"
+                )
+
+    def test_overdue_behavior_today_preserves_scheduled_items(self, api):
+        """overdue_behavior=today should not affect items scheduled for their actual date.
+
+        Items scheduled for tomorrow should still appear on tomorrow's entry,
+        even when overdue_behavior=today is set.
+        """
+        response = api.get_agenda(
+            span="week",
+            include_overdue=True,
+            overdue_behavior="today",
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        # "Task scheduled for tomorrow" should appear on tomorrow's date
+        tomorrow_entries = data["days"].get(TEST_DATE_NEXT_DAY, [])
+        tomorrow_titles = [e.get("title", "") for e in tomorrow_entries]
+        assert any("scheduled for tomorrow" in t.lower() for t in tomorrow_titles), (
+            f"Item 'Task scheduled for tomorrow' should appear on {TEST_DATE_NEXT_DAY}. "
+            f"Found titles: {tomorrow_titles}"
+        )
 
     def test_overdue_behavior_both(self, api):
-        """overdue_behavior=both should be accepted."""
-        response = api.get_agenda(span="week", overdue_behavior="both")
+        """overdue_behavior=both should place overdue items on BOTH original date AND today.
+
+        This mode duplicates overdue items so they appear:
+        1. On their original scheduled date
+        2. On today's date (as a reminder)
+        """
+        response = api.get_agenda(
+            span="week",
+            include_overdue=True,
+            overdue_behavior="both",
+            # Query a range that includes yesterday
+            start_date=TEST_DATE_PREV_DAY,  # 2024-06-14
+            end_date=TEST_DATE_NEXT_DAY,    # 2024-06-16
+        )
         assert response.status_code == 200
+        data = response.json()
+
+        # Helper to find titles containing a substring
+        def titles_for_date(date_str):
+            entries = data["days"].get(date_str, [])
+            return [e.get("title", "") for e in entries]
+
+        # The item should appear on its original date (yesterday)
+        yesterday_titles = titles_for_date(TEST_DATE_PREV_DAY)  # 2024-06-14
+        assert any("scheduled for yesterday" in t.lower() for t in yesterday_titles), (
+            f"With overdue_behavior=both, item should appear on original date "
+            f"({TEST_DATE_PREV_DAY}). Found titles: {yesterday_titles}"
+        )
+
+        # The item should ALSO appear on today
+        today_titles = titles_for_date(TEST_DATE)  # 2024-06-15
+        assert any("scheduled for yesterday" in t.lower() for t in today_titles), (
+            f"With overdue_behavior=both, item should also appear on today "
+            f"({TEST_DATE}). Found titles: {today_titles}"
+        )
 
     def test_entries_have_date_relevance_field(self, api):
         """Entries in multi-day view should have dateRelevance field."""
