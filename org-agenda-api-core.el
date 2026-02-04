@@ -299,6 +299,14 @@ Returns nil for in-file archive locations."
          (archive-files (org-agenda-api--get-archive-files base-files)))
     (delete-dups (append base-files archive-files))))
 
+(defun org-agenda-api--ensure-org-mode (files)
+  "Ensure FILES are opened in Org mode to keep element cache active."
+  (dolist (file files)
+    (when (and file (file-exists-p file))
+      (with-current-buffer (find-file-noselect file)
+        (unless (derived-mode-p 'org-mode)
+          (org-mode))))))
+
 (defmacro org-agenda-api--with-archives (include-archives &rest body)
   "Execute BODY with archive files/trees included when INCLUDE-ARCHIVES is non-nil."
   (declare (indent 1))
@@ -311,6 +319,7 @@ Returns nil for in-file archive locations."
              (progn
                (setq org-agenda-files (org-agenda-api--agenda-files-with-archives orig-files)
                      org-agenda-skip-archived-trees nil)
+               (org-agenda-api--ensure-org-mode org-agenda-files)
                (when (boundp 'org-agenda-archives-mode)
                  (setq org-agenda-archives-mode t))
                ,@body)
