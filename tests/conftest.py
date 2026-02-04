@@ -387,6 +387,8 @@ def org_test_dir(tmp_path_factory):
     # Copy static fixtures
     for fixture_file in fixtures_dir.glob("*.org"):
         shutil.copy(fixture_file, test_dir / fixture_file.name)
+    for fixture_file in fixtures_dir.glob("*.org_archive"):
+        shutil.copy(fixture_file, test_dir / fixture_file.name)
 
     # Create a fixture with the fake "today" date for agenda tests
     today_org = test_dir / "today.org"

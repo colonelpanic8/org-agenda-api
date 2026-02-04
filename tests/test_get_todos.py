@@ -55,6 +55,20 @@ class TestGetAllTodos:
         assert "tags" in buy_groceries
         assert "level" in buy_groceries
 
+    def test_include_archives_param(self, api):
+        """Should include archive files when include_archives=true."""
+        default_response = api.get_all_todos()
+        default_titles = [
+            item.get("title", "") for item in default_response.json()["todos"]
+        ]
+        assert "Archived test task" not in default_titles
+
+        archived_response = api.get("/get-all-todos?include_archives=true")
+        archived_titles = [
+            item.get("title", "") for item in archived_response.json()["todos"]
+        ]
+        assert "Archived test task" in archived_titles
+
     def test_includes_items_with_tags(self, api):
         """Should include TODO items that have tags."""
         response = api.get_all_todos()

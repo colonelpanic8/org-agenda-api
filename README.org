@@ -55,6 +55,9 @@ pytest tests/ -v        # Verbose output
 | =/custom-view?key=X= | Runs a specific custom agenda view         |
 | =/templates=         | Lists registered capture templates         |
 
+Common query params:
+- =include_archives=true= for =/get-all-todos=, =/agenda=, and =/agenda-files= to include archive files/trees.
+
 *** Create/Capture Endpoints (POST)
 
 | Endpoint   | Description                      |

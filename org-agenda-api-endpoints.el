@@ -20,14 +20,22 @@
 (defservlet get-all-todos application/json (_path query)
   "Endpoint: Return all TODO items from agenda files as JSON.
 Response is wrapped with notification defaults.
-Accepts optional query param 'refresh' (true/1) to git pull repos first."
+Accepts optional query params:
+  - 'refresh' (true/1) to git pull repos first
+  - 'include_archives' (true/1) to include archive files/trees."
   (let* ((refresh-param (cadr (assoc "refresh" query)))
+         (include-archives-param (cadr (assoc "include_archives" query)))
+         (include-archives (org-agenda-api--include-archives-p include-archives-param))
          (git-results (when (member refresh-param '("true" "1"))
                         (org-agenda-api--git-refresh-all)))
-         (todos (org-agenda-api--get-agenda-todos))
-         (defaults `(("notifyBefore" . ,(vconcat (org-agenda-api--get-default-notify-before)))))
-         (response `(("defaults" . ,defaults)
-                     ("todos" . ,(vconcat todos)))))
+         (response
+          (org-agenda-api--with-archives include-archives
+            (let* ((todos (if include-archives
+                              (org-agenda-api--get-agenda-todos-from-files org-agenda-files)
+                            (org-agenda-api--get-agenda-todos)))
+                   (defaults `(("notifyBefore" . ,(vconcat (org-agenda-api--get-default-notify-before))))))
+              `(("defaults" . ,defaults)
+                ("todos" . ,(vconcat todos)))))))
     (when git-results
       (push `("gitRefresh" . ,(vconcat git-results)) response))
     (insert (json-encode response)))
@@ -50,6 +58,7 @@ Accepts optional query params:
   - 'today' (YYYY-MM-DD, date to treat as 'today' for overdue calculations)
   - 'include_overdue' (true/1) to include overdue items from previous days (default: false)
   - 'include_completed' (true/1) to include items completed on this date (default: false)
+  - 'include_archives' (true/1) to include archive files/trees
   - 'overdue_behavior' (original/today/both, controls where overdue items appear)
   - 'refresh' (true/1) to git pull repos first.
 
@@ -62,6 +71,7 @@ For span=week or when end_date is provided, returns 'days' object grouped by dat
          (today-param (cadr (assoc "today" query)))
          (include-overdue-param (cadr (assoc "include_overdue" query)))
          (include-completed-param (cadr (assoc "include_completed" query)))
+         (include-archives-param (cadr (assoc "include_archives" query)))
          (overdue-behavior-param (cadr (assoc "overdue_behavior" query)))
          (refresh-param (cadr (assoc "refresh" query)))
          (git-results (when (member refresh-param '("true" "1"))
@@ -69,6 +79,7 @@ For span=week or when end_date is provided, returns 'days' object grouped by dat
          (span (if (string= span-param "week") 'week 'day))
          (include-overdue (member include-overdue-param '("true" "1")))
          (include-completed (member include-completed-param '("true" "1")))
+         (include-archives (org-agenda-api--include-archives-p include-archives-param))
          (overdue-behavior (or overdue-behavior-param "original"))
          ;; Use requested date or default to today (using calendar-current-date for testability)
          (calendar-today (calendar-current-date))
@@ -79,16 +90,17 @@ For span=week or when end_date is provided, returns 'days' object grouped by dat
          ;; Determine if multi-day mode
          (multi-day-p (or end-date-param (eq span 'week)))
          (response
-          (if multi-day-p
-              ;; Multi-day: return grouped by day
-              (org-agenda-api--build-multi-day-response
-               span effective-start end-date-param effective-today
-               include-overdue include-completed overdue-behavior)
-            ;; Single day: backwards compatible flat format
-            (let ((entries (org-agenda-api--run-agenda span effective-start include-overdue include-completed)))
-              `(("span" . ,(symbol-name span))
-                ("date" . ,effective-start)
-                ("entries" . ,(vconcat entries)))))))
+          (org-agenda-api--with-archives include-archives
+            (if multi-day-p
+                ;; Multi-day: return grouped by day
+                (org-agenda-api--build-multi-day-response
+                 span effective-start end-date-param effective-today
+                 include-overdue include-completed overdue-behavior)
+              ;; Single day: backwards compatible flat format
+              (let ((entries (org-agenda-api--run-agenda span effective-start include-overdue include-completed)))
+                `(("span" . ,(symbol-name span))
+                  ("date" . ,effective-start)
+                  ("entries" . ,(vconcat entries))))))))
     (when git-results
       (push `("gitRefresh" . ,(vconcat git-results)) response))
     (insert (json-encode response)))
@@ -161,9 +173,15 @@ If 'asOf' is provided, calculates notifications as if it were that time."
                             ("message" . ,(format "Server error: %S" err)))))))
   (org-agenda-api--track-request))
 
-(defservlet agenda-files application/json ()
-  "Endpoint: Return the list of org-agenda-files as JSON."
-  (let* ((files (mapcar #'expand-file-name org-agenda-files))
+(defservlet agenda-files application/json (_path query)
+  "Endpoint: Return the list of org-agenda-files as JSON.
+Accepts optional query param:
+  - 'include_archives' (true/1) to include archive files."
+  (let* ((include-archives-param (cadr (assoc "include_archives" query)))
+         (include-archives (org-agenda-api--include-archives-p include-archives-param))
+         (files (if include-archives
+                    (org-agenda-api--agenda-files-with-archives org-agenda-files)
+                  (mapcar #'expand-file-name org-agenda-files)))
          (file-info (mapcar (lambda (f)
                               `(("path" . ,f)
                                 ("exists" . ,(if (file-exists-p f) t :json-false))

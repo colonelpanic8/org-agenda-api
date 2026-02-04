@@ -1,0 +1,10 @@
+#+TITLE: Archived Tasks
+
+* DONE Archived test task
+  CLOSED: [2024-06-15 Sat 09:30]
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [2024-06-15 Sat 09:30]
+  :END:
+
+* TODO Archived scheduled task
+  SCHEDULED: <2024-06-15 Sat>

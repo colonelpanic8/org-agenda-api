@@ -11,6 +11,7 @@
 (require 'cl-lib)
 (require 'lisp-mnt)
 (require 'org-agenda)
+(require 'org-archive)
 
 ;;; Version
 
@@ -191,6 +192,24 @@ Example:
   :type '(repeat (choice symbol (list symbol (plist :key-type keyword :value-type string))))
   :group 'org-agenda-api)
 
+(defcustom org-agenda-api-archive-files nil
+  "Archive files or directories to include when archives are requested.
+Each entry may be a file path or a directory. Directories are scanned for
+files matching `org-agenda-api-archive-file-pattern'."
+  :type '(repeat string)
+  :group 'org-agenda-api)
+
+(defcustom org-agenda-api-archive-file-pattern "\\.org_archive\\'"
+  "Regexp used to identify archive files within archive directories."
+  :type 'regexp
+  :group 'org-agenda-api)
+
+(defcustom org-agenda-api-include-archives-default nil
+  "When non-nil, include archive files/trees by default for read endpoints.
+This can be overridden per-request via the `include_archives' query param."
+  :type 'boolean
+  :group 'org-agenda-api)
+
 (defun org-agenda-api--get-exposed-functions ()
   "Return exposed functions as a list of alists for JSON encoding.
 Each entry has \"id\" (function symbol name) and \"name\" (display name)."
@@ -213,6 +232,93 @@ Each entry has \"id\" (function symbol name) and \"name\" (display name)."
                    (eq entry func-sym)
                  (eq (car entry) func-sym)))
              org-agenda-api-exposed-functions)))
+
+;;; Archive handling
+
+(defun org-agenda-api--param-truthy-p (value)
+  "Return t if VALUE (string) represents a truthy query param."
+  (member value '("true" "1" "t" "yes")))
+
+(defun org-agenda-api--param-falsey-p (value)
+  "Return t if VALUE (string) represents a falsey query param."
+  (member value '("false" "0" "nil" "no")))
+
+(defun org-agenda-api--include-archives-p (param)
+  "Return t if archives should be included given PARAM.
+PARAM is a query param string for `include_archives'."
+  (cond
+   ((org-agenda-api--param-truthy-p param) t)
+   ((org-agenda-api--param-falsey-p param) nil)
+   (t org-agenda-api-include-archives-default)))
+
+(defun org-agenda-api--archive-location-file (agenda-file)
+  "Return archive file path for AGENDA-FILE based on `org-archive-location'.
+Returns nil for in-file archive locations."
+  (when (boundp 'org-archive-location)
+    (let ((archive-location org-archive-location))
+      (when (and agenda-file (file-exists-p agenda-file))
+        (with-current-buffer (find-file-noselect agenda-file)
+          (setq archive-location org-archive-location)))
+      (when (stringp archive-location)
+        (let* ((location (car (split-string archive-location "::")))
+               (location (or location "")))
+          (unless (string= location "")
+            (let* ((base (file-name-nondirectory (expand-file-name agenda-file)))
+                   (target (replace-regexp-in-string "%s" base location t t))
+                   (expanded (expand-file-name target
+                                               (file-name-directory (expand-file-name agenda-file)))))
+              (unless (string= expanded (expand-file-name agenda-file))
+                expanded))))))))
+
+(defun org-agenda-api--expand-archive-entry (entry)
+  "Expand archive ENTRY to a list of file paths."
+  (cond
+   ((null entry) nil)
+   ((file-directory-p entry)
+    (directory-files entry t org-agenda-api-archive-file-pattern))
+   (t (list entry))))
+
+(defun org-agenda-api--get-archive-files (&optional agenda-files)
+  "Return archive file paths derived from config and AGENDA-FILES."
+  (let ((archives nil))
+    ;; Explicit archive files/directories
+    (dolist (entry org-agenda-api-archive-files)
+      (setq archives (nconc archives (org-agenda-api--expand-archive-entry entry))))
+    ;; Archives derived from org-archive-location
+    (dolist (file (or agenda-files org-agenda-files))
+      (let ((archive-file (org-agenda-api--archive-location-file file)))
+        (when archive-file
+          (push archive-file archives))))
+    (setq archives (mapcar #'expand-file-name archives))
+    (setq archives (cl-remove-if-not #'file-exists-p archives))
+    (delete-dups archives)))
+
+(defun org-agenda-api--agenda-files-with-archives (&optional agenda-files)
+  "Return AGENDA-FILES plus any discovered archive files."
+  (let* ((base-files (mapcar #'expand-file-name (or agenda-files org-agenda-files)))
+         (archive-files (org-agenda-api--get-archive-files base-files)))
+    (delete-dups (append base-files archive-files))))
+
+(defmacro org-agenda-api--with-archives (include-archives &rest body)
+  "Execute BODY with archive files/trees included when INCLUDE-ARCHIVES is non-nil."
+  (declare (indent 1))
+  `(if ,include-archives
+       (let ((orig-files org-agenda-files)
+             (orig-skip org-agenda-skip-archived-trees)
+             (orig-archives-mode (and (boundp 'org-agenda-archives-mode)
+                                      org-agenda-archives-mode)))
+         (unwind-protect
+             (progn
+               (setq org-agenda-files (org-agenda-api--agenda-files-with-archives orig-files)
+                     org-agenda-skip-archived-trees nil)
+               (when (boundp 'org-agenda-archives-mode)
+                 (setq org-agenda-archives-mode t))
+               ,@body)
+           (setq org-agenda-files orig-files
+                 org-agenda-skip-archived-trees orig-skip)
+           (when (boundp 'org-agenda-archives-mode)
+             (setq org-agenda-archives-mode orig-archives-mode))))
+     (progn ,@body)))
 
 ;;; Worker Lifecycle
 

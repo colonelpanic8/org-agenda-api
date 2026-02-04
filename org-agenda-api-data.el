@@ -484,6 +484,14 @@ Uses caching to avoid re-processing unchanged files."
           (mapcan #'org-agenda-api--get-todo-elements-from-filepath org-agenda-files))
     org-agenda-api--todos-cache))
 
+(defun org-agenda-api--get-agenda-todos-from-files (files)
+  "Get all TODO elements from FILES without using the cache."
+  (let ((files (cl-remove-if-not
+                (lambda (file)
+                  (and file (file-exists-p file) (file-readable-p file)))
+                files)))
+    (mapcan #'org-agenda-api--get-todo-elements-from-filepath files)))
+
 (defun org-agenda-api--element-to-json (element)
   "Convert org ELEMENT to an alist suitable for JSON encoding."
   (let* ((todo (org-element-property :todo-keyword element))
