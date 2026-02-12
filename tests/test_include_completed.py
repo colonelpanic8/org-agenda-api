@@ -460,38 +460,50 @@ class TestIncludeCompleted:
 
 
 class TestStateChangeLogBug:
-    """Tests for bug where state change log entries appear incorrectly.
+    """Tests for include_completed behavior with LOGBOOK-only completions.
 
-    Bug: When include_completed=true, entries with state change logs but no
-    CLOSED timestamp (completedAt) are incorrectly included because the filter
-    allows entries with null scheduled AND null deadline to pass through.
-
-    The filter should only include entries when:
-    - scheduled date matches the query date, OR
-    - deadline date matches the query date, OR
-    - completedAt date matches the query date
-
-    Entries with null scheduled/deadline/completedAt should NOT appear.
+    When include_completed=true, a LOGBOOK transition to a done state on the
+    query date should be treated as a completion signal even without CLOSED.
+    Entries with no completion signal (no CLOSED, no matching LOGBOOK entry,
+    no scheduled/deadline match) should still be excluded.
     """
 
-    def test_done_without_closed_not_shown_as_completed(self, api):
-        """DONE items without CLOSED timestamp should NOT appear with include_completed.
+    def test_done_with_logbook_transition_is_included_as_completed(self, api):
+        """DONE items with a matching LOGBOOK transition should appear as completed.
 
-        This tests the bug where items that are DONE but have no CLOSED timestamp
-        (completedAt is null) appear in the agenda when include_completed=true
-        because the filter allows entries with null scheduled AND null deadline
-        to pass through.
+        This is a regression test for deployed behavior where entries with a
+        done-state transition in LOGBOOK are missing from include_completed
+        results unless they also have a CLOSED timestamp.
+        """
+        # Query with include_completed for the test date
+        agenda_response = api.get(f"/agenda?date={TEST_DATE}&include_completed=true")
+        assert agenda_response.status_code == 200
 
-        The test fixture state_change_bug.org contains:
-        - A DONE item with LOGBOOK state change for TEST_DATE but no CLOSED timestamp
-        - A DONE item without any logging
+        entries = agenda_response.json().get("entries", [])
+        matched_entry = next(
+            (
+                entry
+                for entry in entries
+                if "Task with state change log but no CLOSED" in entry.get("title", "")
+            ),
+            None,
+        )
+        assert matched_entry is not None, (
+            "Expected LOGBOOK-completed item to appear with include_completed=true."
+        )
+        assert matched_entry.get("todo") == "DONE"
+        assert matched_entry.get("completedAt", "").startswith(TEST_DATE), (
+            f"Expected completedAt to start with {TEST_DATE}, got "
+            f"{matched_entry.get('completedAt')}"
+        )
 
-        The key scenario: an item has a state change log entry for the query date
-        (so org-agenda shows it in log mode), but has no CLOSED timestamp.
-        This can happen when:
-        1. org-log-done is nil but state change logging is enabled
-        2. The CLOSED timestamp was manually removed
-        3. The item was marked DONE via external means
+    def test_done_without_any_completion_signal_not_shown_as_completed(self, api):
+        """DONE items with no dated completion signal should not appear.
+
+        A LOGBOOK state transition to a done state is a valid completion signal
+        and should appear on that date with include_completed=true.
+        A plain DONE item without CLOSED, scheduled/deadline, or LOGBOOK transition
+        should remain excluded.
         """
         # Query with include_completed for the test date
         agenda_response = api.get(f"/agenda?date={TEST_DATE}&include_completed=true")
@@ -499,26 +511,33 @@ class TestStateChangeLogBug:
 
         entries = agenda_response.json().get("entries", [])
 
-        # Debug: print all entries
-        entry_info = [
-            (e.get("title"), e.get("todo"), e.get("completedAt"), e.get("scheduled"))
-            for e in entries
-        ]
+        logbook_completed = next(
+            (
+                entry
+                for entry in entries
+                if "Task with state change log but no CLOSED" in entry.get("title", "")
+            ),
+            None,
+        )
+        assert logbook_completed is not None, (
+            "DONE item with LOGBOOK completion transition should be included."
+        )
+        assert logbook_completed.get("completedAt", "").startswith(TEST_DATE), (
+            f"Expected completedAt to start with {TEST_DATE}, got "
+            f"{logbook_completed.get('completedAt')}"
+        )
 
-        # The DONE items from state_change_bug.org should NOT appear because:
-        # - They have no CLOSED timestamp (completedAt is null)
-        # - They have no scheduled/deadline for the test date
-        # They may appear in org-agenda due to LOGBOOK state change, but should be
-        # filtered out because completedAt doesn't match the query date.
-        bug_entries = [
-            e
-            for e in entries
-            if "Task with state change log but no CLOSED" in e.get("title", "")
-            or "Task done without any logging" in e.get("title", "")
-        ]
-        assert len(bug_entries) == 0, (
-            f"DONE items without CLOSED timestamp should not appear with include_completed. "
-            f"Found entries: {bug_entries}. All entries: {entry_info}"
+        no_signal_entry = next(
+            (
+                entry
+                for entry in entries
+                if "Task done without any logging" in entry.get("title", "")
+            ),
+            None,
+        )
+        assert no_signal_entry is None, (
+            "DONE item without CLOSED, schedule/deadline, or LOGBOOK transition "
+            "should not be included."
         )
 
     def test_state_change_only_with_matching_closed_appears(self, api, org_dir):

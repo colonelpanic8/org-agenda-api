@@ -301,7 +301,7 @@ Uses patterns similar to `org-habit-parse-todo' for robust parsing."
                  ;; State change: - State "NEW" from "OLD" [timestamp]
                  ;; Parse directly instead of depending on capture indices in org timestamp regex.
                  ((looking-at
-                   "State \"\\([^\"]+\\)\"\\(?:[ \t]+from \"\\([^\"]*\\)\"\\)?[ \t]+\\[\\([^]]+\\)\\]")
+                   "\\s-*State \"\\([^\"]+\\)\"\\(?:[ \t]+from \"\\([^\"]*\\)\"\\)?[ \t]+\\[\\([^]]+\\)\\]")
                   (let* ((new-state (match-string 1))
                          (old-state (match-string 2))
                          (timestamp-str (match-string 3))
@@ -619,12 +619,9 @@ historical completion rows for reopened/re-completed tasks."
            (let ((is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
                                        (org-agenda-api--is-window-habit-p))))
              (unless is-window-habit
-               ;; Only use LOGBOOK fallback for headings that currently have CLOSED.
-               ;; This avoids treating pure state-change logs as completed items.
-               (let ((closed-ts (org-agenda-api--get-closed-timestamp))
-                     (transition
+               (let ((transition
                       (org-agenda-api--find-done-logbook-transition-on-date query-date)))
-                 (when (and closed-ts transition)
+                 (when transition
                    (let* ((marker (point-marker))
                           (done-state (cdr (assoc "state" transition)))
                           (completed-ts (cdr (assoc "timestamp" transition)))
