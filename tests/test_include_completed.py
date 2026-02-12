@@ -330,6 +330,134 @@ class TestIncludeCompleted:
             f"Re-opened task should not appear as DONE. Found: {completed_entries}"
         )
 
+    def test_unscheduled_repeatable_item_shows_multiple_completion_dates(self, api):
+        """A reopened unscheduled item should appear on each completion date.
+
+        Scenario:
+        1. Start with one TODO that has no SCHEDULED/DEADLINE.
+        2. Complete it on date1.
+        3. Reopen it to TODO on a later date.
+        4. Complete it again on date2.
+
+        With include_completed=true, the item should appear as completed when
+        querying both date1 and date2.
+        """
+        unique_title = "Repeatable unscheduled completion history 424242"
+
+        create_response = api.create_todo(unique_title)
+        assert create_response.status_code == 200, (
+            f"Create failed: {create_response.text}"
+        )
+
+        def get_task():
+            todos_response = api.get_all_todos()
+            todos = todos_response.json().get("todos", [])
+            return next((t for t in todos if unique_title in t.get("title", "")), None)
+
+        task = get_task()
+        assert task is not None, "Created TODO not found"
+        assert task.get("scheduled") is None, "Test requires no scheduled date"
+        assert task.get("deadline") is None, "Test requires no deadline date"
+
+        date1 = "2024-06-10"
+        reopened_date = "2024-06-12"
+        date2 = "2024-06-14"
+
+        complete_1 = api.complete_todo(task, state="DONE", override_date=date1)
+        assert complete_1.status_code == 200, f"First completion failed: {complete_1.text}"
+
+        task = get_task()
+        assert task is not None, "Task should still exist after first completion"
+
+        reopen = api.set_state(task, state="TODO", override_date=reopened_date)
+        assert reopen.status_code == 200, f"Reopen failed: {reopen.text}"
+
+        task = get_task()
+        assert task is not None, "Task should still exist after reopen"
+        assert task.get("todo") == "TODO", "Task should be TODO before second completion"
+
+        complete_2 = api.complete_todo(task, state="DONE", override_date=date2)
+        assert complete_2.status_code == 200, (
+            f"Second completion failed: {complete_2.text}"
+        )
+
+        def get_completed_entry_for_date(query_date):
+            response = api.get(
+                f"/agenda?date={query_date}&span=day&include_completed=true"
+            )
+            assert response.status_code == 200, (
+                f"/agenda failed for {query_date}: {response.text}"
+            )
+            entries = response.json().get("entries", [])
+            return next(
+                (
+                    entry
+                    for entry in entries
+                    if unique_title in entry.get("title", "")
+                    and entry.get("todo") == "DONE"
+                ),
+                None,
+            )
+
+        entry_date1 = get_completed_entry_for_date(date1)
+        assert entry_date1 is not None, (
+            f"Item should appear as completed on first completion date {date1}"
+        )
+        assert entry_date1.get("completedAt", "").startswith(date1), (
+            f"Expected completedAt to start with {date1}, got {entry_date1.get('completedAt')}"
+        )
+
+        entry_date2 = get_completed_entry_for_date(date2)
+        assert entry_date2 is not None, (
+            f"Item should appear as completed on second completion date {date2}"
+        )
+        assert entry_date2.get("completedAt", "").startswith(date2), (
+            f"Expected completedAt to start with {date2}, got {entry_date2.get('completedAt')}"
+        )
+
+        # Also verify weekly view includes both completion dates as completed entries
+        week_response = api.get_agenda(
+            span="week", date=date1, include_completed=True
+        )
+        assert week_response.status_code == 200, (
+            f"Weekly agenda failed: {week_response.text}"
+        )
+        week_days = week_response.json().get("days", {})
+
+        for completion_date in (date1, date2):
+            day_entries = week_days.get(completion_date, [])
+            completed_entry = next(
+                (
+                    entry
+                    for entry in day_entries
+                    if unique_title in entry.get("title", "")
+                    and entry.get("dateRelevance") == "completed"
+                    and entry.get("todo") == "DONE"
+                ),
+                None,
+            )
+            assert completed_entry is not None, (
+                f"Weekly agenda should include completed entry on {completion_date}"
+            )
+            assert completed_entry.get("completedAt", "").startswith(completion_date), (
+                f"Weekly completedAt should start with {completion_date}, "
+                f"got {completed_entry.get('completedAt')}"
+            )
+
+        completed_occurrences = 0
+        for day_entries in week_days.values():
+            completed_occurrences += sum(
+                1
+                for entry in day_entries
+                if unique_title in entry.get("title", "")
+                and entry.get("dateRelevance") == "completed"
+                and entry.get("todo") == "DONE"
+            )
+        assert completed_occurrences == 2, (
+            f"Expected exactly 2 completed occurrences in weekly view, "
+            f"found {completed_occurrences}"
+        )
+
 
 class TestStateChangeLogBug:
     """Tests for bug where state change log entries appear incorrectly.

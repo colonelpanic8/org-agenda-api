@@ -299,8 +299,9 @@ Uses patterns similar to `org-habit-parse-todo' for robust parsing."
                     (line-end (line-end-position)))
                 (cond
                  ;; State change: - State "NEW" from "OLD" [timestamp]
-                 ;; Pattern based on org-habit-parse-todo
-                 ((looking-at (concat "State \"\\([^\"]+\\)\"\\(?: from \"\\([^\"]*\\)\"\\)?[ \t]+" ts-re))
+                 ;; Parse directly instead of depending on capture indices in org timestamp regex.
+                 ((looking-at
+                   "State \"\\([^\"]+\\)\"\\(?:[ \t]+from \"\\([^\"]*\\)\"\\)?[ \t]+\\[\\([^]]+\\)\\]")
                   (let* ((new-state (match-string 1))
                          (old-state (match-string 2))
                          (timestamp-str (match-string 3))
@@ -575,6 +576,78 @@ Returns ISO format timestamp string or nil."
                 (format "%sT%s:00" date-part (string-trim time-part))
               date-part)))))))
 
+(defun org-agenda-api--extract-completed-timestamp-from-agenda-line (agenda-line)
+  "Extract completion timestamp from AGENDA-LINE when it logs a done state change.
+Returns ISO timestamp string or nil.
+
+In log mode, org-agenda shows state transitions (e.g. \"State \\\"DONE\\\" ... [ts]\").
+For repeated completion/reopen cycles, these log lines preserve historical completion
+dates even when the heading's current CLOSED timestamp has changed."
+  (when (and (stringp agenda-line)
+             (string-match "State \"\\([^\"]+\\)\"" agenda-line))
+    (let ((to-state (match-string 1 agenda-line)))
+      (when (member to-state org-done-keywords)
+        (when (string-match "\\[\\([^]]+\\)\\]" agenda-line)
+          (org-agenda-api--parse-inactive-timestamp (match-string 1 agenda-line)))))))
+
+(defun org-agenda-api--find-done-logbook-transition-on-date (query-date)
+  "Return a done-state LOGBOOK transition matching QUERY-DATE at point.
+Returns an alist with keys \"state\" and \"timestamp\", or nil if none match."
+  (let* ((logbook-entries (org-agenda-api--get-logbook-entries))
+         (match (cl-find-if
+                 (lambda (entry)
+                   (let ((entry-type (cdr (assoc "type" entry)))
+                         (to-state (cdr (assoc "to" entry)))
+                         (timestamp (cdr (assoc "timestamp" entry))))
+                     (and (string= entry-type "state-change")
+                          (member to-state org-done-keywords)
+                          (string= (org-agenda-api--extract-date timestamp) query-date))))
+                 logbook-entries)))
+    (when match
+      `(("state" . ,(cdr (assoc "to" match)))
+        ("timestamp" . ,(cdr (assoc "timestamp" match)))))))
+
+(defun org-agenda-api--get-logbook-completed-entries-on-date (query-date)
+  "Get non-habit entries completed on QUERY-DATE from LOGBOOK state transitions.
+Used as a fallback for include_completed when org-agenda log view does not emit
+historical completion rows for reopened/re-completed tasks."
+  (let ((entries nil))
+    (dolist (file org-agenda-files)
+      (with-current-buffer (find-file-noselect file)
+        (org-map-entries
+         (lambda ()
+           (let ((is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
+                                       (org-agenda-api--is-window-habit-p))))
+             (unless is-window-habit
+               ;; Only use LOGBOOK fallback for headings that currently have CLOSED.
+               ;; This avoids treating pure state-change logs as completed items.
+               (let ((closed-ts (org-agenda-api--get-closed-timestamp))
+                     (transition
+                      (org-agenda-api--find-done-logbook-transition-on-date query-date)))
+                 (when (and closed-ts transition)
+                   (let* ((marker (point-marker))
+                          (done-state (cdr (assoc "state" transition)))
+                          (completed-ts (cdr (assoc "timestamp" transition)))
+                          (category (org-get-category))
+                          (title (org-get-heading t t t t))
+                          (agenda-line
+                           (format "  %s:            Closed:     %s %s"
+                                   category done-state title))
+                          (entry-data (org-agenda-api--extract-entry-data
+                                       marker agenda-line query-date)))
+                     (when entry-data
+                       (let ((todo-cell (assoc "todo" entry-data))
+                             (completed-cell (assoc "completedAt" entry-data)))
+                         (when todo-cell
+                           (setcdr todo-cell done-state))
+                         (if completed-cell
+                             (setcdr completed-cell completed-ts)
+                           (setq entry-data
+                                 (cons (cons "completedAt" completed-ts) entry-data)))
+                         (push entry-data entries)))))))))
+         "TODO={.+}" 'file)))
+    (nreverse entries)))
+
 (defun org-agenda-api--extract-entry-data (marker agenda-line &optional query-date)
   "Extract todo data from the org entry at MARKER.
 AGENDA-LINE is the raw agenda display text for reference.
@@ -610,8 +683,12 @@ QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completio
                  (all-properties (org-agenda-api--get-all-entry-properties))
                  ;; Get plain timestamps from entry body
                  (timestamps (org-agenda-api--get-entry-timestamps))
-                 ;; Extract CLOSED timestamp directly from the org entry
-                 (completed-at (org-agenda-api--get-closed-timestamp))
+                 ;; Prefer completion timestamp from agenda log line when present.
+                 ;; This preserves historical completion dates for tasks that were
+                 ;; completed, reopened, and completed again.
+                 (completed-at (or (org-agenda-api--extract-completed-timestamp-from-agenda-line
+                                    (substring-no-properties agenda-line))
+                                   (org-agenda-api--get-closed-timestamp)))
                  ;; Habit detection - only if the window-habit module is loaded
                  (is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
                                        (org-agenda-api--is-window-habit-p)))
@@ -835,6 +912,28 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
                                                (when entry-data (cdr (assoc "title" entry-data))))
                           (when entry-data
                             (setq filtered-entries (cons entry-data filtered-entries))))))))))))
+        ;; Add non-habit completions from LOGBOOK as a fallback. This covers
+        ;; reopened/re-completed tasks where org-agenda log mode may omit older
+        ;; completion events.
+        (when include-completed
+          (let ((logbook-completed-entries
+                 (org-agenda-api--get-logbook-completed-entries-on-date start-date)))
+            (dolist (entry logbook-completed-entries)
+              (let* ((file (cdr (assoc "file" entry)))
+                     (pos (cdr (assoc "pos" entry)))
+                     (completed-date
+                      (org-agenda-api--extract-date (cdr (assoc "completedAt" entry))))
+                     (already-present
+                      (cl-some
+                       (lambda (existing)
+                         (and (string= (cdr (assoc "file" existing)) file)
+                              (= (cdr (assoc "pos" existing)) pos)
+                              (string= (org-agenda-api--extract-date
+                                        (cdr (assoc "completedAt" existing)))
+                                       completed-date)))
+                       filtered-entries)))
+                (unless already-present
+                  (push entry filtered-entries))))))
         ;; Deduplicate entries - when an item has both SCHEDULED and DEADLINE
         ;; on the same day, org-agenda shows it twice. Keep only unique entries
         ;; based on (file, pos).
