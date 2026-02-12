@@ -540,14 +540,14 @@ class TestStateChangeLogBug:
             "should not be included."
         )
 
-    def test_state_change_only_with_matching_closed_appears(self, api, org_dir):
-        """State change log entries should only appear if completedAt matches query date.
+    def test_state_change_only_with_matching_completion_date_appears(self, api, org_dir):
+        """State change log entries should only appear if completion date matches query date.
 
         When org-agenda log mode shows state changes, entries should only pass
         the filter if they have:
         1. A scheduled date matching the query date, OR
         2. A deadline date matching the query date, OR
-        3. A completedAt (CLOSED) date matching the query date
+        3. A completedAt date matching the query date
 
         Entries that appear solely due to state change logs (no CLOSED or
         CLOSED on different date) should be filtered out.
