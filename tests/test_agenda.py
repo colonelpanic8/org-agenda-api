@@ -970,7 +970,9 @@ class TestMultiDayAgenda:
         # The overdue item should NOT appear on tomorrow or later dates
         tomorrow = TEST_DATE_NEXT_DAY  # 2024-06-16
         tomorrow_titles = titles_for_date(tomorrow)
-        assert not any("scheduled for yesterday" in t.lower() for t in tomorrow_titles), (
+        assert not any(
+            "scheduled for yesterday" in t.lower() for t in tomorrow_titles
+        ), (
             f"With overdue_behavior=today, overdue item 'Task scheduled for yesterday' "
             f"should NOT appear on {tomorrow}. Found titles: {tomorrow_titles}"
         )
@@ -979,7 +981,9 @@ class TestMultiDayAgenda:
         for date_str in data["days"].keys():
             if date_str > TEST_DATE:  # Any date after today
                 future_titles = titles_for_date(date_str)
-                assert not any("scheduled for yesterday" in t.lower() for t in future_titles), (
+                assert not any(
+                    "scheduled for yesterday" in t.lower() for t in future_titles
+                ), (
                     f"With overdue_behavior=today, overdue item should NOT appear on "
                     f"future date {date_str}. Found titles: {future_titles}"
                 )
@@ -1019,7 +1023,7 @@ class TestMultiDayAgenda:
             overdue_behavior="both",
             # Query a range that includes yesterday
             start_date=TEST_DATE_PREV_DAY,  # 2024-06-14
-            end_date=TEST_DATE_NEXT_DAY,    # 2024-06-16
+            end_date=TEST_DATE_NEXT_DAY,  # 2024-06-16
         )
         assert response.status_code == 200
         data = response.json()

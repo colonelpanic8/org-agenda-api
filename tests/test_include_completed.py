@@ -364,7 +364,9 @@ class TestIncludeCompleted:
         date2 = "2024-06-14"
 
         complete_1 = api.complete_todo(task, state="DONE", override_date=date1)
-        assert complete_1.status_code == 200, f"First completion failed: {complete_1.text}"
+        assert complete_1.status_code == 200, (
+            f"First completion failed: {complete_1.text}"
+        )
 
         task = get_task()
         assert task is not None, "Task should still exist after first completion"
@@ -374,7 +376,9 @@ class TestIncludeCompleted:
 
         task = get_task()
         assert task is not None, "Task should still exist after reopen"
-        assert task.get("todo") == "TODO", "Task should be TODO before second completion"
+        assert task.get("todo") == "TODO", (
+            "Task should be TODO before second completion"
+        )
 
         complete_2 = api.complete_todo(task, state="DONE", override_date=date2)
         assert complete_2.status_code == 200, (
@@ -416,9 +420,7 @@ class TestIncludeCompleted:
         )
 
         # Also verify weekly view includes both completion dates as completed entries
-        week_response = api.get_agenda(
-            span="week", date=date1, include_completed=True
-        )
+        week_response = api.get_agenda(span="week", date=date1, include_completed=True)
         assert week_response.status_code == 200, (
             f"Weekly agenda failed: {week_response.text}"
         )
@@ -540,7 +542,9 @@ class TestStateChangeLogBug:
             "should not be included."
         )
 
-    def test_state_change_only_with_matching_completion_date_appears(self, api, org_dir):
+    def test_state_change_only_with_matching_completion_date_appears(
+        self, api, org_dir
+    ):
         """State change log entries should only appear if completion date matches query date.
 
         When org-agenda log mode shows state changes, entries should only pass

@@ -24,7 +24,7 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Run nix flake check (elisp compile, ruff)
-        run: nix flake check --print-build-logs
+        run: nix flake check "path:$GITHUB_WORKSPACE" --print-build-logs
 
   test:
     name: Integration Tests
@@ -45,7 +45,7 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Run integration tests
-        run: nix develop -c pytest tests/ --ignore=tests/test_container_integration.py -v -s --tb=short --timeout=60
+        run: nix develop "path:$GITHUB_WORKSPACE" -c pytest tests/ --ignore=tests/test_container_integration.py -v -s --tb=short --timeout=60
 
   container:
     name: Container Build & Test
@@ -66,10 +66,10 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Build base container
-        run: nix build .#container-base -o result-base
+        run: nix build "path:$GITHUB_WORKSPACE#container-base" -o result-base
 
       - name: Build container
-        run: nix build .#container -o result
+        run: nix build "path:$GITHUB_WORKSPACE#container" -o result
 
       - name: Run container integration tests
-        run: nix develop -c pytest tests/test_container_integration.py -v -s
+        run: nix develop "path:$GITHUB_WORKSPACE" -c pytest tests/test_container_integration.py -v -s

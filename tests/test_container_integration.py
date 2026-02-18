@@ -27,6 +27,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 PROJECT_ROOT = Path(__file__).parent.parent
+FLAKE_REF = f"path:{PROJECT_ROOT}"
 CONTAINER_NAME_PREFIX = "org-api-test"
 
 
@@ -85,7 +86,13 @@ class TestContainerBuild:
     def test_container_builds(self):
         """Container should build without errors."""
         result = run_command(
-            ["nix", "build", ".#container", "--no-link", "--print-out-paths"],
+            [
+                "nix",
+                "build",
+                f"{FLAKE_REF}#container",
+                "--no-link",
+                "--print-out-paths",
+            ],
             cwd=PROJECT_ROOT,
         )
         assert result.returncode == 0, f"Build failed: {result.stderr}"
@@ -97,7 +104,7 @@ def container_image():
     """Build and load the container image."""
     # Build container
     result = run_command(
-        ["nix", "build", ".#container", "--no-link", "--print-out-paths"],
+        ["nix", "build", f"{FLAKE_REF}#container", "--no-link", "--print-out-paths"],
         cwd=PROJECT_ROOT,
     )
     if result.returncode != 0:
