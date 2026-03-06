@@ -92,4 +92,3 @@ def test_include_completed_matches_server_timezone(timezone_api):
         f"with timezone {timezone}"
     )
     assert completed_entry.get("todo") == "DONE"
-
