@@ -22,6 +22,7 @@ TEST_DATE_NEXT_DAY = "2024-06-16"
 TEST_DATE_NEXT_DAY_ORG = "2024-06-16 Sun"
 TEST_DATE_PREV_DAY = "2024-06-14"
 TEST_DATE_PREV_DAY_ORG = "2024-06-14 Fri"
+TEST_TIMEZONE = "America/Los_Angeles"
 
 # Week range for multi-day tests (TEST_DATE is Saturday, so week is Sat-Fri)
 TEST_WEEK_START = "2024-06-15"  # Saturday
@@ -57,11 +58,19 @@ def extract_date(timestamp):
 class EmacsServer:
     """Manages an Emacs subprocess running org-agenda-api."""
 
-    def __init__(self, port: int, org_dir: Path, inbox_file: Path, fake_date: str):
+    def __init__(
+        self,
+        port: int,
+        org_dir: Path,
+        inbox_file: Path,
+        fake_date: str,
+        timezone: str = TEST_TIMEZONE,
+    ):
         self.port = port
         self.org_dir = org_dir
         self.inbox_file = inbox_file
         self.fake_date = fake_date
+        self.timezone = timezone
         self.process = None
 
     @property
@@ -76,8 +85,8 @@ class EmacsServer:
         env["ORG_AGENDA_API_TEST_INBOX"] = str(self.inbox_file)
         env["ORG_AGENDA_API_PACKAGE_DIR"] = str(PROJECT_ROOT)
         env["ORG_AGENDA_API_TEST_FAKE_DATE"] = self.fake_date
-        # Use a timezone with DST to properly test DST-related bugs
-        env["TZ"] = "America/Los_Angeles"
+        # Keep Emacs timezone explicit for deterministic date behavior.
+        env["TZ"] = self.timezone
 
         script_path = PROJECT_ROOT / "scripts" / "run-emacs-server.el"
 
@@ -689,6 +698,7 @@ def emacs_server(org_test_dir, inbox_file):
         org_dir=org_test_dir,
         inbox_file=inbox_file,
         fake_date=TEST_DATE,
+        timezone=TEST_TIMEZONE,
     )
     server.start()
     yield server

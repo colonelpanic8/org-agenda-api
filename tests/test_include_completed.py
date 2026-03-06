@@ -3,7 +3,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from conftest import TEST_DATE, TEST_DATE_NEXT_DAY
+from conftest import TEST_DATE, TEST_DATE_NEXT_DAY, TEST_TIMEZONE
 
 
 def get_today_str():
@@ -12,10 +12,10 @@ def get_today_str():
     Note: The CLOSED timestamp uses the real date, not the fake test date.
     This is because org-mode uses current-time for CLOSED timestamps.
 
-    Tests run Emacs with TZ=America/Los_Angeles in conftest.py, so we must
+    Tests run Emacs with TZ set by TEST_TIMEZONE in conftest.py, so we must
     derive "today" in the same timezone or date-boundary tests can flake in CI.
     """
-    return datetime.now(ZoneInfo("America/Los_Angeles")).date().strftime("%Y-%m-%d")
+    return datetime.now(ZoneInfo(TEST_TIMEZONE)).date().strftime("%Y-%m-%d")
 
 
 def extract_date(timestamp):
