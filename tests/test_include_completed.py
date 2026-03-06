@@ -1,6 +1,7 @@
 """Integration tests for include_completed parameter on /agenda endpoint."""
 
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from conftest import TEST_DATE, TEST_DATE_NEXT_DAY
 
@@ -9,10 +10,12 @@ def get_today_str():
     """Return today's date as YYYY-MM-DD string.
 
     Note: The CLOSED timestamp uses the real date, not the fake test date.
-    This is because org-mode uses current-time for CLOSED timestamps,
-    which isn't overridden by our test setup.
+    This is because org-mode uses current-time for CLOSED timestamps.
+
+    Tests run Emacs with TZ=America/Los_Angeles in conftest.py, so we must
+    derive "today" in the same timezone or date-boundary tests can flake in CI.
     """
-    return date.today().strftime("%Y-%m-%d")
+    return datetime.now(ZoneInfo("America/Los_Angeles")).date().strftime("%Y-%m-%d")
 
 
 def extract_date(timestamp):
