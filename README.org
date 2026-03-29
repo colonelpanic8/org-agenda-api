@@ -68,7 +68,7 @@ Common query params:
 
 | Endpoint   | Description                                          |
 |------------+------------------------------------------------------|
-| =/update=  | Updates TODO properties (scheduled, deadline, priority) |
+| =/update=  | Updates TODO fields (scheduled, deadline, priority, effort, properties) |
 | =/complete= | Marks TODO as complete                               |
 
 *** Utility Endpoints (GET)

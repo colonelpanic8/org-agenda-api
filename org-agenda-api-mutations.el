@@ -201,7 +201,7 @@ Returns alist with status and details."
 
 (defun org-agenda-api--update-todo-at (file pos updates)
   "Update the TODO at FILE and POS with UPDATES alist.
-UPDATES can contain: state, new_title, scheduled, deadline, priority, tags, properties, body.
+UPDATES can contain: state, new_title, scheduled, deadline, priority, tags, effort, properties, body.
 Returns alist with status, details, and new position."
   (with-current-buffer (find-file-noselect file)
     (save-excursion
@@ -302,6 +302,12 @@ Returns alist with status, details, and new position."
                           (push (cons prop-name-upper prop-value) applied-props)))))
                   (when applied-props
                     (push `("properties" . ,applied-props) applied-updates)))))
+            ;; Handle effort through Org's dedicated effort API
+            (when (assoc "effort" updates)
+              (let ((effort-value (cdr (assoc "effort" updates))))
+                (org-agenda-api--set-entry-effort effort-value)
+                (push `("effort" . ,(org-agenda-api--get-entry-effort))
+                      applied-updates)))
             ;; Handle body - the content after metadata, before next heading
             (when (assoc "body" updates)
               (let ((body-value (cdr (assoc "body" updates))))

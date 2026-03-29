@@ -425,6 +425,7 @@ REFERENCE-TIME is used for calculations."
                (org-id (org-id-get))
                (priority (org-entry-get (point) "PRIORITY"))
                (effective-category (org-get-category))
+               (effort (org-agenda-api--get-entry-effort))
                (all-properties (org-agenda-api--get-all-entry-properties))
                (habit-summary (org-agenda-api--get-habit-summary))
                ;; Check if completed on this date
@@ -437,6 +438,7 @@ REFERENCE-TIME is used for calculations."
             ("tags" . ,(when tags (vconcat tags)))
             ("priority" . ,priority)
             ("effectiveCategory" . ,effective-category)
+            ("effort" . ,effort)
             ("properties" . ,all-properties)
             ("isWindowHabit" . t)
             ("dateRelevance" . "habit_required")

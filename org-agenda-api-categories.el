@@ -123,6 +123,7 @@ Uses occ-map-entries-for-category to traverse entries."
                                    (org-id (org-entry-get (point) "ID"))
                                    (olpath (org-get-outline-path t))
                                    (priority (org-entry-get (point) "PRIORITY"))
+                                   (effort (org-agenda-api--get-entry-effort))
                                    (all-properties (org-agenda-api--get-all-entry-properties))
                                    (timestamps (org-agenda-api--get-entry-timestamps)))
                               `(("todo" . ,todo)
@@ -143,6 +144,7 @@ Uses occ-map-entries-for-category to traverse entries."
                                 ("category" . ,category)
                                 ("olpath" . ,(if olpath (vconcat olpath) nil))
                                 ("priority" . ,priority)
+                                ("effort" . ,effort)
                                 ("properties" . ,all-properties))))
                           :get-category-from-element
                           (if (fboundp 'org-project-capture-get-category-from-heading)
@@ -157,7 +159,7 @@ Uses occ-map-entries-for-category to traverse entries."
 
 (defun org-agenda-api--build-category-capture-template (values)
   "Build a capture template string from VALUES.
-VALUES is an alist with title, state, scheduled, deadline, priority, tags, properties.
+VALUES is an alist with title, state, scheduled, deadline, priority, tags, effort, properties.
 scheduled and deadline are objects with {date, time?, repeater?}.
 Accepts both \"state\" and \"todo\" for the TODO state (for backwards compatibility).
 Returns a template string with all values pre-filled (no interactive prompts)."
@@ -170,6 +172,7 @@ Returns a template string with all values pre-filled (no interactive prompts)."
          (deadline (cdr (assoc "deadline" values)))
          (priority (cdr (assoc "priority" values)))
          (tags (cdr (assoc "tags" values)))
+         (effort (cdr (assoc "effort" values)))
          (properties (cdr (assoc "properties" values)))
          (parts nil))
     ;; Build headline: * TODO [#A] Title :tag1:tag2:
@@ -196,12 +199,19 @@ Returns a template string with all values pre-filled (no interactive prompts)."
     ;; Add properties drawer
     (push ":PROPERTIES:\n" parts)
     (push (format ":CREATED: %s\n" (format-time-string "[%Y-%m-%d %a %H:%M]" (current-time))) parts)
+    (when (and effort (not (string-empty-p effort)))
+      (org-agenda-api--validate-effort-value effort)
+      (push (format ":%s: %s\n" org-effort-property effort) parts))
     (when properties
       (dolist (prop properties)
         (let ((prop-name (car prop))
               (prop-value (cdr prop)))
-          (when (and prop-name prop-value (not (string-empty-p prop-value)))
-            (push (format ":%s: %s\n" (upcase prop-name) prop-value) parts)))))
+          (let ((prop-name-upper (upcase prop-name)))
+            (when (and prop-name
+                       prop-value
+                       (not (string-empty-p prop-value))
+                       (not (and effort (string= prop-name-upper org-effort-property))))
+              (push (format ":%s: %s\n" prop-name-upper prop-value) parts))))))
     (push ":END:\n" parts)
     ;; Combine all parts
     (apply #'concat (nreverse parts))))
@@ -215,6 +225,7 @@ VALUES is an alist that may contain:
   - deadline: ISO date/datetime string
   - priority: A, B, or C
   - tags: list of tag strings
+  - effort: Org duration string
   - properties: alist of property name/value pairs
 Returns an alist with status information.
 
@@ -355,6 +366,7 @@ Accepts JSON body with:
   - deadline: ISO date/datetime string (optional)
   - priority: A, B, or C (optional)
   - tags: array of tag strings (optional)
+  - effort: Org duration string (optional)
   - properties: object of property name/value pairs (optional)"
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
@@ -367,6 +379,7 @@ Accepts JSON body with:
              (deadline (gethash "deadline" json-data))
              (priority (gethash "priority" json-data))
              (tags (gethash "tags" json-data))
+             (effort (gethash "effort" json-data))
              (properties-hash (gethash "properties" json-data))
              ;; Convert properties hash to alist
              (properties (when (hash-table-p properties-hash)
@@ -380,6 +393,7 @@ Accepts JSON body with:
                        ("deadline" . ,(unless (eq deadline :null) deadline))
                        ("priority" . ,(unless (eq priority :null) priority))
                        ("tags" . ,(unless (eq tags :null) tags))
+                       ("effort" . ,(unless (eq effort :null) effort))
                        ("properties" . ,properties))))
         (cond
          ((or (null type-name) (string= type-name ""))

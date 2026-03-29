@@ -282,6 +282,29 @@ class TestCategoryCaptureEndpoint:
         assert task is not None
         assert task.get("priority") == "A"
 
+    def test_capture_with_effort(self, api, has_projects_strategy):
+        """Can capture a TODO with Org's built-in effort field."""
+        if not has_projects_strategy:
+            pytest.skip("org-category-capture not available in test environment")
+        response = api.post(
+            "/category-capture",
+            json={
+                "type": "projects",
+                "category": "Project Alpha",
+                "title": "Estimated task",
+                "effort": "0:30",
+            },
+        )
+        data = response.json()
+        assert data.get("status") == "created"
+
+        response = api.get("/category-tasks?type=projects&category=Project%20Alpha")
+        tasks = response.json()["tasks"]
+        task = next((t for t in tasks if t.get("title") == "Estimated task"), None)
+        assert task is not None
+        assert task.get("effort") == "0:30"
+        assert task.get("properties", {}).get("EFFORT") == "0:30"
+
     def test_capture_with_scheduled(self, api, has_projects_strategy):
         """Can capture a TODO with scheduled date."""
         if not has_projects_strategy:

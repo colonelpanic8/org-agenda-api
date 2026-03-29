@@ -12,6 +12,7 @@
 (require 'cl-lib)
 (require 'org)
 (require 'org-agenda)
+(require 'org-duration)
 (require 'org-element)
 (require 'org-agenda-api-core)
 
@@ -244,6 +245,25 @@ Untimed habits are moved to the end and sorted alphabetically by title."
 
 ;;; Property and Logbook Functions
 
+(defun org-agenda-api--get-entry-effort ()
+  "Return the Org effort value for the entry at point, if any."
+  (org-entry-get nil org-effort-property))
+
+(defun org-agenda-api--validate-effort-value (value)
+  "Validate Org effort VALUE and return it.
+Signal an error when VALUE is not a valid Org duration."
+  (when (and value (not (string-empty-p value)))
+    (org-duration-to-minutes value)
+    value))
+
+(defun org-agenda-api--set-entry-effort (value)
+  "Set the Org effort property for the entry at point to VALUE.
+When VALUE is nil or empty, remove the effort property."
+  (if (or (null value) (string-empty-p value))
+      (org-entry-delete (point) org-effort-property)
+    (org-agenda-api--validate-effort-value value)
+    (org-set-effort nil value)))
+
 (defun org-agenda-api--get-all-entry-properties ()
   "Get all properties for the entry at point as an alist.
 Returns an alist of (KEY . VALUE) pairs for all properties in the drawer."
@@ -434,6 +454,7 @@ expensive `org-element-at-point' calls."
               (notify-before (org-agenda-api--parse-notify-before
                               (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
               (effective-category (org-get-category))
+              (effort (org-agenda-api--get-entry-effort))
               (all-properties (org-agenda-api--get-all-entry-properties))
               ;; Get plain timestamps from entry body
               (timestamps (org-agenda-api--get-entry-timestamps))
@@ -465,6 +486,7 @@ expensive `org-element-at-point' calls."
            ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
            ("priority" . ,priority)
            ("effectiveCategory" . ,effective-category)
+           ("effort" . ,effort)
            ("properties" . ,all-properties)
            ("isWindowHabit" . ,(if is-window-habit t :json-false))
            ,@(when habit-summary
@@ -677,6 +699,7 @@ QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completio
                  (notify-before (org-agenda-api--parse-notify-before
                                  (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
                  (effective-category (org-get-category))
+                 (effort (org-agenda-api--get-entry-effort))
                  (all-properties (org-agenda-api--get-all-entry-properties))
                  ;; Get plain timestamps from entry body
                  (timestamps (org-agenda-api--get-entry-timestamps))
@@ -718,6 +741,7 @@ QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completio
               ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
               ("effectiveCategory" . ,effective-category)
               ("agendaLine" . ,(substring-no-properties agenda-line))
+              ("effort" . ,effort)
               ("properties" . ,all-properties)
               ("completedAt" . ,completed-at)
               ("isWindowHabit" . ,(if is-window-habit t :json-false))
@@ -964,6 +988,7 @@ from the org buffer rather than an agenda line."
                (notify-before (org-agenda-api--parse-notify-before
                                (org-entry-get (point) "WILD_NOTIFIER_NOTIFY_BEFORE")))
                (effective-category (org-get-category))
+               (effort (org-agenda-api--get-entry-effort))
                (all-properties (org-agenda-api--get-all-entry-properties))
                ;; Habit detection
                (is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
@@ -990,6 +1015,7 @@ from the org buffer rather than an agenda line."
             ("priority" . ,priority)
             ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
             ("effectiveCategory" . ,effective-category)
+            ("effort" . ,effort)
             ("properties" . ,all-properties)
             ("isWindowHabit" . ,(if is-window-habit t :json-false))
             ,@(when habit-summary

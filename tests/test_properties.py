@@ -66,6 +66,22 @@ class TestPropertiesInGetTodos:
         assert "EFFORT" in properties
         assert properties["EFFORT"] == "2:00"
 
+    def test_todo_includes_top_level_effort_field(self, api):
+        """TODO items should expose Org effort as a first-class field."""
+        response = api.get_all_todos()
+        todos = response.json()["todos"]
+
+        custom_item = next(
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
+            None,
+        )
+        assert custom_item is not None
+        assert custom_item.get("effort") == "2:00"
+
     def test_properties_contains_energy_and_context(self, api):
         """Properties should include ENERGY and CONTEXT fields."""
         response = api.get_all_todos()
@@ -298,3 +314,106 @@ class TestUpdateProperties:
         properties = updated_item.get("properties", {})
         assert "TEST_NEW_PROP" in properties
         assert properties["TEST_NEW_PROP"] == "created-drawer"
+
+
+class TestUpdateEffort:
+    """Tests for Org effort support via POST /update."""
+
+    def test_can_update_effort_via_top_level_field(self, api):
+        """Should update effort using the dedicated effort field."""
+        response = api.get_all_todos()
+        todos = response.json()["todos"]
+        custom_item = next(
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
+            None,
+        )
+        assert custom_item is not None
+
+        update_response = api.update_todo(custom_item, {"effort": "1:30"})
+        assert update_response.status_code == 200
+        assert update_response.json().get("status") == "updated"
+
+        response = api.get_all_todos()
+        todos = response.json()["todos"]
+        updated_item = next(
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
+            None,
+        )
+        assert updated_item is not None
+        assert updated_item.get("effort") == "1:30"
+        assert updated_item.get("properties", {}).get("EFFORT") == "1:30"
+
+    def test_can_clear_effort_via_top_level_field(self, api):
+        """Should clear effort when the dedicated effort field is null."""
+        response = api.get_all_todos()
+        todos = response.json()["todos"]
+        custom_item = next(
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
+            None,
+        )
+        assert custom_item is not None
+
+        update_response = api.update_todo(custom_item, {"effort": None})
+        assert update_response.status_code == 200
+        assert update_response.json().get("status") == "updated"
+
+        response = api.get_all_todos()
+        todos = response.json()["todos"]
+        updated_item = next(
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
+            None,
+        )
+        assert updated_item is not None
+        assert updated_item.get("effort") is None
+        assert updated_item.get("properties", {}).get("EFFORT") is None
+
+    def test_top_level_effort_overrides_properties_effort(self, api):
+        """Dedicated effort field should win over properties.EFFORT when both are sent."""
+        response = api.get_all_todos()
+        todos = response.json()["todos"]
+        custom_item = next(
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
+            None,
+        )
+        assert custom_item is not None
+
+        update_response = api.update_todo(
+            custom_item,
+            {"effort": "0:45", "properties": {"EFFORT": "3:00"}},
+        )
+        assert update_response.status_code == 200
+        assert update_response.json().get("status") == "updated"
+
+        response = api.get_all_todos()
+        todos = response.json()["todos"]
+        updated_item = next(
+            (
+                item
+                for item in todos
+                if "custom properties" in item.get("title", "").lower()
+            ),
+            None,
+        )
+        assert updated_item is not None
+        assert updated_item.get("effort") == "0:45"
+        assert updated_item.get("properties", {}).get("EFFORT") == "0:45"
