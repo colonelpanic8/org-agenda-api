@@ -415,9 +415,7 @@ class TestCompleteWithOverrideDate:
         assert "2024-06-12" in content
         assert "SCHEDULED: <2024-06-16 Sun .+1d>" in content
 
-    def test_chronological_repeater_completion_still_advances_scheduled(
-        self, api
-    ):
+    def test_chronological_repeater_completion_still_advances_scheduled(self, api):
         """Historical completion guard should not block forward advancement."""
         todos = api.get_all_todos().json()["todos"]
         todo = next(t for t in todos if t.get("id") == "repeater-restart")
