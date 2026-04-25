@@ -138,6 +138,36 @@ Returns the ID (existing or newly created), or nil if disabled."
              (buffer-file-name))
     (org-id-get-create)))
 
+(defun org-agenda-api--planning-timestamp-time (timestamp)
+  "Parse org planning TIMESTAMP into an Emacs time value."
+  (when (and timestamp (stringp timestamp) (not (string-empty-p timestamp)))
+    (condition-case nil
+        (org-time-string-to-time timestamp)
+      (error nil))))
+
+(defun org-agenda-api--planning-timestamp-regressed-p (before after)
+  "Return non-nil when planning timestamp AFTER is earlier than BEFORE."
+  (let ((before-time (org-agenda-api--planning-timestamp-time before))
+        (after-time (org-agenda-api--planning-timestamp-time after)))
+    (and before-time after-time (time-less-p after-time before-time))))
+
+(defun org-agenda-api--restore-planning-timestamp (type timestamp)
+  "Restore planning timestamp TYPE to TIMESTAMP at point.
+TYPE should be either \"SCHEDULED\" or \"DEADLINE\"."
+  (let ((org-log-reschedule nil)
+        (org-log-redeadline nil))
+    (pcase type
+      ("SCHEDULED" (org-schedule nil timestamp))
+      ("DEADLINE" (org-deadline nil timestamp)))))
+
+(defun org-agenda-api--preserve-planning-if-regressed (type before)
+  "Restore TYPE planning timestamp to BEFORE if completion moved it backwards.
+Return non-nil when a restore was performed."
+  (let ((after (org-entry-get (point) type)))
+    (when (org-agenda-api--planning-timestamp-regressed-p before after)
+      (org-agenda-api--restore-planning-timestamp type before)
+      t)))
+
 (defun org-agenda-api--complete-todo-at (file pos &optional new-state override-date)
   "Mark the TODO at FILE and POS as complete.
 NEW-STATE defaults to DONE if not specified.
@@ -152,7 +182,11 @@ Returns alist with status and details."
         (goto-char pos)
         (if (org-at-heading-p)
             (let ((old-state (org-get-todo-state))
-                  (title (org-get-heading t t t t)))
+                  (title (org-get-heading t t t t))
+                  (scheduled-before (org-entry-get (point) "SCHEDULED"))
+                  (deadline-before (org-entry-get (point) "DEADLINE"))
+                  (scheduled-preserved nil)
+                  (deadline-preserved nil))
               ;; Ensure org-id exists (auto-create if enabled)
               (org-agenda-api--ensure-org-id)
               ;; Call org-todo and run post-command-hook, optionally with date override.
@@ -173,7 +207,14 @@ Returns alist with status and details."
                     ;; Reorder logbook entries to maintain chronological order
                     ;; (override-date may have inserted entry out of order)
                     (org-back-to-heading t)
-                    (org-agenda-api--reorder-logbook-entries))
+                    (org-agenda-api--reorder-logbook-entries)
+                    (org-back-to-heading t)
+                    (setq scheduled-preserved
+                          (org-agenda-api--preserve-planning-if-regressed
+                           "SCHEDULED" scheduled-before))
+                    (setq deadline-preserved
+                          (org-agenda-api--preserve-planning-if-regressed
+                           "DEADLINE" deadline-before)))
                 (progn
                   (org-todo new-state)
                   ;; Run post-command-hook to trigger org-mode's state change logging
@@ -194,6 +235,10 @@ Returns alist with status and details."
                   ("title" . ,title)
                   ("oldState" . ,old-state)
                   ("newState" . ,new-state)
+                  ,@(when scheduled-preserved
+                      '(("scheduledPreserved" . t)))
+                  ,@(when deadline-preserved
+                      '(("deadlinePreserved" . t)))
                   ,@(when habit-summary
                       `(("habitSummary" . ,habit-summary))))))
           `(("status" . "error")
