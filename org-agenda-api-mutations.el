@@ -524,11 +524,12 @@ Returns alist with deletion result."
           `(("deleted" . t)
             ("title" . ,title)))))))
 
-(defun org-agenda-api--delete-logbook-entry (file pos date &optional entry-type)
+(defun org-agenda-api--delete-logbook-entry (file pos date &optional entry-type start)
   "Delete a LOGBOOK entry at DATE for the heading at FILE and POS.
 DATE should be a string like \"2024-01-15\".
 ENTRY-TYPE if provided filters to only delete entries of that type
-\(e.g., \"state-change\", \"note\").
+\(e.g., \"state-change\", \"note\", \"clock\").
+START, when non-nil, narrows clock deletion to the entry with that ISO start.
 Returns alist with deletion result."
   (with-current-buffer (find-file-noselect file)
     (save-excursion
@@ -566,28 +567,37 @@ Returns alist with deletion result."
                         (line-end (line-end-position))
                         (line (buffer-substring-no-properties
                                (line-beginning-position) (line-end-position))))
-                    ;; Check if this line is a logbook entry starting with "- "
-                    (when (string-match "^[ \t]*- " line)
+                    ;; Check if this line is a logbook entry starting with "- " or "CLOCK:"
+                    (when (or (string-match "^[ \t]*- " line)
+                              (string-match "^[ \t]*CLOCK:" line))
                       ;; Check if it contains our target date in an inactive timestamp
                       (when (string-match (concat "\\[" (regexp-quote date)) line)
                         ;; Check entry type if specified
                         (let ((is-state-change (string-match "State \"" line))
                               (is-note (string-match "Note taken on" line))
+                              (is-clock (string-match "^[ \t]*CLOCK:" line))
                               (should-delete t))
                           (when entry-type
                             (setq should-delete
                                   (cond
                                    ((string= entry-type "state-change") is-state-change)
                                    ((string= entry-type "note") is-note)
+                                   ((string= entry-type "clock") is-clock)
                                    (t t))))  ; Unknown type - delete anyway
+                          (when (and should-delete is-clock start)
+                            (setq should-delete
+                                  (and (string-match "CLOCK:[ \t]+\\[\\([^]]+\\)\\]" line)
+                                       (string= (org-agenda-api--parse-inactive-timestamp
+                                                 (match-string 1 line))
+                                                start))))
                           (when should-delete
                             ;; Found the entry to delete
-                            ;; Check for continuation lines (indented, not starting with "- " or ":")
+                            ;; Check for continuation lines (indented, not starting with "- ", "CLOCK:", or ":")
                             (let ((entry-end line-end))
                               (save-excursion
                                 (forward-line 1)
                                 (while (and (< (point) drawer-end)
-                                            (looking-at "^[ \t]+[^-:]"))
+                                            (looking-at "^[ \t]+\\(?:[^-:C]\\|C[^L]\\)"))
                                   (setq entry-end (line-end-position))
                                   (forward-line 1)))
                               ;; Delete the entry (including newline)
@@ -613,6 +623,130 @@ Returns alist with deletion result."
                                           (if entry-type
                                               (format " with type '%s'" entry-type)
                                             "")))))))))))))
+
+(defun org-agenda-api--format-clock-timestamp (iso-string)
+  "Convert ISO-STRING to an inactive Org clock timestamp."
+  (let ((time (org-agenda-api--parse-datetime iso-string)))
+    (unless time
+      (error "Invalid clock timestamp: %s" iso-string))
+    (format-time-string "[%Y-%m-%d %a %H:%M]" time)))
+
+(defun org-agenda-api--clock-duration-minutes (start-iso end-iso)
+  "Return clock duration in minutes from START-ISO to END-ISO."
+  (let ((start-time (org-agenda-api--parse-datetime start-iso))
+        (end-time (org-agenda-api--parse-datetime end-iso)))
+    (unless start-time
+      (error "Invalid clock start timestamp: %s" start-iso))
+    (unless end-time
+      (error "Invalid clock end timestamp: %s" end-iso))
+    (when (time-less-p end-time start-time)
+      (error "Clock end cannot be before start"))
+    (round (/ (float-time (time-subtract end-time start-time)) 60))))
+
+(defun org-agenda-api--format-clock-duration (minutes)
+  "Format MINUTES as Org clock duration."
+  (format "%2d:%02d" (/ minutes 60) (mod minutes 60)))
+
+(defun org-agenda-api--clock-line (start-iso end-iso)
+  "Return an Org CLOCK line for START-ISO and END-ISO."
+  (let ((minutes (org-agenda-api--clock-duration-minutes start-iso end-iso)))
+    (format "CLOCK: %s--%s => %s"
+            (org-agenda-api--format-clock-timestamp start-iso)
+            (org-agenda-api--format-clock-timestamp end-iso)
+            (org-agenda-api--format-clock-duration minutes))))
+
+(defun org-agenda-api--ensure-logbook-drawer ()
+  "Ensure the current heading has a LOGBOOK drawer and return its content point."
+  (let ((drawer-name (or (and (boundp 'org-log-into-drawer)
+                              (stringp org-log-into-drawer)
+                              org-log-into-drawer)
+                         "LOGBOOK"))
+        (end-of-heading (save-excursion (outline-next-heading) (point))))
+    (org-back-to-heading t)
+    (if (re-search-forward
+         (format "^[ \t]*:%s:[ \t]*$" (regexp-quote drawer-name))
+         end-of-heading t)
+        (progn
+          (forward-line 1)
+          (point))
+      (org-end-of-meta-data t)
+      (insert "  :" drawer-name ":\n  :END:\n")
+      (forward-line -1)
+      (point))))
+
+(defun org-agenda-api--add-clock-entry (file pos start-iso end-iso)
+  "Add a CLOCK entry at FILE POS from START-ISO to END-ISO."
+  (let* ((duration-minutes (org-agenda-api--clock-duration-minutes start-iso end-iso))
+         (clock-line (org-agenda-api--clock-line start-iso end-iso)))
+    (with-current-buffer (find-file-noselect file)
+      (save-excursion
+        (goto-char pos)
+        (if (not (org-at-heading-p))
+            `(("status" . "error")
+              ("message" . "No heading found at position"))
+          (let ((title (org-get-heading t t t t)))
+            (goto-char (org-agenda-api--ensure-logbook-drawer))
+            (insert "  " clock-line "\n")
+            (org-back-to-heading t)
+            (org-agenda-api--reorder-logbook-entries)
+            (save-buffer)
+            (org-agenda-api--invalidate-cache)
+            `(("status" . "created")
+              ("title" . ,title)
+              ("clock" . (("start" . ,start-iso)
+                          ("end" . ,end-iso)
+                          ("durationMinutes" . ,duration-minutes))))))))))
+
+(defun org-agenda-api--update-clock-entry (file pos original-start start-iso end-iso)
+  "Update CLOCK entry at FILE POS matching ORIGINAL-START."
+  (let* ((duration-minutes (org-agenda-api--clock-duration-minutes start-iso end-iso))
+         (clock-line (org-agenda-api--clock-line start-iso end-iso)))
+    (with-current-buffer (find-file-noselect file)
+      (save-excursion
+        (goto-char pos)
+        (if (not (org-at-heading-p))
+            `(("status" . "error")
+              ("message" . "No heading found at position"))
+          (let* ((title (org-get-heading t t t t))
+                 (drawer-name (or (and (boundp 'org-log-into-drawer)
+                                       (stringp org-log-into-drawer)
+                                       org-log-into-drawer)
+                                  "LOGBOOK"))
+                 (end-of-subtree (save-excursion (org-end-of-subtree t) (point)))
+                 (updated nil))
+            (if (not (re-search-forward
+                      (format "^[ \t]*:%s:[ \t]*$" (regexp-quote drawer-name))
+                      end-of-subtree t))
+                `(("status" . "not_found")
+                  ("message" . ,(format "No LOGBOOK drawer found for '%s'" title)))
+              (let ((drawer-end (save-excursion
+                                  (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t)
+                                  (match-beginning 0))))
+                (while (and (not updated) (< (point) drawer-end))
+                  (let ((line (buffer-substring-no-properties
+                               (line-beginning-position) (line-end-position))))
+                    (when (and (string-match "^[ \t]*CLOCK:" line)
+                               (string-match "CLOCK:[ \t]+\\[\\([^]]+\\)\\]" line)
+                               (string= (org-agenda-api--parse-inactive-timestamp
+                                         (match-string 1 line))
+                                        original-start))
+                      (delete-region (line-beginning-position) (line-end-position))
+                      (insert "  " clock-line)
+                      (setq updated t)))
+                  (forward-line 1))
+                (if (not updated)
+                    `(("status" . "not_found")
+                      ("message" . ,(format "No CLOCK entry found with start %s"
+                                            original-start)))
+                  (org-back-to-heading t)
+                  (org-agenda-api--reorder-logbook-entries)
+                  (save-buffer)
+                  (org-agenda-api--invalidate-cache)
+                  `(("status" . "updated")
+                    ("title" . ,title)
+                    ("clock" . (("start" . ,start-iso)
+                                ("end" . ,end-iso)
+                                ("durationMinutes" . ,duration-minutes)))))))))))))
 
 (provide 'org-agenda-api-mutations)
 ;;; org-agenda-api-mutations.el ends here

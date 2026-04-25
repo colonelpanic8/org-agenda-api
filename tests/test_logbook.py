@@ -417,3 +417,124 @@ class TestDeleteLogbookEntry:
         content = file_path.read_text()
         assert date1 not in content, "Date1 should be deleted"
         assert date2 in content, "Date2 should still exist"
+
+
+class TestClockEntries:
+    """Tests for CLOCK logbook parsing and mutations."""
+
+    def _create_clocked_todo(self, api, title):
+        api.create_todo(title)
+        todos = api.get_all_todos().json()["todos"]
+        todo = next(
+            (t for t in todos if title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+        return todo
+
+    def _refetch_todo(self, api, title):
+        todos = api.get_all_todos().json()["todos"]
+        todo = next(
+            (t for t in todos if title in t.get("title", "")),
+            None,
+        )
+        assert todo is not None
+        return todo
+
+    def test_add_clock_creates_logbook_entry(self, api):
+        title = "Clock add test todo"
+        todo = self._create_clocked_todo(api, title)
+
+        response = api.add_clock(
+            todo,
+            "2024-06-15T09:00:00",
+            "2024-06-15T10:30:00",
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data.get("status") == "created"
+        assert data["clock"]["durationMinutes"] == 90
+
+    def test_clock_entries_are_returned_in_logbook(self, api):
+        title = "Clock parse test todo"
+        todo = self._create_clocked_todo(api, title)
+        api.add_clock(
+            todo,
+            "2024-06-15T09:00:00",
+            "2024-06-15T10:30:00",
+        )
+
+        todo = self._refetch_todo(api, title)
+        clocks = [
+            entry for entry in todo.get("logbook", []) if entry.get("type") == "clock"
+        ]
+
+        assert len(clocks) == 1
+        assert clocks[0]["start"] == "2024-06-15T09:00:00"
+        assert clocks[0]["end"] == "2024-06-15T10:30:00"
+        assert clocks[0]["durationMinutes"] == 90
+        assert clocks[0]["raw"].startswith("CLOCK:")
+
+    def test_update_clock_rewrites_existing_clock(self, api):
+        title = "Clock update test todo"
+        todo = self._create_clocked_todo(api, title)
+        api.add_clock(
+            todo,
+            "2024-06-15T09:00:00",
+            "2024-06-15T10:30:00",
+        )
+        todo = self._refetch_todo(api, title)
+
+        response = api.update_clock(
+            todo,
+            "2024-06-15T09:00:00",
+            "2024-06-15T08:30:00",
+            "2024-06-15T11:00:00",
+        )
+        data = response.json()
+
+        assert data.get("status") == "updated"
+        assert data["clock"]["durationMinutes"] == 150
+
+        todo = self._refetch_todo(api, title)
+        clocks = [
+            entry for entry in todo.get("logbook", []) if entry.get("type") == "clock"
+        ]
+
+        assert len(clocks) == 1
+        assert clocks[0]["start"] == "2024-06-15T08:30:00"
+        assert clocks[0]["end"] == "2024-06-15T11:00:00"
+        assert clocks[0]["durationMinutes"] == 150
+
+    def test_delete_clock_can_target_start_timestamp(self, api):
+        title = "Clock delete test todo"
+        todo = self._create_clocked_todo(api, title)
+        api.add_clock(
+            todo,
+            "2024-06-15T09:00:00",
+            "2024-06-15T10:00:00",
+        )
+        todo = self._refetch_todo(api, title)
+        api.add_clock(
+            todo,
+            "2024-06-15T11:00:00",
+            "2024-06-15T12:00:00",
+        )
+        todo = self._refetch_todo(api, title)
+
+        response = api.delete_logbook_entry(
+            todo,
+            "2024-06-15",
+            entry_type="clock",
+            start="2024-06-15T09:00:00",
+        )
+        assert response.json().get("status") == "deleted"
+
+        todo = self._refetch_todo(api, title)
+        clocks = [
+            entry for entry in todo.get("logbook", []) if entry.get("type") == "clock"
+        ]
+
+        assert len(clocks) == 1
+        assert clocks[0]["start"] == "2024-06-15T11:00:00"
