@@ -354,14 +354,15 @@ class APIClient:
         return self.get("/reload", timeout=timeout)
 
     def delete_logbook_entry(
-        self, todo: dict, date: str, entry_type: str = None
+        self, todo: dict, date: str, entry_type: str = None, start: str = None
     ) -> requests.Response:
         """POST /delete-logbook-entry
 
         Args:
             todo: Dict with id, file, pos to identify the todo
             date: The date of the logbook entry to delete (YYYY-MM-DD)
-            entry_type: Optional type filter ("state-change", "note")
+            entry_type: Optional type filter ("state-change", "note", "clock")
+            start: Optional clock start timestamp for precise clock deletion
         """
         payload = {
             "file": todo.get("file"),
@@ -372,7 +373,40 @@ class APIClient:
             payload["id"] = todo["id"]
         if entry_type:
             payload["type"] = entry_type
+        if start:
+            payload["start"] = start
         return self.post("/delete-logbook-entry", json=payload)
+
+    def add_clock(self, todo: dict, start: str, end: str) -> requests.Response:
+        """POST /add-clock"""
+        return self.post(
+            "/add-clock",
+            json={
+                "id": todo.get("id"),
+                "file": todo.get("file"),
+                "pos": todo.get("pos"),
+                "title": todo.get("title"),
+                "start": start,
+                "end": end,
+            },
+        )
+
+    def update_clock(
+        self, todo: dict, original_start: str, start: str, end: str
+    ) -> requests.Response:
+        """POST /update-clock"""
+        return self.post(
+            "/update-clock",
+            json={
+                "id": todo.get("id"),
+                "file": todo.get("file"),
+                "pos": todo.get("pos"),
+                "title": todo.get("title"),
+                "original_start": original_start,
+                "start": start,
+                "end": end,
+            },
+        )
 
 
 def find_free_port() -> int:

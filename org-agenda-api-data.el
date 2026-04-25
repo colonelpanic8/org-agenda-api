@@ -291,10 +291,16 @@ Handles timestamps like 2026-01-21 Wed 10:30 (content from org-ts-regexp-inactiv
             (format "%sT%s:00" date time)
           date)))))
 
+(defun org-agenda-api--parse-clock-duration (duration)
+  "Parse Org clock DURATION like \"1:30\" into minutes."
+  (when (and duration (string-match "\\([0-9]+\\):\\([0-9][0-9]\\)" duration))
+    (+ (* (string-to-number (match-string 1 duration)) 60)
+       (string-to-number (match-string 2 duration)))))
+
 (defun org-agenda-api--get-logbook-entries ()
   "Get LOGBOOK entries for the entry at point.
 Returns a list of alists, each containing type, timestamp, and details.
-Parses state changes and notes from the LOGBOOK drawer.
+Parses state changes, notes, and clock entries from the LOGBOOK drawer.
 Uses patterns similar to `org-habit-parse-todo' for robust parsing."
   (save-excursion
     (let ((entries nil)
@@ -314,10 +320,35 @@ Uses patterns similar to `org-habit-parse-todo' for robust parsing."
                            (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t))))
           (when drawer-end
             ;; Parse entries within the drawer
-            (while (re-search-forward "^[ \t]*- " drawer-end t)
-              (let ((line-start (point))
-                    (line-end (line-end-position)))
+            (while (re-search-forward "^[ \t]*\\(?:- \\|CLOCK:\\)" drawer-end t)
+              (let ((line-start (line-beginning-position))
+                    (line-end (line-end-position))
+                    (line (buffer-substring-no-properties
+                           (line-beginning-position) (line-end-position))))
                 (cond
+                 ;; Clock entry: CLOCK: [start]--[end] => H:MM
+                 ((string-match "CLOCK:" line)
+                  (let ((start nil)
+                        (end nil)
+                        (duration-minutes nil))
+                    (when (string-match "CLOCK:[ \t]+\\[\\([^]]+\\)\\]" line)
+                      (setq start
+                            (org-agenda-api--parse-inactive-timestamp
+                             (match-string 1 line))))
+                    (when (string-match "--\\[\\([^]]+\\)\\]" line)
+                      (setq end
+                            (org-agenda-api--parse-inactive-timestamp
+                             (match-string 1 line))))
+                    (when (string-match "=>[ \t]*\\([0-9]+:[0-9][0-9]\\)" line)
+                      (setq duration-minutes
+                            (org-agenda-api--parse-clock-duration
+                             (match-string 1 line))))
+                    (push `(("type" . "clock")
+                            ("start" . ,start)
+                            ("end" . ,end)
+                            ("durationMinutes" . ,duration-minutes)
+                            ("raw" . ,(string-trim line)))
+                          entries)))
                  ;; State change: - State "NEW" from "OLD" [timestamp]
                  ;; Parse directly instead of depending on capture indices in org timestamp regex.
                  ((looking-at
@@ -355,9 +386,6 @@ Uses patterns similar to `org-habit-parse-todo' for robust parsing."
                             ("content" . ,note-content)
                             ("raw" . ,(buffer-substring line-start line-end)))
                           entries)))
-                 ;; Clock entry: CLOCK: [timestamp]--[timestamp] => duration
-                 ((looking-at (concat "CLOCK: " ts-re "\\(?:--" ts-re "\\)?\\(?: =>.*\\)?"))
-                  nil) ;; Skip clock entries for now, they're not usually needed
                  ;; Other log entry - capture as generic
                  (t
                   (push `(("type" . "other")

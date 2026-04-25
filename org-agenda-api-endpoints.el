@@ -604,14 +604,33 @@ Optional:
                                             ("include_children" . ,(if include-children t :json-false))))))))))
   (org-agenda-api--track-request))
 
+(defun org-agenda-api--resolve-todo-location (id file pos title)
+  "Resolve todo location from ID, FILE, POS, and TITLE."
+  (let ((location nil))
+    (when (and file pos)
+      (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
+    (unless location
+      (setq location (org-agenda-api--find-todo-by-id id)))
+    (unless location
+      (setq location (org-agenda-api--find-todo-by-file-title file title)))
+    (unless location
+      (setq location (org-agenda-api--find-todo-by-title title)))
+    (unless location
+      (setq location (org-agenda-api--find-todo-by-file-title file title t)))
+    (unless location
+      (setq location (org-agenda-api--find-todo-by-title title t)))
+    location))
+
 (defservlet delete-logbook-entry application/json (_path _query headers)
   "Endpoint: Delete a specific LOGBOOK entry from an org item.
 Accepts JSON body with:
   - id: org-id to locate the item (or use file + pos)
   - file + pos: direct file location
+  - title: heading title (optional fallback)
   - date: the date of the logbook entry to delete (YYYY-MM-DD)
 Optional:
-  - type: filter to only delete entries of this type (\"state-change\", \"note\")"
+  - type: filter to only delete entries of this type (\"state-change\", \"note\", \"clock\")
+  - start: ISO datetime of clock start for precise clock deletion"
   (let* ((content-header (cadr (assoc "Content" headers)))
          (json-data (condition-case parse-err
                         (json-parse-string content-header)
@@ -622,10 +641,12 @@ Optional:
          (id (and json-data (gethash "id" json-data)))
          (file (and json-data (gethash "file" json-data)))
          (pos (and json-data (gethash "pos" json-data)))
+         (title (and json-data (gethash "title" json-data)))
          (date (and json-data (gethash "date" json-data)))
-         (entry-type (and json-data (gethash "type" json-data))))
-    (org-agenda-api--log 'info "/delete-logbook-entry: Request - id=%S, file=%S, pos=%S, date=%S, type=%S"
-                         id file pos date entry-type)
+         (entry-type (and json-data (gethash "type" json-data)))
+         (start (and json-data (gethash "start" json-data))))
+    (org-agenda-api--log 'info "/delete-logbook-entry: Request - id=%S, file=%S, pos=%S, date=%S, type=%S, start=%S"
+                         id file pos date entry-type start)
     (condition-case err
         (cond
          ((null json-data)
@@ -638,22 +659,111 @@ Optional:
           (insert (json-encode `(("status" . "error")
                                  ("message" . "Must provide either 'id' or both 'file' and 'pos'")))))
          (t
-          ;; Resolve location from id if provided
-          (let* ((location (if id
-                               (org-id-find id)
-                             (cons file pos)))
+          (let* ((location (org-agenda-api--resolve-todo-location id file pos title))
                  (target-file (car location))
                  (target-pos (cdr location)))
             (if (null location)
                 (insert (json-encode `(("status" . "error")
                                        ("message" . ,(format "Item not found with id: %s" id)))))
               (let ((result (org-agenda-api--delete-logbook-entry
-                             target-file target-pos date entry-type)))
+                             target-file target-pos date entry-type start)))
                 (org-agenda-api--log 'info "/delete-logbook-entry: Result - %S"
                                      (cdr (assoc "status" result)))
                 (insert (json-encode result)))))))
       (error
        (org-agenda-api--log-error-with-backtrace "/delete-logbook-entry" err)
+       (insert (json-encode `(("status" . "error")
+                              ("message" . ,(error-message-string err))))))))
+  (org-agenda-api--track-request))
+
+(defservlet add-clock application/json (_path _query headers)
+  "Endpoint: Add a CLOCK entry to an org item.
+Accepts JSON body with id or file+pos, plus required start and end ISO datetimes."
+  (let* ((content-header (cadr (assoc "Content" headers)))
+         (json-data (condition-case parse-err
+                        (json-parse-string content-header)
+                      (error
+                       (org-agenda-api--log 'error "/add-clock: Failed to parse JSON: %s"
+                                            (error-message-string parse-err))
+                       nil)))
+         (id (and json-data (gethash "id" json-data)))
+         (file (and json-data (gethash "file" json-data)))
+         (pos (and json-data (gethash "pos" json-data)))
+         (title (and json-data (gethash "title" json-data)))
+         (start (and json-data (gethash "start" json-data)))
+         (end (and json-data (gethash "end" json-data))))
+    (condition-case err
+        (cond
+         ((null json-data)
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Failed to parse request body as JSON")))))
+         ((or (null start) (eq start :null))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required parameter: start")))))
+         ((or (null end) (eq end :null))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required parameter: end")))))
+         ((and (null id) (or (null file) (null pos)))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Must provide either 'id' or both 'file' and 'pos'")))))
+         (t
+          (let ((location (org-agenda-api--resolve-todo-location id file pos title)))
+            (if (null location)
+                (insert (json-encode `(("status" . "error")
+                                       ("message" . "Todo not found"))))
+              (insert (json-encode
+                       (org-agenda-api--add-clock-entry
+                        (car location) (cdr location) start end)))))))
+      (error
+       (org-agenda-api--log-error-with-backtrace "/add-clock" err)
+       (insert (json-encode `(("status" . "error")
+                              ("message" . ,(error-message-string err))))))))
+  (org-agenda-api--track-request))
+
+(defservlet update-clock application/json (_path _query headers)
+  "Endpoint: Update a CLOCK entry identified by original_start."
+  (let* ((content-header (cadr (assoc "Content" headers)))
+         (json-data (condition-case parse-err
+                        (json-parse-string content-header)
+                      (error
+                       (org-agenda-api--log 'error "/update-clock: Failed to parse JSON: %s"
+                                            (error-message-string parse-err))
+                       nil)))
+         (id (and json-data (gethash "id" json-data)))
+         (file (and json-data (gethash "file" json-data)))
+         (pos (and json-data (gethash "pos" json-data)))
+         (title (and json-data (gethash "title" json-data)))
+         (original-start (and json-data (gethash "original_start" json-data)))
+         (start (and json-data (gethash "start" json-data)))
+         (end (and json-data (gethash "end" json-data))))
+    (condition-case err
+        (cond
+         ((null json-data)
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Failed to parse request body as JSON")))))
+         ((or (null original-start) (eq original-start :null))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required parameter: original_start")))))
+         ((or (null start) (eq start :null))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required parameter: start")))))
+         ((or (null end) (eq end :null))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Missing required parameter: end")))))
+         ((and (null id) (or (null file) (null pos)))
+          (insert (json-encode `(("status" . "error")
+                                 ("message" . "Must provide either 'id' or both 'file' and 'pos'")))))
+         (t
+          (let ((location (org-agenda-api--resolve-todo-location id file pos title)))
+            (if (null location)
+                (insert (json-encode `(("status" . "error")
+                                       ("message" . "Todo not found"))))
+              (insert (json-encode
+                       (org-agenda-api--update-clock-entry
+                        (car location) (cdr location)
+                        original-start start end)))))))
+      (error
+       (org-agenda-api--log-error-with-backtrace "/update-clock" err)
        (insert (json-encode `(("status" . "error")
                               ("message" . ,(error-message-string err))))))))
   (org-agenda-api--track-request))
