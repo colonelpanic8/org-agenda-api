@@ -127,6 +127,11 @@ Returns active (not-done) states and done states separately."
   (insert (json-encode (org-agenda-api--get-todo-states)))
   (org-agenda-api--track-request))
 
+(defservlet todo-states-by-file application/json ()
+  "Endpoint: Return effective TODO states for each agenda file."
+  (insert (json-encode (org-agenda-api--get-todo-states-by-file)))
+  (org-agenda-api--track-request))
+
 (defservlet filter-options application/json ()
   "Endpoint: Return all available filter options for the UI.
 Returns todoStates, priorities, tags, and categories."
@@ -229,6 +234,12 @@ Returns templates, filterOptions, todoStates, customViews, categoryTypes, habitC
       (error
        (push (format "todoStates: %s" (error-message-string err)) errors)
        (push '("todoStates" . nil) result)))
+    ;; Collect todo states by file
+    (condition-case err
+        (push `("todoStatesByFile" . ,(org-agenda-api--get-todo-states-by-file)) result)
+      (error
+       (push (format "todoStatesByFile: %s" (error-message-string err)) errors)
+       (push '("todoStatesByFile" . nil) result)))
     ;; Collect custom views
     (condition-case err
         (let ((views (org-agenda-api--list-custom-views)))

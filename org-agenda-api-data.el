@@ -1316,13 +1316,18 @@ Example: <2026-01-25 Sat 10:00 +1w> -> ((date . \"2026-01-25\") (time . \"10:00\
 
 ;;; TODO State and Filter Functions
 
-(defun org-agenda-api--get-todo-states ()
-  "Get all configured TODO states from `org-todo-keywords'.
-Return alist with \"active\" (not-done) and \"done\" states.
-Handles both list and vector formats in `org-todo-keywords'."
+(defun org-agenda-api--clean-todo-keyword (keyword)
+  "Return KEYWORD without Org fast-selection suffixes."
+  (when (stringp keyword)
+    (replace-regexp-in-string "(.*)$" "" keyword)))
+
+(defun org-agenda-api--todo-keywords-to-states (todo-keywords)
+  "Convert TODO-KEYWORDS into active and done state vectors.
+TODO-KEYWORDS should have the same shape as `org-todo-keywords'.  Both list
+and vector keyword sets are accepted."
   (let ((active-states nil)
         (done-states nil))
-    (dolist (keyword-set org-todo-keywords)
+    (dolist (keyword-set todo-keywords)
       (let ((in-done-section nil)
             ;; Convert to list if it's a vector, skip first element (sequence/type)
             (keywords (cdr (if (vectorp keyword-set)
@@ -1330,18 +1335,70 @@ Handles both list and vector formats in `org-todo-keywords'."
                              keyword-set))))
         (dolist (keyword keywords)
           (cond
-           ((string= keyword "|")
+           ((and (stringp keyword) (string= keyword "|"))
             (setq in-done-section t))
            (t
-            ;; Handle keywords with shortcuts like "TODO(t)"
-            (let ((clean-keyword (if (string-match-p "(.*)$" keyword)
-                                     (replace-regexp-in-string "(.*)$" "" keyword)
-                                   keyword)))
-              (if in-done-section
-                  (push clean-keyword done-states)
-                (push clean-keyword active-states))))))))
+            (let ((clean-keyword (org-agenda-api--clean-todo-keyword keyword)))
+              (when (and clean-keyword (not (string-empty-p clean-keyword)))
+                (if in-done-section
+                    (push clean-keyword done-states)
+                  (push clean-keyword active-states)))))))))
     `(("active" . ,(vconcat (nreverse active-states)))
       ("done" . ,(vconcat (nreverse done-states))))))
+
+(defun org-agenda-api--get-todo-states ()
+  "Get all configured TODO states from `org-todo-keywords'.
+Return alist with \"active\" (not-done) and \"done\" states.
+Handles both list and vector formats in `org-todo-keywords'."
+  (org-agenda-api--todo-keywords-to-states org-todo-keywords))
+
+(defun org-agenda-api--file-todo-keyword-specs (file)
+  "Return TODO keyword specs declared by FILE keywords.
+This handles `#+TODO:', `#+SEQ_TODO:', and `#+TYP_TODO:' lines.  The return
+shape matches `org-todo-keywords' closely enough to reuse the normal parser."
+  (let ((specs nil))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (while (re-search-forward
+              "^[ \t]*#\\+\\(?:SEQ_\\|TYP_\\)?TODO:[ \t]+\\(.+\\)$"
+              nil t)
+        (push (cons 'sequence
+                    (split-string (string-trim (match-string 1)) "[ \t]+" t))
+              specs)))
+    (nreverse specs)))
+
+(defun org-agenda-api--get-todo-states-for-file (file)
+  "Return effective TODO states for FILE.
+This includes file-local `#+TODO:' and `#+SEQ_TODO:' settings after Org has
+initialized the buffer's keyword options."
+  (let ((file-specs (org-agenda-api--file-todo-keyword-specs file)))
+    (if file-specs
+        (org-agenda-api--todo-keywords-to-states file-specs)
+      (with-current-buffer (find-file-noselect file)
+        (org-with-wide-buffer
+         (org-set-regexps-and-options)
+         (org-agenda-api--todo-keywords-to-states org-todo-keywords))))))
+
+(defun org-agenda-api--get-todo-states-by-file ()
+  "Return TODO states for each readable `org-agenda-files' entry."
+  (let ((files nil)
+        (errors nil))
+    (dolist (file (mapcar #'expand-file-name org-agenda-files))
+      (condition-case err
+          (if (and (file-exists-p file) (file-readable-p file))
+              (push `(("file" . ,file)
+                      ("todoStates" . ,(org-agenda-api--get-todo-states-for-file file)))
+                    files)
+            (push `(("file" . ,file)
+                    ("message" . "File is missing or unreadable"))
+                  errors))
+        (error
+         (push `(("file" . ,file)
+                 ("message" . ,(error-message-string err)))
+               errors))))
+    `(("files" . ,(vconcat (nreverse files)))
+      ("errors" . ,(vconcat (nreverse errors))))))
 
 (defun org-agenda-api--get-filter-options ()
   "Get all available filter options from agenda files.

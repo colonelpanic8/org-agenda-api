@@ -448,6 +448,18 @@ def org_test_dir(tmp_path_factory):
 * TODO Standalone task
 """)
 
+    custom_keywords_org = test_dir / "custom_keywords.org"
+    custom_keywords_org.write_text("""\
+#+TITLE: Custom Keyword Test
+#+TODO: STOCKED VERIFY BUY | PURCHASED SKIPPED
+
+* BUY Coffee beans
+
+* VERIFY Paper towels
+
+* PURCHASED Dish soap
+""")
+
     # Create file for testing include_completed bug
     # This file contains items that should NOT appear with include_completed:
     # - DONE items with LOGBOOK state change but no CLOSED timestamp
