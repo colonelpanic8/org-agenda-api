@@ -384,6 +384,58 @@ class TestCompleteWithOverrideDate:
             f"Logbook content:\n{logbook_content}"
         )
 
+    def test_retroactive_repeater_completion_does_not_move_scheduled_backwards(
+        self, api, org_dir
+    ):
+        """Out-of-order historical completions should not regress SCHEDULED."""
+        todos = api.get_all_todos().json()["todos"]
+        todo = next(t for t in todos if t.get("id") == "repeater-restart")
+
+        response = api.complete_todo(todo, override_date="2024-06-15")
+        assert response.status_code == 200
+        assert response.json().get("status") == "completed"
+
+        todos = api.get_all_todos().json()["todos"]
+        repeater = next(t for t in todos if t.get("id") == "repeater-restart")
+        assert repeater["scheduled"]["date"] == "2024-06-16"
+
+        response = api.complete_todo(repeater, override_date="2024-06-12")
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("status") == "completed"
+        assert data.get("scheduledPreserved") is True
+
+        todos = api.get_all_todos().json()["todos"]
+        repeater = next(t for t in todos if t.get("id") == "repeater-restart")
+        assert repeater["scheduled"]["date"] == "2024-06-16"
+
+        from pathlib import Path
+
+        content = Path(repeater["file"]).read_text()
+        assert "2024-06-12" in content
+        assert "SCHEDULED: <2024-06-16 Sun .+1d>" in content
+
+    def test_chronological_repeater_completion_still_advances_scheduled(self, api):
+        """Historical completion guard should not block forward advancement."""
+        todos = api.get_all_todos().json()["todos"]
+        todo = next(t for t in todos if t.get("id") == "repeater-restart")
+
+        first = api.complete_todo(todo, override_date="2024-06-12")
+        assert first.status_code == 200
+        assert first.json().get("status") == "completed"
+
+        todos = api.get_all_todos().json()["todos"]
+        repeater = next(t for t in todos if t.get("id") == "repeater-restart")
+        assert repeater["scheduled"]["date"] == "2024-06-13"
+
+        second = api.complete_todo(repeater, override_date="2024-06-15")
+        assert second.status_code == 200
+        assert second.json().get("scheduledPreserved") is None
+
+        todos = api.get_all_todos().json()["todos"]
+        repeater = next(t for t in todos if t.get("id") == "repeater-restart")
+        assert repeater["scheduled"]["date"] == "2024-06-16"
+
 
 class TestSetStateEndpoint:
     """Tests for POST /set-state endpoint."""
