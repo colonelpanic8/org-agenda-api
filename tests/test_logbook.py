@@ -467,8 +467,7 @@ class TestClockEntries:
 
         todo = self._refetch_todo(api, title)
         clocks = [
-            entry for entry in todo.get("logbook", [])
-            if entry.get("type") == "clock"
+            entry for entry in todo.get("logbook", []) if entry.get("type") == "clock"
         ]
 
         assert len(clocks) == 1
@@ -500,8 +499,7 @@ class TestClockEntries:
 
         todo = self._refetch_todo(api, title)
         clocks = [
-            entry for entry in todo.get("logbook", [])
-            if entry.get("type") == "clock"
+            entry for entry in todo.get("logbook", []) if entry.get("type") == "clock"
         ]
 
         assert len(clocks) == 1
@@ -535,8 +533,7 @@ class TestClockEntries:
 
         todo = self._refetch_todo(api, title)
         clocks = [
-            entry for entry in todo.get("logbook", [])
-            if entry.get("type") == "clock"
+            entry for entry in todo.get("logbook", []) if entry.get("type") == "clock"
         ]
 
         assert len(clocks) == 1
