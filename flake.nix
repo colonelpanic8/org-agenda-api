@@ -117,19 +117,10 @@
 
         # Mova package info
         movaPackageJson = builtins.fromJSON (builtins.readFile "${mova}/package.json");
-
-        # Mova node_modules built with mkYarnModules
-        movaNodeModules = pkgs.mkYarnModules {
-          pname = movaPackageJson.name;
-          version = movaPackageJson.version;
-          inherit nodejs;
-          packageJSON = "${mova}/package.json";
+        movaOfflineCache = pkgs.fetchYarnDeps {
+          name = "mova-deps-offline-cache";
           yarnLock = "${mova}/yarn.lock";
-          offlineCache = pkgs.fetchYarnDeps {
-            name = "mova-deps-offline-cache";
-            yarnLock = "${mova}/yarn.lock";
-            hash = "sha256-YGZRIgH6tX+wrBjxpRhN+zDgQj2h+Vm1J4QsROzcBfI=";
-          };
+          hash = "sha256-YGZRIgH6tX+wrBjxpRhN+zDgQj2h+Vm1J4QsROzcBfI=";
         };
 
         # Mova web build
@@ -138,8 +129,10 @@
           version = movaPackageJson.version;
 
           src = mova;
+          yarnOfflineCache = movaOfflineCache;
 
           nativeBuildInputs = [
+            pkgs.yarnConfigHook
             pkgs.yarn
             nodejs
           ];
@@ -152,9 +145,6 @@
 
             # Set mova git commit for version tracking
             export MOVA_GIT_COMMIT=${movaGitCommit}
-
-            # Copy prebuilt node_modules
-            cp -r ${movaNodeModules}/node_modules ./node_modules
 
             # Create cache directory
             mkdir -p .cache
