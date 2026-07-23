@@ -120,7 +120,7 @@
         movaOfflineCache = pkgs.fetchYarnDeps {
           name = "mova-deps-offline-cache";
           yarnLock = "${mova}/yarn.lock";
-          hash = "sha256-JfSdz/ZNDFSy7c15Uzi8PldG5R4vbun0DEp94Tccq80=";
+          hash = "sha256-9q9nquG828biB6UgHIbmQ8H4LumL3bFB/kM71UGIMr8=";
         };
 
         # Mova web build
