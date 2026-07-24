@@ -447,7 +447,7 @@ REFERENCE-TIME is used for calculations."
             ,@(when completed-on-date
                 `(("habitCompletedOnQueryDate" . t))))))))
 
-  (defun org-agenda-api--collect-habits-for-date-range (start-date end-date today-str)
+  (cl-defun org-agenda-api--collect-habits-for-date-range (start-date end-date today-str)
     "Collect habit entries for each date in range START-DATE to END-DATE.
 TODAY-STR is the reference date for calculations.
 Returns an alist of (date-str . entries-list)."
