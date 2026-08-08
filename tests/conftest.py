@@ -593,6 +593,15 @@ def org_test_dir(tmp_path_factory):
   - State "DONE"       from "TODO"       [2024-06-10 Mon 09:00]
   :END:
   This habit was NOT completed yesterday.
+
+* TODO Paused Window Habit
+  DEADLINE: <{TEST_DATE_ORG} .+1d>
+  :PROPERTIES:
+  :STYLE: habit
+  :OWH_CONFIG: (:window-specs ((:duration (:days 7) :repetitions 2)) :until "2024-06-01")
+  :ID: test-window-habit-paused
+  :END:
+  This habit is retained as history but is inactive on the test date.
 """
     )
 

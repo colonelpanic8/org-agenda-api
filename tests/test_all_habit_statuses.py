@@ -62,6 +62,13 @@ class TestAllHabitStatuses:
         habit_ids = [h.get("id") for h in habits]
         assert "habit-exercise-daily" in habit_ids
 
+    def test_paused_habit_is_omitted_at_inactive_date(self, api):
+        """Bulk status excludes habits whose config is inactive."""
+        response = api.get_all_habit_statuses(date="2024-06-15")
+        habit_ids = [h.get("id") for h in response.json().get("habits", [])]
+
+        assert "test-window-habit-paused" not in habit_ids
+
     def test_preceding_parameter_affects_graph_length(self, api):
         """Preceding parameter changes graph length for all habits."""
         response_default = api.get_all_habit_statuses()
