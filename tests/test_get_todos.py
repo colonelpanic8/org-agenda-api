@@ -191,6 +191,13 @@ class TestGetAllTodosHabitFields:
         for todo in non_habit_todos:
             assert "habitSummary" not in todo
 
+    def test_paused_window_habit_is_omitted(self, api):
+        """A window habit with no active config is not an actionable TODO."""
+        response = api.get_all_todos()
+        todos = response.json().get("todos", [])
+
+        assert not any(t.get("id") == "test-window-habit-paused" for t in todos)
+
 
 class TestEffectiveCategory:
     """Tests for effectiveCategory field in todos."""

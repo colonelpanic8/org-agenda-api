@@ -38,6 +38,18 @@ Delegates to `org-window-habit-entry-p' from the org-window-habit library."
     (and (org-agenda-api--window-habit-available-p)
          (org-window-habit-entry-p)))
 
+  (defun org-agenda-api--active-window-habit-instance (&optional reference-time)
+    "Return the active window-habit instance at REFERENCE-TIME.
+Return nil when the entry is not a window habit or its configuration is
+inactive at that time."
+    (when (org-agenda-api--is-window-habit-p)
+      (condition-case err
+          (org-window-habit-create-instance-from-heading-at-point reference-time)
+        (error
+         (org-agenda-api--log 'warn "Failed to create window habit: %s"
+                              (error-message-string err))
+         nil))))
+
   (defun org-agenda-api--habit-completed-on-date-p (date-string)
     "Return non-nil if the habit at point was completed on DATE-STRING.
 DATE-STRING should be in YYYY-MM-DD format.
@@ -110,13 +122,16 @@ Converts time values to ISO strings and plist to alist."
         ("windowStart" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" window-start))
         ("windowEnd" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" window-end)))))
 
-  (defun org-agenda-api--get-habit-summary ()
+  (defun org-agenda-api--get-habit-summary (&optional reference-time habit)
     "Get habit summary for the entry at point.
 Returns an alist suitable for JSON encoding, or nil if not a window-habit."
     (when (org-agenda-api--is-window-habit-p)
       (condition-case err
-          (let* ((habit (org-window-habit-create-instance-from-heading-at-point))
-                 (next-required (org-window-habit-get-next-required-interval habit))
+          (let* ((habit (or habit
+                            (org-agenda-api--active-window-habit-instance
+                             reference-time))))
+            (when habit
+              (let* ((next-required (org-window-habit-get-next-required-interval habit))
                  ;; Get per-window-spec conforming data using new function
                  (specs-status (org-window-habit-get-window-specs-status habit))
                  (window-specs-status (cdr (assoc "windowSpecsStatus" specs-status)))
@@ -131,11 +146,11 @@ Returns an alist suitable for JSON encoding, or nil if not a window-habit."
                  (window (oref iterator window))
                  (completion-needed-today
                   (org-window-habit-time-falls-in-assessment-interval window next-required)))
-            `(("conformingRatio" . ,aggregated-ratio)  ; backwards compatibility
-              ("aggregatedConformingRatio" . ,aggregated-ratio)
-              ("windowSpecsStatus" . ,formatted-specs)
-              ("completionNeededToday" . ,(if completion-needed-today t :json-false))
-              ("nextRequiredInterval" . ,(format-time-string "%Y-%m-%d" next-required))))
+              `(("conformingRatio" . ,aggregated-ratio)  ; backwards compatibility
+                ("aggregatedConformingRatio" . ,aggregated-ratio)
+                ("windowSpecsStatus" . ,formatted-specs)
+                ("completionNeededToday" . ,(if completion-needed-today t :json-false))
+                ("nextRequiredInterval" . ,(format-time-string "%Y-%m-%d" next-required))))))
         (error
          (org-agenda-api--log 'warn "Failed to get habit summary: %s" (error-message-string err))
          nil))))
@@ -222,13 +237,20 @@ Returns a JSON-encodable alist."
               (goto-char pos)
               (if (not (org-agenda-api--is-window-habit-p))
                   `(("status" . "error") ("message" . "Entry is not an org-window-habit"))
-                (let* ((habit (org-window-habit-create-instance-from-heading-at-point))
+                (let* ((habit (org-agenda-api--active-window-habit-instance
+                               reference-time))
                        (title (org-get-heading t t t t))
-                       (done-times (oref habit done-times))
-                       (window-specs (oref habit window-specs))
-                       (graph (org-agenda-api--build-habit-graph-data habit preceding following reference-time))
-                       (summary (org-agenda-api--get-habit-summary)))
-                  `(("status" . "ok")
+                       (done-times (when habit (oref habit done-times)))
+                       (window-specs (when habit (oref habit window-specs)))
+                       (graph (when habit
+                                (org-agenda-api--build-habit-graph-data
+                                 habit preceding following reference-time)))
+                       (summary (when habit
+                                  (org-agenda-api--get-habit-summary
+                                   reference-time habit))))
+                  (if (not habit)
+                      `(("status" . "inactive") ("id" . ,id) ("title" . ,title))
+                    `(("status" . "ok")
                     ("id" . ,id)
                     ("title" . ,title)
                     ("habit" . (("assessmentInterval" . ,(org-agenda-api--plist-to-alist
@@ -252,7 +274,7 @@ Returns a JSON-encodable alist."
                                      (mapcar (lambda (time)
                                                (format-time-string "%Y-%m-%dT%H:%M:%S" time))
                                              done-times)))
-                    ("graph" . ,(vconcat graph)))))))))))
+                      ("graph" . ,(vconcat graph))))))))))))
 
   ;;; Helper Functions
 
@@ -315,7 +337,7 @@ Accepts query params:
                               ("message" . ,(error-message-string err)))))))
     (org-agenda-api--track-request))
 
-  (defun org-agenda-api--find-all-habits ()
+  (defun org-agenda-api--find-all-habits (&optional reference-time)
     "Find all org-window-habit entries in agenda files.
 Returns a list of (id . title) cons cells for each habit found."
     (let ((results nil))
@@ -326,7 +348,8 @@ Returns a list of (id . title) cons cells for each habit found."
               (goto-char (point-min))
               (while (re-search-forward org-heading-regexp nil t)
                 (when (and (org-at-heading-p)
-                           (org-agenda-api--is-window-habit-p))
+                           (org-agenda-api--active-window-habit-instance
+                            reference-time))
                   (let ((id (org-id-get))
                         (title (org-get-heading t t t t)))
                     (when id
@@ -337,7 +360,7 @@ Returns a list of (id . title) cons cells for each habit found."
     "Build all habit statuses response with PRECEDING and FOLLOWING params.
 REFERENCE-TIME is the time to use as \"today\" (default current-time).
 Returns a JSON-encodable alist with status for all habits."
-    (let ((habits (org-agenda-api--find-all-habits))
+    (let ((habits (org-agenda-api--find-all-habits reference-time))
           (habit-results nil))
       (dolist (habit-entry habits)
         (let* ((id (car habit-entry))
@@ -470,9 +493,8 @@ Returns an alist of (date-str . entries-list)."
                 (when (and (org-at-heading-p)
                            (org-agenda-api--is-window-habit-p))
                   (let* ((pos (line-beginning-position))
-                         (habit (condition-case nil
-                                    (org-window-habit-create-instance-from-heading-at-point)
-                                  (error nil))))
+                         (habit (org-agenda-api--active-window-habit-instance
+                                 reference-time)))
                     (when habit
                       ;; Get required dates for this habit
                       (let ((required-dates

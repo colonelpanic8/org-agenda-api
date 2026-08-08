@@ -453,8 +453,10 @@ Each alist has: start, end (if range), hasTime, type, raw."
 Uses `org-map-entries' for efficient traversal instead of
 expensive `org-element-at-point' calls."
   (with-current-buffer (find-file-noselect filepath)
-    (org-map-entries
-     (lambda ()
+    (delq
+     nil
+     (org-map-entries
+      (lambda ()
        ;; We're at a headline with a TODO keyword
        ;; Extract properties directly from org functions (much faster than org-element)
        (let* ((todo (org-get-todo-state))
@@ -489,13 +491,20 @@ expensive `org-element-at-point' calls."
               ;; Habit detection - only if the window-habit module is loaded
               (is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
                                     (org-agenda-api--is-window-habit-p)))
-              (habit-summary (when (and is-window-habit
+              (active-window-habit
+               (when (and is-window-habit
+                          (fboundp 'org-agenda-api--active-window-habit-instance))
+                 (org-agenda-api--active-window-habit-instance)))
+              (habit-summary (when (and active-window-habit
                                         (fboundp 'org-agenda-api--get-habit-summary))
-                               (org-agenda-api--get-habit-summary)))
+                               (org-agenda-api--get-habit-summary
+                                nil active-window-habit)))
               ;; Get logbook entries
               (logbook (org-agenda-api--get-logbook-entries)))
-         ;; Return an alist directly for JSON encoding (skip org-element overhead)
-         `(("todo" . ,todo)
+         ;; Inactive window habits are retained in Org as history, but are not
+         ;; actionable TODOs and should not populate API task or habit lists.
+         (when (or (not is-window-habit) active-window-habit)
+           `(("todo" . ,todo)
            ("title" . ,title)
            ("tags" . ,(if tags (vconcat tags) nil))
            ("level" . ,level)
@@ -520,9 +529,9 @@ expensive `org-element-at-point' calls."
            ,@(when habit-summary
                `(("habitSummary" . ,habit-summary)))
            ,@(when logbook
-               `(("logbook" . ,(vconcat logbook)))))))
-     "TODO={.+}"  ; MATCH: regex matches any non-empty TODO keyword (active or done)
-     'file)))
+               `(("logbook" . ,(vconcat logbook))))))))
+      "TODO={.+}"  ; MATCH: regex matches any non-empty TODO keyword (active or done)
+      'file))))
 
 (defun org-agenda-api--get-agenda-todos ()
   "Get all TODO elements from `org-agenda-files'.
@@ -532,7 +541,9 @@ Uses caching to avoid re-processing unchanged files."
     ;; Rebuild cache
     (setq org-agenda-api--cache-mtime (org-agenda-api--get-max-mtime)
           org-agenda-api--todos-cache
-          (mapcan #'org-agenda-api--get-todo-elements-from-filepath org-agenda-files))
+          (delq nil
+                (mapcan #'org-agenda-api--get-todo-elements-from-filepath
+                        org-agenda-files)))
     org-agenda-api--todos-cache))
 
 (defun org-agenda-api--get-agenda-todos-from-files (files)
@@ -541,7 +552,8 @@ Uses caching to avoid re-processing unchanged files."
                 (lambda (file)
                   (and file (file-exists-p file) (file-readable-p file)))
                 files)))
-    (mapcan #'org-agenda-api--get-todo-elements-from-filepath files)))
+    (delq nil
+          (mapcan #'org-agenda-api--get-todo-elements-from-filepath files))))
 
 (defun org-agenda-api--element-to-json (element)
   "Convert org ELEMENT to an alist suitable for JSON encoding."
@@ -740,16 +752,26 @@ QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completio
                  ;; Habit detection - only if the window-habit module is loaded
                  (is-window-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
                                        (org-agenda-api--is-window-habit-p)))
-                 (habit-summary (when (and is-window-habit
+                 (habit-reference-time
+                  (when (and is-window-habit query-date)
+                    (org-agenda-api--date-string-to-time query-date)))
+                 (active-window-habit
+                  (when (and is-window-habit
+                             (fboundp 'org-agenda-api--active-window-habit-instance))
+                    (org-agenda-api--active-window-habit-instance
+                     habit-reference-time)))
+                 (habit-summary (when (and active-window-habit
                                            (fboundp 'org-agenda-api--get-habit-summary))
-                                  (org-agenda-api--get-habit-summary)))
+                                  (org-agenda-api--get-habit-summary
+                                   habit-reference-time active-window-habit)))
                  ;; Check if habit was completed on the query date
                  (habit-completed-on-query-date
-                  (when (and is-window-habit
+                  (when (and active-window-habit
                              query-date
                              (fboundp 'org-agenda-api--habit-completed-on-date-p))
                     (org-agenda-api--habit-completed-on-date-p query-date))))
-            `(("todo" . ,todo)
+            (when (or (not is-window-habit) active-window-habit)
+              `(("todo" . ,todo)
               ("title" . ,title)
               ("tags" . ,(if tags (vconcat tags) nil))
               ("level" . ,level)
@@ -776,7 +798,7 @@ QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completio
               ,@(when habit-summary
                   `(("habitSummary" . ,habit-summary)))
               ,@(when habit-completed-on-query-date
-                  `(("habitCompletedOnQueryDate" . t))))))))))
+                  `(("habitCompletedOnQueryDate" . t)))))))))))
 
 (defun org-agenda-api--run-agenda (span &optional start-date include-overdue include-completed)
   "Run org-agenda and return entries as a list of JSON-encodable alists.
