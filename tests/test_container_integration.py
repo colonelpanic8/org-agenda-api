@@ -311,6 +311,19 @@ class TestContainerAPI:
         assert response.status_code == 200
         # May be empty if no templates configured in container
 
+    def test_call_function_is_proxied_to_emacs(self, running_container):
+        """POST /call-function should reach Emacs instead of the static handler."""
+        response = requests.post(
+            f"{running_container['url']}/call-function",
+            json={"function": "not-configured-for-container-test"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "status": "error",
+            "message": ("Function not in whitelist: not-configured-for-container-test"),
+        }
+
 
 class TestGitSync:
     """Tests for git synchronization functionality."""
