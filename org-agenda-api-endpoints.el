@@ -267,6 +267,15 @@ Returns templates, filterOptions, todoStates, customViews, categoryTypes, habitC
       (error
        (push (format "exposedFunctions: %s" (error-message-string err)) errors)
        (push '("exposedFunctions" . []) result)))
+    ;; Collect stored app config (all namespaces)
+    (condition-case err
+        (let ((configs (mapcar (lambda (ns)
+                                 (cons ns (org-agenda-api--app-config-read ns)))
+                               (org-agenda-api--app-config-namespaces))))
+          (push `("appConfig" . ,configs) result))
+      (error
+       (push (format "appConfig: %s" (error-message-string err)) errors)
+       (push '("appConfig" . nil) result)))
     ;; Add errors array
     (push `("errors" . ,(vconcat (nreverse errors))) result)
     (insert (json-encode (nreverse result))))
@@ -777,6 +786,55 @@ Accepts JSON body with id or file+pos, plus required start and end ISO datetimes
        (org-agenda-api--log-error-with-backtrace "/update-clock" err)
        (insert (json-encode `(("status" . "error")
                               ("message" . ,(error-message-string err))))))))
+  (org-agenda-api--track-request))
+
+;;; App Config Endpoints
+
+(defservlet app-config application/json (path _query headers)
+  "Endpoint: Read or write namespaced client app config as JSON.
+Stores arbitrary JSON blobs alongside the org files (see
+`org-agenda-api-app-config-directory') so client apps can persist
+configuration in the org repo.
+
+GET /app-config            -> list stored namespaces
+GET /app-config/NAMESPACE  -> return stored config for NAMESPACE
+POST /app-config/NAMESPACE -> replace NAMESPACE's config with the JSON body"
+  (condition-case err
+      (let* ((parts (split-string (directory-file-name path) "/" t))
+             (namespace (when (cdr parts) (string-join (cdr parts) "/")))
+             (method (caar headers))
+             (body (cadr (assoc "Content" headers))))
+        (cond
+         ((null namespace)
+          (insert (json-encode
+                   `(("namespaces" . ,(vconcat (org-agenda-api--app-config-namespaces)))))))
+         ((not (org-agenda-api--app-config-valid-namespace-p namespace))
+          (insert (json-encode
+                   `(("status" . "error")
+                     ("message" . ,(format "Invalid namespace: %s" namespace))))))
+         ((member method '("POST" "PUT"))
+          (if (or (null body) (string-empty-p (string-trim body)))
+              (insert (json-encode
+                       `(("status" . "error")
+                         ("message" . "Missing JSON request body"))))
+            (org-agenda-api--app-config-write namespace body)
+            (org-agenda-api--log 'info "/app-config: stored config for namespace %s" namespace)
+            ;; Nudge git-sync-rs so the config file gets committed/pushed.
+            (ignore-errors (org-agenda-api--trigger-sync))
+            (insert (json-encode `(("status" . "ok")
+                                   ("namespace" . ,namespace))))))
+         (t
+          (let* ((file (org-agenda-api--app-config-file namespace))
+                 (exists (and file (file-readable-p file))))
+            (insert (json-encode
+                     `(("namespace" . ,namespace)
+                       ("exists" . ,(if exists t :json-false))
+                       ("config" . ,(and exists
+                                         (org-agenda-api--app-config-read namespace))))))))))
+    (error
+     (org-agenda-api--log-error-with-backtrace "/app-config" err)
+     (insert (json-encode `(("status" . "error")
+                            ("message" . ,(error-message-string err)))))))
   (org-agenda-api--track-request))
 
 ;;; Utility Endpoints

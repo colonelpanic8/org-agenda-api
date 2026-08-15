@@ -210,6 +210,15 @@ This can be overridden per-request via the `include_archives' query param."
   :type 'boolean
   :group 'org-agenda-api)
 
+(defcustom org-agenda-api-app-config-directory nil
+  "Directory in which client app config JSON files are stored.
+When nil, defaults to a \".app-config\" directory at the git root of the
+first agenda file (or alongside the file when it is not in a git repo),
+so stored config travels with the org repo."
+  :type '(choice (const :tag "Default (.app-config in org repo)" nil)
+                 directory)
+  :group 'org-agenda-api)
+
 (defun org-agenda-api--get-exposed-functions ()
   "Return exposed functions as a list of alists for JSON encoding.
 Each entry has \"id\" (function symbol name) and \"name\" (display name)."
@@ -453,6 +462,67 @@ Returns alist with status and touched file path."
               ("message" . ,(format "File does not exist: %s" expanded-file)))))
       `(("status" . "error")
         ("message" . "No org-agenda-files configured")))))
+
+;;; App Config Storage
+
+(defun org-agenda-api--app-config-directory ()
+  "Return the directory used to store app config files, or nil.
+Uses `org-agenda-api-app-config-directory' when set; otherwise a
+\".app-config\" directory at the git root of the first agenda file."
+  (if org-agenda-api-app-config-directory
+      (expand-file-name org-agenda-api-app-config-directory)
+    (when-let* ((first-file (car org-agenda-files))
+                (dir (file-name-directory (expand-file-name first-file))))
+      (let ((git-root (locate-dominating-file dir ".git")))
+        (expand-file-name ".app-config" (or git-root dir))))))
+
+(defun org-agenda-api--app-config-valid-namespace-p (namespace)
+  "Return non-nil if NAMESPACE is a safe app config namespace."
+  (and (stringp namespace)
+       (string-match-p "\\`[A-Za-z0-9][A-Za-z0-9_-]*\\'" namespace)))
+
+(defun org-agenda-api--app-config-file (namespace)
+  "Return the path of the config file for NAMESPACE, or nil."
+  (when-let* ((dir (org-agenda-api--app-config-directory)))
+    (expand-file-name (concat namespace ".json") dir)))
+
+(defun org-agenda-api--app-config-parse (json-string)
+  "Parse JSON-STRING with types that round-trip through `json-encode'."
+  (json-parse-string json-string
+                     :object-type 'hash-table
+                     :array-type 'array
+                     :null-object nil
+                     :false-object :json-false))
+
+(defun org-agenda-api--app-config-read (namespace)
+  "Return the stored config for NAMESPACE, or nil when absent."
+  (when-let* ((file (org-agenda-api--app-config-file namespace)))
+    (when (file-readable-p file)
+      (org-agenda-api--app-config-parse
+       (with-temp-buffer
+         (insert-file-contents file)
+         (buffer-string))))))
+
+(defun org-agenda-api--app-config-write (namespace json-string)
+  "Store JSON-STRING as the config for NAMESPACE.
+Signals an error if JSON-STRING is not valid JSON or no storage
+directory can be determined."
+  (org-agenda-api--app-config-parse json-string)
+  (let ((file (org-agenda-api--app-config-file namespace)))
+    (unless file
+      (error "No app config directory available (no agenda files configured)"))
+    (make-directory (file-name-directory file) t)
+    (let ((coding-system-for-write 'utf-8))
+      (with-temp-file file
+        (insert json-string)))
+    file))
+
+(defun org-agenda-api--app-config-namespaces ()
+  "Return the list of namespaces that have stored config."
+  (let ((dir (org-agenda-api--app-config-directory)))
+    (when (and dir (file-directory-p dir))
+      (mapcar #'file-name-sans-extension
+              (directory-files dir nil "\\.json\\'")))))
 
 ;;; Utility Functions
 
