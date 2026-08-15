@@ -76,7 +76,7 @@ let
 
         # API endpoints - proxy to emacs with auth
         # Support both /endpoint and /api/endpoint paths for backwards compatibility
-        location ~ ^/(api/)?(agenda|agenda-files|get-all-todos|get-todays-agenda|complete|set-state|update|delete|delete-logbook-entry|reload|todo-states|capture-templates|capture|custom-views|custom-view|debug-config|filter-options|metadata|restart|category-types|categories|category-tasks|category-capture|habit-config|habit-status|all-habit-statuses|notifications|trigger-sync|call-function|meta-score|meta-score-series)$ {
+        location ~ ^/(api/)?(agenda|agenda-files|get-all-todos|get-todays-agenda|complete|set-state|update|delete|delete-logbook-entry|reload|todo-states|todo-states-by-file|capture-templates|capture|custom-views|custom-view|debug-config|filter-options|metadata|restart|category-types|categories|category-tasks|category-capture|habit-config|habit-status|all-habit-statuses|notifications|trigger-sync|call-function|meta-score|meta-score-series|app-config(/[A-Za-z0-9_-]+)?|add-clock|update-clock)$ {
           # Handle preflight OPTIONS request (before auth check)
           if ($request_method = 'OPTIONS') {
             add_header 'Access-Control-Allow-Origin' '*' always;
