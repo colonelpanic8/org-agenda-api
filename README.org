@@ -42,9 +42,9 @@ pytest tests/ -v        # Verbose output
 
 ** MCP Server
 
-The =org-agenda-mcp= sidecar exposes four stdio MCP tools over the existing
-HTTP API: =org_agenda=, =org_capture=, =org_complete=, and =org_update=. It does
-not read or modify org files directly.
+The =org-agenda-mcp= sidecar exposes four MCP tools over the existing HTTP API:
+=org_agenda=, =org_capture=, =org_complete=, and =org_update=. It supports both
+stdio and hosted Streamable HTTP and does not read or modify org files directly.
 
 Configure and run it locally:
 
@@ -62,6 +62,20 @@ above (or =ORG_AGENDA_API_PASSWORD=) in its server configuration:
 nix run /home/imalison/projects/org-agenda-api#mcp-server
 #+end_src
 
+The container also runs the Streamable HTTP transport under supervisord and
+proxies it through nginx at =/mcp=. It uses the same Basic Auth credentials as
+the JSON API. For the production container, remote MCP hosts connect to:
+
+#+begin_src text
+https://org-agenda-api.rocket-sense.duckdns.org/mcp
+#+end_src
+
+To run the HTTP transport directly during development:
+
+#+begin_src bash
+nix run .#mcp-server -- --transport streamable-http --port 2026
+#+end_src
+
 The sidecar accepts these environment variables:
 
 | Variable                              | Description |
@@ -70,6 +84,8 @@ The sidecar accepts these environment variables:
 | =ORG_AGENDA_API_USER=                 | Required Basic Auth username |
 | =ORG_AGENDA_API_PASSWORD=             | Basic Auth password; takes precedence over the command |
 | =ORG_AGENDA_API_PASSWORD_COMMAND=     | Shell command whose first stdout line supplies the password |
+| =ORG_AGENDA_MCP_HOST=                 | Streamable HTTP bind host (container default: =127.0.0.1=) |
+| =ORG_AGENDA_MCP_PORT=                 | Streamable HTTP port (container default: =2026=) |
 
 Scheduled and deadline tool arguments use =YYYY-MM-DD= or
 =YYYY-MM-DDTHH:MM=. In =org_update=, an explicit =null= clears a field, while
@@ -78,12 +94,10 @@ an omitted field is left unchanged. There is deliberately no delete tool.
 register that template in =org-agenda-api-capture-templates=; the fallback
 templates in the minimal container do not include it.
 
-The Nix container includes =/bin/org-agenda-mcp=. Because stdio MCP servers are
-child processes of their MCP host, supervisord does not start it as a daemon;
-the existing supervisor configuration continues to manage only Emacs, nginx,
-git sync, and health checking. A host that shares the container can launch it
-on demand (for example, with =docker exec -i=) and point it at the container's
-HTTP listener.
+The Nix container includes =/bin/org-agenda-mcp=. Supervisord runs its HTTP
+transport on the loopback interface alongside Emacs, nginx, git sync, and the
+health checker; only nginx exposes it. The stdio transport remains available
+for hosts that launch MCP servers as child processes.
 
 ** API Endpoints
 

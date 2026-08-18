@@ -11,6 +11,7 @@ Skip with: pytest tests/ --ignore=tests/test_container_integration.py
 """
 
 import os
+import asyncio
 import shutil
 import socket
 import subprocess
@@ -20,6 +21,8 @@ from pathlib import Path
 
 import pytest
 import requests
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 # Skip all tests in this module if Docker is not available
 pytestmark = pytest.mark.skipif(
@@ -323,6 +326,31 @@ class TestContainerAPI:
             "status": "error",
             "message": ("Function not in whitelist: not-configured-for-container-test"),
         }
+
+    def test_streamable_http_mcp_is_supervised_and_proxied(self, running_container):
+        """The container should expose MCP through nginx at /mcp."""
+
+        async def exercise() -> None:
+            async with streamable_http_client(f"{running_container['url']}/mcp") as (
+                read_stream,
+                write_stream,
+                _get_session_id,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    listed = await session.list_tools()
+                    assert [tool.name for tool in listed.tools] == [
+                        "org_agenda",
+                        "org_capture",
+                        "org_complete",
+                        "org_update",
+                    ]
+                    result = await session.call_tool("org_agenda", {})
+                    assert result.isError is False
+                    assert result.structuredContent is not None
+                    assert "entries" in result.structuredContent
+
+        asyncio.run(exercise())
 
 
 class TestGitSync:

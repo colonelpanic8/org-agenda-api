@@ -3,6 +3,7 @@
 let
   lib = pkgs.lib;
   port = 2025;
+  mcpPort = 2026;
 
   # Nginx with headers-more module for clearing WWW-Authenticate header
   nginxWithModules = pkgs.nginx.override {
@@ -37,6 +38,10 @@ let
 
       upstream emacs {
         server 127.0.0.1:${toString port};
+      }
+
+      upstream mcp {
+        server 127.0.0.1:${toString mcpPort};
       }
 
       server {
@@ -109,6 +114,40 @@ let
           add_header 'Access-Control-Allow-Methods' '*' always;
           add_header 'Access-Control-Allow-Headers' '*' always;
           add_header 'Access-Control-Expose-Headers' '*' always;
+        }
+
+        # Hosted MCP endpoint - authenticated by the same nginx Basic Auth
+        # configuration as the JSON API. The upstream only listens on loopback.
+        location = /mcp {
+          if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, DELETE, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' '*' always;
+            add_header 'Access-Control-Max-Age' 86400 always;
+            add_header 'Content-Length' 0;
+            add_header 'Content-Type' 'text/plain';
+            return 204;
+          }
+
+          include /tmp/nginx-auth.conf;
+          more_clear_headers 'WWW-Authenticate';
+
+          proxy_pass http://mcp;
+          proxy_http_version 1.1;
+          proxy_buffering off;
+          proxy_cache off;
+          proxy_read_timeout 300s;
+          proxy_set_header Host 127.0.0.1:${toString mcpPort};
+          proxy_set_header Origin "";
+          proxy_set_header Authorization "";
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          add_header 'Access-Control-Allow-Origin' '*' always;
+          add_header 'Access-Control-Allow-Methods' 'GET, POST, DELETE, OPTIONS' always;
+          add_header 'Access-Control-Allow-Headers' '*' always;
+          add_header 'Access-Control-Expose-Headers' 'Mcp-Session-Id' always;
         }
 
         # Static files - serve mova web app (no auth)
@@ -267,6 +306,24 @@ let
     fi
   '';
 
+  # The hosted MCP process talks back through nginx so every HTTP call still
+  # uses Basic Auth. AUTH_* fallbacks match the container's existing auth
+  # configuration; explicit ORG_AGENDA_API_* values take precedence.
+  mcpHttpStartScript = pkgs.writeShellScriptBin "start-mcp-http" ''
+    set -e
+
+    export ORG_AGENDA_API_URL="''${ORG_AGENDA_API_URL:-http://127.0.0.1}"
+    export ORG_AGENDA_API_USER="''${ORG_AGENDA_API_USER:-''${AUTH_USER:-mcp-internal}}"
+    if [ -z "$ORG_AGENDA_API_PASSWORD" ] && [ -z "$ORG_AGENDA_API_PASSWORD_COMMAND" ]; then
+      export ORG_AGENDA_API_PASSWORD="''${AUTH_PASSWORD:-mcp-internal}"
+    fi
+
+    exec ${mcpServer}/bin/org-agenda-mcp \
+      --transport streamable-http \
+      --host "''${ORG_AGENDA_MCP_HOST:-127.0.0.1}" \
+      --port "''${ORG_AGENDA_MCP_PORT:-${toString mcpPort}}"
+  '';
+
   containerSupervisordConf = pkgs.writeText "supervisord.conf" ''
     [supervisord]
     nodaemon=true
@@ -310,6 +367,17 @@ let
 
     [program:nginx]
     command=${nginxWithModules}/bin/nginx -c ${nginxConf}
+    autostart=true
+    autorestart=true
+    startretries=3
+    startsecs=2
+    stdout_logfile=/dev/stdout
+    stdout_logfile_maxbytes=0
+    stderr_logfile=/dev/stderr
+    stderr_logfile_maxbytes=0
+
+    [program:mcp]
+    command=${mcpHttpStartScript}/bin/start-mcp-http
     autostart=true
     autorestart=true
     startretries=3
@@ -448,6 +516,7 @@ let
           gitSyncMultiScript
           healthCheckerScript
           emacsStartScript
+          mcpHttpStartScript
           containerStartupScript
         ] ++ extraPackages;
         pathsToLink = [ "/bin" ];
@@ -572,6 +641,9 @@ let
         "ORG_AGENDA_API_INIT=${containerInitPath}"
         "ORG_AGENDA_API_CONFIG_DIR=${containerConfigPath}"
         "ORG_AGENDA_API_CONFIG_ENTRYPOINT=${emacsConfigEntryPoint}"
+        # Hosted MCP sidecar (loopback; nginx exposes /mcp)
+        "ORG_AGENDA_MCP_HOST=127.0.0.1"
+        "ORG_AGENDA_MCP_PORT=${toString mcpPort}"
         # Git repository options (choose one):
         # GIT_SYNC_REPOSITORIES - JSON array for multiple repos:
         #   [{"url": "git@github.com:user/org.git", "path": "org"},
