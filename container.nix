@@ -1,4 +1,4 @@
-{ pkgs, emacsWithPackages, gitSyncRs, orgAgendaApiSitelisp, containerInitEl, gitCommit ? "unknown", movaWeb, orgAgendaApiVersion ? "unknown" }:
+{ pkgs, emacsWithPackages, gitSyncRs, orgAgendaApiSitelisp, containerInitEl, gitCommit ? "unknown", movaWeb, mcpServer, orgAgendaApiVersion ? "unknown" }:
 
 let
   lib = pkgs.lib;
@@ -439,6 +439,7 @@ let
           pkgs.python3Packages.supervisor
           pkgs.tzdata
           gitSyncRs
+          mcpServer
           # QoL tools for interactive use
           pkgs.less
           pkgs.ncurses

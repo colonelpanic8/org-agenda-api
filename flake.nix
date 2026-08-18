@@ -102,6 +102,7 @@
 
         # Python with test dependencies
         pythonWithPackages = pkgs.python3.withPackages (ppkgs: [
+          ppkgs.mcp
           ppkgs.pytest
           ppkgs.requests
           ppkgs.pytest-timeout
@@ -161,6 +162,22 @@
           '';
         };
 
+        # Stdio MCP sidecar. Org behavior remains in the HTTP API; this package
+        # only translates MCP tool calls into authenticated JSON requests.
+        mcpServer = pkgs.python3Packages.buildPythonApplication {
+          pname = "org-agenda-api-mcp";
+          version = "0.1.0";
+          pyproject = true;
+          src = ./.;
+
+          build-system = [ pkgs.python3Packages.setuptools ];
+          dependencies = [ pkgs.python3Packages.mcp ];
+
+          # The tests use an in-process HTTP server and therefore run outside
+          # the Nix sandbox via `nix develop -c pytest tests/mcp`.
+          doCheck = false;
+        };
+
         # The elisp files
         containerInitEl = ./container-init.el;
         containerBootstrapEl = ./container-bootstrap.el;
@@ -181,7 +198,7 @@
 
         # Import the container builder
         containerLib = import ./container.nix {
-          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiSitelisp containerInitEl gitCommit movaWeb orgAgendaApiVersion;
+          inherit pkgs emacsWithPackages gitSyncRs orgAgendaApiSitelisp containerInitEl gitCommit movaWeb orgAgendaApiVersion mcpServer;
         };
         mkContainer = containerLib.mkContainer;
         mkContainerBase = containerLib.mkContainerBase;
@@ -293,6 +310,9 @@
           # Mova web app build
           inherit movaWeb;
 
+          # MCP stdio adapter
+          mcp-server = mcpServer;
+
           # Default Docker container image (minimal, no custom config)
           container = mkContainer {};
           # Cached base image (no org-agenda-api code or emacs config)
@@ -306,6 +326,11 @@
         apps.bootstrap-emacs-config = {
           type = "app";
           program = "${bootstrapScript}/bin/bootstrap-emacs-config";
+        };
+
+        apps.mcp-server = {
+          type = "app";
+          program = "${mcpServer}/bin/org-agenda-mcp";
         };
 
         devShells.default = pkgs.mkShell {
@@ -334,8 +359,8 @@
             echo "  pytest tests/ -x       # Stop on first failure"
             echo ""
             echo "Linting:"
-            echo "  ruff check tests/      # Lint Python test files"
-            echo "  ruff format --check tests/  # Check Python formatting"
+            echo "  ruff check mcp_server tests/      # Lint Python files"
+            echo "  ruff format --check mcp_server tests/  # Check Python formatting"
             echo "  emacs --batch -f batch-byte-compile org-agenda-api.el  # Byte-compile elisp"
             echo ""
             echo "Container (minimal):"
@@ -411,8 +436,8 @@
             nativeBuildInputs = [ pkgs.ruff ];
 
             buildPhase = ''
-              ruff check tests/
-              ruff format --check tests/
+              ruff check mcp_server tests/
+              ruff format --check mcp_server tests/
             '';
 
             installPhase = ''
