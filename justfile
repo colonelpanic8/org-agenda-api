@@ -1,12 +1,13 @@
 # org-agenda-api development commands
 
 # Production API base URL
-prod_url := "https://colonelpanic-org-agenda.fly.dev"
-pass_entry := "colonelpanic-org-agenda.fly.dev"
+prod_url := "https://org-agenda-api.rocket-sense.duckdns.org"
+prod_user := "imalison"
+pass_entry := "org-agenda-api-imalison"
 
 # Run authenticated curl against production API
 prod *args:
-    @curl -s -u "$(pass show {{pass_entry}} | grep '^user:' | cut -d' ' -f2):$(pass show {{pass_entry}} | head -1)" {{prod_url}}{{args}} | jq
+    @curl -s -u "{{prod_user}}:$(pass show {{pass_entry}} | head -1)" {{prod_url}}{{args}} | jq
 
 # Health check
 health:
