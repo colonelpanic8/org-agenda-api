@@ -46,6 +46,9 @@ class TestPropertiesInGetTodos:
             f"Should have CUSTOM_FIELD, got: {properties.keys()}"
         )
         assert properties["CUSTOM_FIELD"] == "my-custom-value"
+        assert properties["CATEGORY"] == "testing", (
+            "An explicitly defined CATEGORY should remain in properties"
+        )
 
     def test_properties_contains_effort(self, api):
         """Properties should include EFFORT field."""
@@ -103,8 +106,8 @@ class TestPropertiesInGetTodos:
         assert "CONTEXT" in properties
         assert properties["CONTEXT"] == "@computer"
 
-    def test_items_without_drawer_have_empty_or_minimal_properties(self, api):
-        """Items without a property drawer should have minimal properties."""
+    def test_items_without_drawer_have_no_synthetic_properties(self, api):
+        """Items without a property drawer should not expose computed properties."""
         response = api.get_all_todos()
         todos = response.json()["todos"]
 
@@ -115,8 +118,8 @@ class TestPropertiesInGetTodos:
         )
         assert simple_item is not None
 
-        # Should still have properties field (may contain computed properties like CATEGORY)
         assert "properties" in simple_item
+        assert simple_item["properties"] in ({}, None)
 
 
 class TestUpdateProperties:
@@ -292,7 +295,7 @@ class TestUpdateProperties:
         assert simple_item is not None, "Should find 'Buy groceries' item"
 
         # Verify it has minimal/no custom properties initially
-        initial_props = simple_item.get("properties", {})
+        initial_props = simple_item.get("properties") or {}
         assert "TEST_NEW_PROP" not in initial_props
 
         # Add a property - this should create the PROPERTIES drawer

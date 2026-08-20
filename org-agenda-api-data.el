@@ -264,6 +264,17 @@ When VALUE is nil or empty, remove the effort property."
     (org-agenda-api--validate-effort-value value)
     (org-set-effort nil value)))
 
+(defun org-agenda-api--entry-has-local-property-p (property)
+  "Return non-nil when the current entry's drawer defines PROPERTY."
+  (let ((block (org-get-property-block (point))))
+    (when block
+      (save-excursion
+        (goto-char (car block))
+        (let ((case-fold-search t))
+          (re-search-forward
+           (format "^[ \\t]*:%s\\(?:\\+\\)?:[ \\t]*" (regexp-quote property))
+           (cdr block) t))))))
+
 (defun org-agenda-api--get-all-entry-properties ()
   "Get all properties for the entry at point as an alist.
 Returns an alist of (KEY . VALUE) pairs for all properties in the drawer."
@@ -272,8 +283,12 @@ Returns an alist of (KEY . VALUE) pairs for all properties in the drawer."
     (dolist (prop props)
       (let ((key (car prop))
             (value (cdr prop)))
-        ;; Include all properties - caller can filter if needed
-        (push (cons key value) result)))
+        ;; `org-entry-properties' synthesizes CATEGORY even when it is only
+        ;; inherited or derived from the file name.  Keep it only when the
+        ;; current entry actually defines CATEGORY in its property drawer.
+        (unless (and (string= key "CATEGORY")
+                     (not (org-agenda-api--entry-has-local-property-p key)))
+          (push (cons key value) result))))
     (nreverse result)))
 
 (defun org-agenda-api--parse-inactive-timestamp (ts-string)
