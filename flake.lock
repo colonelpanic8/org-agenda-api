@@ -143,6 +143,22 @@
         "type": "github"
       }
     },
+    "org-fc": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1768685906,
+        "narHash": "sha256-/CUrcu1bcCZr5/f7ZvyuXlSKptACBA0PtQoFkhiNZJw=",
+        "owner": "l3kn",
+        "repo": "org-fc",
+        "rev": "fce1cb265445f9c08ecb6b524562115eba9ab7a6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "l3kn",
+        "repo": "org-fc",
+        "type": "github"
+      }
+    },
     "org-project-capture": {
       "flake": false,
       "locked": {
@@ -198,6 +214,7 @@
         "git-sync-rs": "git-sync-rs",
         "mova": "mova",
         "nixpkgs": "nixpkgs_2",
+        "org-fc": "org-fc",
         "org-project-capture": "org-project-capture",
         "org-wild-notifier": "org-wild-notifier",
         "org-window-habit": "org-window-habit"

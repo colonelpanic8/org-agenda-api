@@ -9,6 +9,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'json)
 (require 'lisp-mnt)
 (require 'org-agenda)
 (require 'org-archive)
@@ -93,6 +94,18 @@ ERR should be the error caught by condition-case."
         (backtrace (org-agenda-api--capture-backtrace)))
     (org-agenda-api--log 'error "Error in %s: %s" endpoint error-msg)
     (org-agenda-api--log 'error "Backtrace:\n%s" backtrace)))
+
+(defun org-agenda-api--decode-json-request-body (body)
+  "Decode raw HTTP request BODY as UTF-8 for JSON parsing.
+simple-httpd receives connections with binary process coding, so its Content
+value contains UTF-8 bytes even though the request buffer is multibyte."
+  (unless (stringp body)
+    (signal 'json-parse-error '("Missing JSON request body")))
+  (decode-coding-string (encode-coding-string body 'binary) 'utf-8))
+
+(defun org-agenda-api--parse-json-request-body (body)
+  "Decode raw HTTP request BODY as UTF-8 and parse it as JSON."
+  (json-parse-string (org-agenda-api--decode-json-request-body body)))
 
 ;;; Customization
 

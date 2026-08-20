@@ -33,9 +33,13 @@
       url = "github:emacsorphanage/org-wild-notifier";
       flake = false;
     };
+    org-fc = {
+      url = "github:l3kn/org-fc";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova, org-window-habit, org-project-capture, org-wild-notifier }:
+  outputs = { self, nixpkgs, flake-utils, emacs-overlay, git-sync-rs, mova, org-window-habit, org-project-capture, org-wild-notifier, org-fc }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -86,6 +90,17 @@
           cp ${org-wild-notifier}/org-wild-notifier.el $out/share/emacs/site-lisp/
         '';
 
+        # org-fc package built from flake input.
+        # Only the elisp is needed: the container runs org-fc solely from a
+        # capture template's :prepare-finalize (org-fc-type-vocab-init, which
+        # just writes properties on the entry at point). The awk-backed index
+        # and the review UI never run here, so the awk/ and python/ trees and
+        # the hydra dependency are deliberately left out.
+        orgFcPkg = pkgs.runCommand "emacs-org-fc" {} ''
+          mkdir -p $out/share/emacs/site-lisp
+          cp ${org-fc}/*.el $out/share/emacs/site-lisp/
+        '';
+
         # Emacs with required packages (base packages from nix)
         emacsWithPackages = pkgs.emacs-nox.pkgs.withPackages (epkgs: [
           epkgs.simple-httpd
@@ -98,6 +113,7 @@
           orgCategoryCapturePkg
           orgProjectCapturePkg
           orgWildNotifierPkg
+          orgFcPkg
         ]);
 
         # Python with test dependencies

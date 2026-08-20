@@ -22,6 +22,9 @@
                              (directory-file-name
                               (file-name-directory load-file-name)))))
 
+;; Always exercise the current checkout when ignored .elc files are stale.
+(setq load-prefer-newer t)
+
 ;; Load dependencies
 (require 'org)
 (require 'org-agenda)
@@ -123,6 +126,19 @@
                     :immediate-finish t)
          :prompts (("Title" :type string :required t)
                    ("When" :type date :required t)))
+        ("calendar-event"
+         :name "Calendar Event"
+         :template ("c" "Calendar Event" entry (file ,test-inbox)
+                    "* %?\n%^{When}T\n"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)
+                   ("When" :type date :required t)))
+        ("anonymous-date"
+         :name "Unsafe Anonymous Date"
+         :template ("x" "Unsafe Anonymous Date" entry (file ,test-inbox)
+                    "* %?\n%^T\n"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)))
         ("tagged-todo"
          :name "Tagged Todo"
          :template ("g" "Tagged" entry (file ,test-inbox)

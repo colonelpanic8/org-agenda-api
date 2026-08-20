@@ -309,22 +309,43 @@ Accepts query params:
   "Endpoint: Capture using a registered template with provided values."
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (json-parse-string content-header))
+             (json-data (org-agenda-api--parse-json-request-body content-header))
              (template-key (gethash "template" json-data))
              (values-hash (gethash "values" json-data))
              ;; Convert hash-table to alist
-             (values (let (alist)
-                       (maphash (lambda (k v) (push (cons k v) alist)) values-hash)
-                       alist))
+             (values
+              (progn
+                (unless (stringp template-key)
+                  (org-agenda-api--capture-client-error
+                   "Request field 'template' must be a string"))
+                (unless (hash-table-p values-hash)
+                  (org-agenda-api--capture-client-error
+                   "Request field 'values' must be an object"))
+                (let (alist)
+                  (maphash (lambda (k v) (push (cons k v) alist)) values-hash)
+                  alist)))
              (result (org-agenda-api--capture-with-template template-key values)))
         (insert (json-encode result)))
+    (org-agenda-api-capture-client-error
+     (org-agenda-api--log 'warn "Invalid /capture request: %s"
+                          (error-message-string err))
+     (insert (json-encode `(("status" . "error")
+                            ("code" . "invalid_capture_request")
+                            ("message" . ,(error-message-string err)))))
+     (httpd-send-header t "application/json; charset=utf-8" 422))
+    (json-error
+     (org-agenda-api--log 'warn "Invalid JSON for /capture: %s"
+                          (error-message-string err))
+     (insert (json-encode `(("status" . "error")
+                            ("code" . "invalid_json")
+                            ("message" . ,(error-message-string err)))))
+     (httpd-send-header t "application/json; charset=utf-8" 400))
     (error
-     ;; Return error as JSON with appropriate status
-     ;; Note: simple-httpd doesn't have great error handling, so we return 200 with error in body
-     ;; A better approach would need custom error handling
      (org-agenda-api--log-error-with-backtrace "/capture" err)
      (insert (json-encode `(("status" . "error")
-                            ("message" . ,(error-message-string err)))))))
+                            ("code" . "internal_error")
+                            ("message" . ,(error-message-string err)))))
+     (httpd-send-header t "application/json; charset=utf-8" 500)))
   (org-agenda-api--track-request))
 
 (defservlet update application/json (_path _query headers)
@@ -349,7 +370,7 @@ Returns updated todo with new file and pos for cache update."
   (condition-case err
       (catch 'done
         (let* ((content-header (cadr (assoc "Content" headers)))
-               (json-data (json-parse-string content-header))
+               (json-data (org-agenda-api--parse-json-request-body content-header))
                (id (gethash "id" json-data))
                (file (gethash "file" json-data))
                (pos (gethash "pos" json-data))
@@ -457,7 +478,7 @@ Accepts JSON body with:
                    (affects LOGBOOK timestamp, useful for retroactive completions)"
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (json-parse-string content-header))
+             (json-data (org-agenda-api--parse-json-request-body content-header))
              (id (gethash "id" json-data))
              (file (gethash "file" json-data))
              (pos (gethash "pos" json-data))
@@ -520,7 +541,7 @@ Accepts JSON body with:
   (condition-case err
       (catch 'done
         (let* ((content-header (cadr (assoc "Content" headers)))
-               (json-data (json-parse-string content-header))
+               (json-data (org-agenda-api--parse-json-request-body content-header))
                (id (gethash "id" json-data))
                (file (gethash "file" json-data))
                (pos (gethash "pos" json-data))
@@ -577,7 +598,7 @@ Optional:
   - include_children: if true, delete subtree even if item has children"
   (let* ((content-header (cadr (assoc "Content" headers)))
          (json-data (condition-case parse-err
-                        (json-parse-string content-header)
+                        (org-agenda-api--parse-json-request-body content-header)
                       (error
                        (org-agenda-api--log 'error "/delete: Failed to parse JSON body: %s (raw: %s)"
                                             (error-message-string parse-err) content-header)
@@ -653,7 +674,7 @@ Optional:
   - start: ISO datetime of clock start for precise clock deletion"
   (let* ((content-header (cadr (assoc "Content" headers)))
          (json-data (condition-case parse-err
-                        (json-parse-string content-header)
+                        (org-agenda-api--parse-json-request-body content-header)
                       (error
                        (org-agenda-api--log 'error "/delete-logbook-entry: Failed to parse JSON: %s"
                                             (error-message-string parse-err))
@@ -701,7 +722,7 @@ Optional:
 Accepts JSON body with id or file+pos, plus required start and end ISO datetimes."
   (let* ((content-header (cadr (assoc "Content" headers)))
          (json-data (condition-case parse-err
-                        (json-parse-string content-header)
+                        (org-agenda-api--parse-json-request-body content-header)
                       (error
                        (org-agenda-api--log 'error "/add-clock: Failed to parse JSON: %s"
                                             (error-message-string parse-err))
@@ -744,7 +765,7 @@ Accepts JSON body with id or file+pos, plus required start and end ISO datetimes
   "Endpoint: Update a CLOCK entry identified by original_start."
   (let* ((content-header (cadr (assoc "Content" headers)))
          (json-data (condition-case parse-err
-                        (json-parse-string content-header)
+                        (org-agenda-api--parse-json-request-body content-header)
                       (error
                        (org-agenda-api--log 'error "/update-clock: Failed to parse JSON: %s"
                                             (error-message-string parse-err))
@@ -928,7 +949,7 @@ The function is called with no arguments. Returns immediately with status ok.
 This is fire-and-forget - use for batch operations like rescheduling."
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (json-parse-string content-header))
+             (json-data (org-agenda-api--parse-json-request-body content-header))
              (func-name (gethash "function" json-data)))
         (cond
          ((null func-name)

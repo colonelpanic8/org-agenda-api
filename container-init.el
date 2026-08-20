@@ -61,10 +61,12 @@
 ;; Workers exit after N requests or N seconds, allowing supervisord to restart them
 (let ((max-requests (getenv "ORG_API_MAX_REQUESTS"))
       (max-lifetime (getenv "ORG_API_MAX_LIFETIME")))
-  (when max-requests
-    (setq org-agenda-api-max-requests (string-to-number max-requests)))
-  (when max-lifetime
-    (setq org-agenda-api-max-lifetime (string-to-number max-lifetime))))
+  (when (and max-requests (not (string= max-requests "")))
+    (let ((value (string-to-number max-requests)))
+      (setq org-agenda-api-max-requests (and (> value 0) value))))
+  (when (and max-lifetime (not (string= max-lifetime "")))
+    (let ((value (string-to-number max-lifetime)))
+      (setq org-agenda-api-max-lifetime (and (> value 0) value)))))
 
 ;; Load custom elisp if specified (file path)
 (let ((custom-elisp-file (getenv "ORG_API_CUSTOM_ELISP")))

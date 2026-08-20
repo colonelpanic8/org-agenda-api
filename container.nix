@@ -551,10 +551,10 @@ let
         "ORG_API_PORT=${toString port}"
         "ORG_AGENDA_API_GIT_COMMIT=${gitCommit}"
         "ORG_AGENDA_API_VERSION=${orgAgendaApiVersion}"
-        # Worker lifecycle - restart emacs periodically for freshness
-        # Emacs exits after completing a request when lifetime is reached
-        # Set to empty to disable, or override with your own value
-        "ORG_API_MAX_LIFETIME=900"
+        # Worker lifecycle limits are disabled by default. Set
+        # ORG_API_MAX_REQUESTS or ORG_API_MAX_LIFETIME in the runtime
+        # environment to make Emacs exit after a threshold and let the process
+        # manager restart it.
         # Health checker settings - monitors emacs and restarts if unhealthy
         # Checks every INTERVAL seconds; if check fails, retries immediately once
         "HEALTH_CHECK_INTERVAL=10"

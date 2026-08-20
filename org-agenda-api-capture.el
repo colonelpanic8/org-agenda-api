@@ -14,6 +14,14 @@
 (require 'org-agenda-api-core)
 (require 'org-agenda-api-data)
 
+(define-error 'org-agenda-api-capture-client-error
+  "Invalid noninteractive capture request")
+
+(defun org-agenda-api--capture-client-error (format-string &rest args)
+  "Signal a client capture error using FORMAT-STRING and ARGS."
+  (signal 'org-agenda-api-capture-client-error
+          (list (apply #'format format-string args))))
+
 ;;; Capture Template Functions
 
 (defun org-agenda-api--get-default-capture-target ()
@@ -99,12 +107,74 @@ Returns nil if valid, or an error message string if invalid."
         (concat ":" (mapconcat #'identity tag-list ":") ":")
       "")))
 
-(defun org-agenda-api--format-date (date-string)
-  "Convert DATE-STRING (ISO format) to org timestamp."
-  (if date-string
-      (let ((time (date-to-time (concat date-string " 00:00:00"))))
-        (format-time-string (car org-time-stamp-formats) time))
-    ""))
+(defun org-agenda-api--capture-value-component (value key)
+  "Get KEY from timestamp VALUE, which may be a hash table or alist."
+  (cond
+   ((hash-table-p value) (gethash key value))
+   ((listp value) (cdr (assoc key value)))
+   (t nil)))
+
+(defun org-agenda-api--parse-capture-date-value (value)
+  "Return (DATE TIME) parsed from capture prompt VALUE.
+VALUE may be an ISO date/datetime string or an object with date and time
+fields.  TIME is nil when VALUE contains only a date."
+  (let (date time)
+    (cond
+     ((stringp value)
+      (unless (string-match
+               (concat
+                "\\`\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)"
+                "\\(?:[T ]\\([0-9]\\{2\\}:[0-9]\\{2\\}\\)"
+                "\\(?::[0-9]\\{2\\}\\(?:\\.[0-9]+\\)?\\)?"
+                "\\(?:Z\\|[+-][0-9]\\{2\\}:[0-9]\\{2\\}\\)?\\)?\\'")
+               value)
+        (org-agenda-api--capture-client-error
+         "Invalid date value: %s" value))
+      (setq date (match-string 1 value)
+            time (match-string 2 value)))
+     ((or (hash-table-p value) (listp value))
+      (setq date (org-agenda-api--capture-value-component value "date")
+            time (org-agenda-api--capture-value-component value "time")))
+     ((null value)
+      (setq date nil))
+     (t
+      (org-agenda-api--capture-client-error
+       "Invalid date value: %S" value)))
+    (when (and date
+               (not (string-match-p
+                     "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" date)))
+      (org-agenda-api--capture-client-error
+       "Invalid date value: %s" date))
+    (when (and time
+               (not (string-match-p "\\`[0-9]\\{2\\}:[0-9]\\{2\\}\\'" time)))
+      (org-agenda-api--capture-client-error
+       "Invalid time value: %s" time))
+    (list date time)))
+
+(defun org-agenda-api--format-prompt-timestamp (value suffix)
+  "Convert prompt VALUE to an Org timestamp according to SUFFIX.
+The lowercase t/u suffixes produce date-only timestamps.  Uppercase T/U
+preserve a supplied time.  The u/U forms produce inactive timestamps."
+  (pcase-let ((`(,date ,time)
+               (org-agenda-api--parse-capture-date-value value)))
+    (if (not date)
+        ""
+      (let* ((include-time (memq suffix '(?T ?U)))
+             (inactive (memq suffix '(?u ?U)))
+             (timestamp-input (concat date " " (or time "00:00") ":00"))
+             (parsed-time
+              (condition-case nil
+                  (date-to-time timestamp-input)
+                (error
+                 (org-agenda-api--capture-client-error
+                  "Invalid date-time value: %s%s"
+                  date (if time (concat " " time) "")))))
+             (contents (format-time-string
+                        (if (and include-time time)
+                            "%Y-%m-%d %a %H:%M"
+                          "%Y-%m-%d %a")
+                        parsed-time)))
+        (concat (if inactive "[" "<") contents (if inactive "]" ">"))))))
 
 (defun org-agenda-api--format-inactive-timestamp ()
   "Return current time as inactive org timestamp."
@@ -131,29 +201,39 @@ like %(sexp), %U, %t, etc."
             (funcall template-raw))
            ;; Plain string
            (t template-raw)))
-         (result template-string))
-    ;; Replace %^{Name} with the value (interactive prompts we're filling programmatically)
-    ;; Do patterns with suffixes FIRST, then without (otherwise suffix gets left behind)
-    (dolist (prompt prompts)
-      (let* ((name (car prompt))
-             (ptype (plist-get (cdr prompt) :type))
-             (value (cdr (assoc name values)))
+         (result template-string)
+         (prompt-regexp
+          "%\\^{\\([^}|]+\\)\\(?:|[^}]*\\)?}\\([tTuUgGC]\\)?"))
+    ;; Replace named prompts, including choice/default forms, without invoking
+    ;; Org's interactive prompt reader.
+    (while (string-match prompt-regexp result)
+      (let* ((name (match-string 1 result))
+             (suffix-string (match-string 2 result))
+             (suffix (and suffix-string (aref suffix-string 0)))
+             (prompt (assoc name prompts))
+             (value-entry (assoc name values))
+             (ptype (and prompt (plist-get (cdr prompt) :type)))
+             (value (cdr value-entry))
              (formatted-value
-              (pcase ptype
-                ('string (or value ""))
-                ('date (org-agenda-api--format-date value))
-                ('tags (org-agenda-api--format-tags value))
-                (_ (or value "")))))
-        ;; First replace %^{Name}X patterns (like %^{When}t for date, %^{Tags}g for tags)
-        (setq result (replace-regexp-in-string
-                      (format "%%\\^{%s}[tTgGuU]" (regexp-quote name))
-                      formatted-value
-                      result t t))
-        ;; Then replace plain %^{Name} pattern
-        (setq result (replace-regexp-in-string
-                      (format "%%\\^{%s}" (regexp-quote name))
-                      formatted-value
-                      result t t))))
+              (save-match-data
+                (cond
+                 ((memq suffix '(?t ?T ?u ?U))
+                  (org-agenda-api--format-prompt-timestamp value suffix))
+                 ((memq suffix '(?g ?G))
+                  (org-agenda-api--format-tags value))
+                 ((eq ptype 'date)
+                  (org-agenda-api--format-prompt-timestamp value ?t))
+                 ((eq ptype 'tags)
+                  (org-agenda-api--format-tags value))
+                 ((null value) "")
+                 ((stringp value) value)
+                 (t (format "%s" value))))))
+        ;; An unregistered prompt cannot be supplied through the advertised API
+        ;; contract, so reject it before Org can open a minibuffer.
+        (unless prompt
+          (org-agenda-api--capture-client-error
+           "Template contains unregistered interactive prompt: %s" name))
+        (setq result (replace-match formatted-value t t result))))
     ;; Replace %? with Title value if present, otherwise remove it
     ;; (do this before org-capture-fill-template which would leave %? for cursor)
     (let ((title-value (cdr (assoc "Title" values))))
@@ -161,6 +241,14 @@ like %(sexp), %U, %t, etc."
                     "%\\?"
                     (or title-value "")
                     result t t)))
+    ;; Any remaining %^ escape is interactive (for example anonymous %^T).
+    ;; Calling `org-capture-fill-template' with it in a headless server would
+    ;; enter the minibuffer and wedge the worker.
+    (when (string-match "%\\^" result)
+      (org-agenda-api--capture-client-error
+       "Template contains unsupported anonymous interactive escape: %s"
+       (substring result (match-beginning 0)
+                  (min (length result) (+ (match-beginning 0) 12)))))
     ;; Use org-capture-fill-template to handle all other escape sequences:
     ;; %(sexp), %U, %u, %T, %t, %a, %c, %i, etc.
     (require 'org-capture)
@@ -180,10 +268,11 @@ These are applied after the entry is created.
 Returns an alist with status information."
   (let ((template-entry (org-agenda-api--get-template template-key)))
     (unless template-entry
-      (error "Unknown template: %s" template-key))
+      (org-agenda-api--capture-client-error
+       "Unknown template: %s" template-key))
     (let ((validation-error (org-agenda-api--validate-capture-values template-entry values)))
       (when validation-error
-        (error "%s" validation-error)))
+        (org-agenda-api--capture-client-error "%s" validation-error)))
     (let* ((plist (cdr template-entry))
            (capture-template (plist-get plist :template))
            (target-file (let ((target (nth 3 capture-template)))
@@ -199,6 +288,11 @@ Returns an alist with status information."
            ;; Accept both "state" and "todo" for backwards compatibility
            (todo-state (or (cdr (assoc "state" values))
                            (cdr (assoc "todo" values))))
+           ;; org-capture template properties live in the tail after the
+           ;; template body (key description type target body . plist).
+           (prepare-finalize (plist-get (nthcdr 5 capture-template)
+                                        :prepare-finalize))
+           (finalize-error nil)
            (entry-pos nil))
       ;; Append entry to target file
       (with-current-buffer (find-file-noselect target-file)
@@ -234,11 +328,27 @@ Returns an alist with status information."
             ;; Apply tags
             (when (and tags (> (length tags) 0))
               (let ((tag-list (if (vectorp tags) (append tags nil) tags)))
-                (org-set-tags tag-list)))))
+                (org-set-tags tag-list)))
+            ;; Run the template's :prepare-finalize function with point on the
+            ;; new entry. org-capture would call this in the capture buffer;
+            ;; we insert directly, so it has to be invoked here or the entry
+            ;; is left half-built (e.g. a vocabulary entry that never becomes
+            ;; an org-fc card). Failures are reported rather than raised: the
+            ;; entry is already written, and losing it to a missing optional
+            ;; package would be worse than returning it un-finalized.
+            (when (functionp prepare-finalize)
+              (condition-case err
+                  (funcall prepare-finalize)
+                (error
+                 (setq finalize-error (error-message-string err))
+                 (message "org-agenda-api: :prepare-finalize failed for %s: %s"
+                          template-key finalize-error))))))
         (save-buffer))
       (org-agenda-api--invalidate-cache)
       `(("status" . "created")
-        ("template" . ,template-key)))))
+        ("template" . ,template-key)
+        ,@(when finalize-error
+            `(("prepare_finalize_error" . ,finalize-error)))))))
 
 ;;; Capture Readiness Check
 

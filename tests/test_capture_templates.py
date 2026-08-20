@@ -102,9 +102,10 @@ class TestCaptureWithTemplate:
             "/capture", json={"template": "nonexistent", "values": {"Title": "Test"}}
         )
 
-        # simple-httpd returns 200 with error in body
+        assert response.status_code == 422
         data = response.json()
         assert data.get("status") == "error"
+        assert data.get("code") == "invalid_capture_request"
         assert "Unknown template" in data.get("message", "")
 
     def test_error_on_missing_required_prompt(self, api):
@@ -117,10 +118,59 @@ class TestCaptureWithTemplate:
             },
         )
 
-        # simple-httpd returns 200 with error in body
+        assert response.status_code == 422
         data = response.json()
         assert data.get("status") == "error"
+        assert data.get("code") == "invalid_capture_request"
         assert "Missing required" in data.get("message", "")
+
+    def test_invalid_json_returns_bad_request(self, api):
+        """Malformed JSON should return a real HTTP client error."""
+        response = api.post(
+            "/capture",
+            data=b'{"template":',
+            headers={"Content-Type": "application/json"},
+        )
+
+        assert response.status_code == 400
+        assert response.json().get("code") == "invalid_json"
+
+    def test_unicode_json_body_is_decoded_as_utf8(self, api, org_dir):
+        """Multibyte capture text should survive simple-httpd's binary input."""
+        title = "Unicode “smart quotes” café ☕"
+
+        response = api.post(
+            "/capture", json={"template": "todo", "values": {"Title": title}}
+        )
+
+        assert response.status_code == 200
+        assert response.json().get("status") == "created"
+        assert title in (org_dir / "inbox.org").read_text()
+
+    def test_anonymous_date_prompt_fails_without_wedging_server(self, api, org_dir):
+        """An unresolved %^T must fail before Org opens a minibuffer."""
+        title = "Anonymous prompt must not be inserted"
+
+        response = api.post(
+            "/capture",
+            json={"template": "anonymous-date", "values": {"Title": title}},
+        )
+
+        assert response.status_code == 422
+        data = response.json()
+        assert data.get("code") == "invalid_capture_request"
+        assert "anonymous interactive escape" in data.get("message", "")
+        assert title not in (org_dir / "inbox.org").read_text()
+
+        followup = api.post(
+            "/capture",
+            json={
+                "template": "todo",
+                "values": {"Title": "Server remained responsive"},
+            },
+        )
+        assert followup.status_code == 200
+        assert followup.json().get("status") == "created"
 
 
 class TestCaptureWithDatePrompt:
@@ -156,6 +206,24 @@ class TestCaptureWithDatePrompt:
         assert unique_title in content
         # Should have an org timestamp somewhere
         assert "2024-06-20" in content or "<2024-06-20" in content
+
+    def test_named_date_time_preserves_calendar_event_time(self, api, org_dir):
+        """%^T's named form should create a timed bare event timestamp."""
+        title = "Timed calendar event 23232"
+
+        response = api.post(
+            "/capture",
+            json={
+                "template": "calendar-event",
+                "values": {"Title": title, "When": "2024-06-20T14:30:00-07:00"},
+            },
+        )
+
+        assert response.status_code == 200
+        content = (org_dir / "inbox.org").read_text()
+        entry = content[content.index(f"* {title}") :]
+        assert "<2024-06-20 Thu 14:30>" in entry
+        assert "SCHEDULED:" not in entry.split("\n\n", 1)[0]
 
 
 class TestCaptureWithTags:

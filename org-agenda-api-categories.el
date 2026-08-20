@@ -370,7 +370,7 @@ Accepts JSON body with:
   - properties: object of property name/value pairs (optional)"
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (json-parse-string content-header))
+             (json-data (org-agenda-api--parse-json-request-body content-header))
              (type-name (gethash "type" json-data))
              (category (gethash "category" json-data))
              (title (gethash "title" json-data))
