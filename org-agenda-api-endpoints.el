@@ -824,7 +824,9 @@ POST /app-config/NAMESPACE -> replace NAMESPACE's config with the JSON body"
       (let* ((parts (split-string (directory-file-name path) "/" t))
              (namespace (when (cdr parts) (string-join (cdr parts) "/")))
              (method (caar headers))
-             (body (cadr (assoc "Content" headers))))
+             (raw-body (cadr (assoc "Content" headers)))
+             (body (and raw-body
+                        (org-agenda-api--decode-json-request-body raw-body))))
         (cond
          ((null namespace)
           (insert (json-encode

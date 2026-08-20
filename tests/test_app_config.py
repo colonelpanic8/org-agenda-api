@@ -76,6 +76,15 @@ class TestAppConfig:
         response = api.get("/app-config/mova")
         assert response.json()["config"] == config
 
+    def test_unicode_json_round_trip(self, api):
+        config = {"label": "Unicode “smart quotes” café ☕"}
+
+        response = api.post("/app-config/mova", json=config)
+        assert response.status_code == 200
+
+        response = api.get("/app-config/mova")
+        assert response.json()["config"] == config
+
     def test_invalid_namespace_rejected(self, api):
         response = api.post("/app-config/..%2fevil", json={"a": 1})
         assert response.status_code == 200
