@@ -1550,6 +1550,47 @@ Returns a list of integers (minutes before event)."
             ("pos" . ,pos)
             ,@(when id `(("id" . ,id)))))))))
 
+(defun org-agenda-api--notification-entry-active-p (notification fallback-time)
+  "Return non-nil when NOTIFICATION belongs to an actionable entry.
+
+Window habits can retain repeating Org timestamps after their final config has
+ended.  Exclude those inactive habits while leaving ordinary entries and
+  installations without window-habit support unchanged.  FALLBACK-TIME is used
+  when the notification has no event or firing time."
+  (let* ((marker (plist-get notification :marker))
+         (file (plist-get notification :file))
+         (pos (plist-get notification :pos))
+         (reference-time (or (plist-get notification :event-time)
+                             (plist-get notification :notify-at)
+                             fallback-time))
+         (active-at-point-p
+          (lambda ()
+            (or (not (org-agenda-api--is-window-habit-p))
+                (org-agenda-api--active-window-habit-instance
+                 reference-time)))))
+    (if (not (and (fboundp 'org-agenda-api--is-window-habit-p)
+                  (fboundp 'org-agenda-api--active-window-habit-instance)))
+        t
+      (condition-case err
+          (cond
+           ((and marker (marker-buffer marker) (marker-position marker))
+            (with-current-buffer (marker-buffer marker)
+              (save-excursion
+                (goto-char marker)
+                (funcall active-at-point-p))))
+           ((and file pos (file-readable-p file))
+            (with-current-buffer (find-file-noselect file)
+              (save-excursion
+                (save-restriction
+                  (widen)
+                  (goto-char pos)
+                  (funcall active-at-point-p)))))
+           (t t))
+        (error
+         (message "[org-agenda-api] Error checking notification habit activity: %S"
+                  err)
+         t)))))
+
 (defun org-agenda-api--get-upcoming-notifications (&optional as-of-time)
   "Get upcoming notifications.
 If AS-OF-TIME is provided (as an Emacs time value), use it as the reference time
@@ -1562,7 +1603,12 @@ Returns a list of notification objects suitable for JSON encoding."
                                 (org-wild-notifier-get-upcoming-notifications now)
                               (error
                                (message "[org-agenda-api] Error getting notifications: %S" err)
-                               nil))))
+                               nil)))
+         (active-notifications
+          (cl-remove-if-not
+           (lambda (notification)
+             (org-agenda-api--notification-entry-active-p notification now))
+           all-notifications)))
     (cl-remove nil
                (mapcar
                 (lambda (notif)
@@ -1620,7 +1666,7 @@ Returns a list of notification objects suitable for JSON encoding."
                     (error
                      (message "[org-agenda-api] Error processing notification: %S" err)
                      nil)))
-                all-notifications))))
+                active-notifications))))
 
 ;;; Multi-Day Agenda Support
 

@@ -599,6 +599,7 @@ def org_test_dir(tmp_path_factory):
   :PROPERTIES:
   :STYLE: habit
   :OWH_CONFIG: (:window-specs ((:duration (:days 7) :repetitions 2)) :until "2024-06-01")
+  :WILD_NOTIFIER_NOTIFY_AT: <{TEST_DATE_ORG} 12:00>
   :ID: test-window-habit-paused
   :END:
   This habit is retained as history but is inactive on the test date.

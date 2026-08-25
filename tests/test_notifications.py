@@ -333,6 +333,15 @@ class TestMinutesBeforeField:
 class TestNotificationConsistency:
     """Tests for consistency between notification data."""
 
+    def test_inactive_window_habit_has_no_notifications(self, api):
+        """Habits outside their active config range should not notify."""
+        response = api.get_notifications(as_of="2024-06-15T08:00:00")
+        notification_ids = {
+            notification.get("id") for notification in response.json()["notifications"]
+        }
+
+        assert "test-window-habit-paused" not in notification_ids
+
     def test_notify_at_before_event_time_for_relative(self, api):
         """For relative notifications, notifyAt should be before eventTime."""
         response = api.get_notifications()
