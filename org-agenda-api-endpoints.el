@@ -213,7 +213,7 @@ Accepts optional query param:
 
 (defservlet metadata application/json ()
   "Endpoint: Return all app metadata in a single request.
-Returns templates, filterOptions, todoStates, customViews, categoryTypes, habitConfig, and any errors."
+Returns templates, filterOptions, todoStates, customViews, categoryTypes, habitConfig, orgConfig, and any errors."
   (let ((result '())
         (errors '()))
     ;; Collect templates
@@ -261,6 +261,12 @@ Returns templates, filterOptions, todoStates, customViews, categoryTypes, habitC
       (error
        (push (format "habitConfig: %s" (error-message-string err)) errors)
        (push '("habitConfig" . nil) result)))
+    ;; Collect org-mode settings clients need to mirror locally
+    (condition-case err
+        (push `("orgConfig" . (("extendTodayUntil" . ,(or (bound-and-true-p org-extend-today-until) 0)))) result)
+      (error
+       (push (format "orgConfig: %s" (error-message-string err)) errors)
+       (push '("orgConfig" . nil) result)))
     ;; Collect exposed functions
     (condition-case err
         (push `("exposedFunctions" . ,(vconcat (org-agenda-api--get-exposed-functions))) result)
