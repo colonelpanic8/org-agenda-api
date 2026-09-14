@@ -58,6 +58,11 @@ pytest tests/ -v        # Verbose output
 Common query params:
 - =include_archives=true= for =/get-all-todos=, =/agenda=, and =/agenda-files= to include archive files/trees.
 
+For =GET /get-all-todos=:
+- =q= optionally filters todos by a case-insensitive substring of =title=, =tags=, =todo= state, =category=, or =effectiveCategory=. Exact title matches sort before title-prefix matches, followed by other matches in their existing order.
+- =limit= optionally caps the returned =todos= after filtering and ranking; it must be a positive integer.
+- When either =q= or =limit= is supplied, =total= is the number of matching todos before =limit= is applied.
+
 *** Create/Capture Endpoints (POST)
 
 | Endpoint   | Description                      |
@@ -70,6 +75,8 @@ Common query params:
 |------------+------------------------------------------------------|
 | =/update=  | Updates TODO fields (scheduled, deadline, priority, effort, properties) |
 | =/complete= | Marks TODO as complete                               |
+
+=POST /complete= accepts an optional JSON boolean =strict= (default =false=). In strict mode, an =id= must resolve exactly; otherwise =file=, =pos=, and =title= must identify the exact heading, with no title fallback. Conflicts return HTTP 409 without changing an item. =POST /update= and the =/set-state= alias support the same strict lookup behavior.
 
 *** Utility Endpoints (GET)
 

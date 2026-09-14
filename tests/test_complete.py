@@ -631,3 +631,88 @@ class TestAutoAddOrgId:
         assert len(updated_todo["id"]) >= 32, (
             f"ID should be UUID format, got: {updated_todo['id']}"
         )
+
+
+class TestCompleteTodoStrictLookup:
+    """Tests for opt-in strict mutation targeting."""
+
+    def test_strict_id_miss_does_not_fall_back(self, api):
+        """A supplied id is authoritative in strict mode."""
+        target = next(
+            todo
+            for todo in api.get_all_todos().json()["todos"]
+            if todo.get("todo") == "TODO"
+        )
+        response = api.post(
+            "/complete",
+            json={**target, "id": "strict-id-that-does-not-exist", "strict": True},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["status"] == "error"
+        unchanged = next(
+            todo
+            for todo in api.get_all_todos().json()["todos"]
+            if todo["title"] == target["title"]
+        )
+        assert unchanged["todo"] == "TODO"
+
+    def test_strict_stale_position_reports_found_title_without_completion(self, api):
+        """A different heading at the requested position should be reported and untouched."""
+        todos = api.get_all_todos().json()["todos"]
+        target = next(todo for todo in todos if todo["title"] == "Buy groceries")
+        at_position = next(todo for todo in todos if todo["title"] == "Call dentist")
+        response = api.post(
+            "/complete",
+            json={
+                "file": at_position["file"],
+                "pos": at_position["pos"],
+                "title": target["title"],
+                "strict": True,
+            },
+        )
+
+        assert response.status_code == 409
+        assert response.json()["foundTitle"] == at_position["title"]
+        current = {
+            todo["title"]: todo["todo"] for todo in api.get_all_todos().json()["todos"]
+        }
+        assert current[target["title"]] == "TODO"
+        assert current[at_position["title"]] == "TODO"
+
+    def test_strict_exact_position_succeeds(self, api):
+        """An exact file, position, and title should complete normally."""
+        target = next(
+            todo
+            for todo in api.get_all_todos().json()["todos"]
+            if todo["title"] == "Buy groceries"
+        )
+        response = api.post(
+            "/complete",
+            json={
+                "file": target["file"],
+                "pos": target["pos"],
+                "title": target["title"],
+                "strict": True,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "completed"
+
+    def test_non_strict_stale_position_still_falls_back_to_title(self, api):
+        """Legacy clients should retain stale-position recovery."""
+        todos = api.get_all_todos().json()["todos"]
+        target = next(todo for todo in todos if todo["title"] == "Buy groceries")
+        stale = next(todo for todo in todos if todo["title"] == "Call dentist")
+        response = api.post(
+            "/complete",
+            json={
+                "file": stale["file"],
+                "pos": stale["pos"],
+                "title": target["title"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["title"] == target["title"]

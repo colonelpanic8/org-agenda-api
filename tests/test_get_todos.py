@@ -1,5 +1,7 @@
 """Integration tests for GET endpoints."""
 
+import pytest
+
 
 class TestGetAllTodos:
     """Tests for GET /get-all-todos endpoint."""
@@ -15,6 +17,7 @@ class TestGetAllTodos:
         data = response.json()
         assert isinstance(data, dict)
         assert "todos" in data
+        assert "total" not in data
         assert isinstance(data["todos"], list)
 
     def test_returns_defaults(self, api):
@@ -92,6 +95,79 @@ class TestGetAllTodos:
         [item for item in todos if item.get("todo") == "DONE"]
         # Note: The current implementation does include DONE items
         # This test documents current behavior - adjust if intended behavior differs
+
+    @pytest.mark.parametrize(
+        ("query", "expected_title"),
+        [
+            ("grocer", "Buy groceries"),
+            ("work", "Review PR"),
+            ("waiting", "Hear back from client"),
+            ("testing", "Task with custom properties"),
+            ("custom_keywords", "Coffee beans"),
+        ],
+    )
+    def test_search_matches_each_response_field(self, api, query, expected_title):
+        """Search title, tags, todo state, and category fields case-insensitively."""
+        response = api.get("/get-all-todos", params={"q": query.upper()})
+
+        assert response.status_code == 200
+        titles = [todo["title"] for todo in response.json()["todos"]]
+        assert expected_title in titles
+
+    def test_search_ranks_exact_then_prefix_then_other_stably(self, api):
+        """Title relevance buckets should lead while preserving order within a bucket."""
+        for title in [
+            "Contains Search Needle",
+            "Search Needle prefix",
+            "Search Needle",
+        ]:
+            assert api.create_todo(title).status_code == 200
+
+        response = api.get("/get-all-todos", params={"q": "sEaRcH nEeDlE"})
+
+        matching_titles = [todo["title"] for todo in response.json()["todos"]]
+        assert matching_titles[:3] == [
+            "Search Needle",
+            "Search Needle prefix",
+            "Contains Search Needle",
+        ]
+
+    def test_limit_caps_results_and_reports_pre_limit_total(self, api):
+        """Limit should cap todos while total describes the uncapped match set."""
+        uncapped = api.get("/get-all-todos", params={"q": "work"}).json()
+        response = api.get("/get-all-todos", params={"q": "work", "limit": 2})
+        data = response.json()
+
+        assert response.status_code == 200
+        assert len(data["todos"]) == 2
+        assert data["total"] == len(uncapped["todos"])
+        assert data["todos"] == uncapped["todos"][:2]
+
+    def test_limit_without_query_preserves_existing_order(self, api):
+        """A standalone limit should take the leading items in their existing order."""
+        all_todos = api.get_all_todos().json()["todos"]
+        data = api.get("/get-all-todos", params={"limit": 3}).json()
+
+        assert data["todos"] == all_todos[:3]
+        assert data["total"] == len(all_todos)
+
+    def test_search_keeps_habit_augmentation(self, api):
+        """Filtering should retain fields added while todo items are materialized."""
+        data = api.get("/get-all-todos", params={"q": "Test Window Habit"}).json()
+        habit = next(
+            todo for todo in data["todos"] if todo["title"] == "Test Window Habit"
+        )
+
+        assert habit["isWindowHabit"] is True
+        assert "habitSummary" in habit
+
+    @pytest.mark.parametrize("limit", ["nope", "0", "-1", "1.5"])
+    def test_invalid_limit_returns_json_400(self, api, limit):
+        """Malformed and non-positive limits should be client errors."""
+        response = api.get("/get-all-todos", params={"limit": limit})
+
+        assert response.status_code == 400
+        assert response.json()["status"] == "error"
 
 
 class TestGetTodaysAgenda:

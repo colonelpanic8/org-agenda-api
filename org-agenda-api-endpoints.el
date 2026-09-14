@@ -9,6 +9,7 @@
 ;;; Code:
 
 (require 'json)
+(require 'seq)
 (require 'simple-httpd)
 (require 'org-agenda-api-core)
 (require 'org-agenda-api-data)
@@ -17,14 +18,64 @@
 
 ;;; Query Endpoints
 
+(define-error 'org-agenda-api-invalid-query-parameter
+  "Invalid org-agenda-api query parameter")
+
+(defun org-agenda-api--parse-positive-integer-query-param (name value)
+  "Parse optional query parameter NAME from VALUE as a positive integer."
+  (when value
+    (unless (string-match-p "\\`[1-9][0-9]*\\'" value)
+      (signal 'org-agenda-api-invalid-query-parameter
+              (list (format "Query parameter '%s' must be a positive integer" name))))
+    (string-to-number value)))
+
+(defun org-agenda-api--todo-search-field-strings (todo)
+  "Return searchable response field strings from TODO."
+  (let ((tags (cdr (assoc "tags" todo))))
+    (delq nil
+          (append (list (cdr (assoc "title" todo))
+                        (cdr (assoc "todo" todo))
+                        (cdr (assoc "category" todo))
+                        (cdr (assoc "effectiveCategory" todo)))
+                  (cond
+                   ((vectorp tags) (append tags nil))
+                   ((listp tags) tags)
+                   (tags (list tags)))))))
+
+(defun org-agenda-api--filter-and-rank-todos (todos query)
+  "Filter TODOS by QUERY and rank title matches without disturbing ties."
+  (if (null query)
+      todos
+    (let ((needle (downcase query)) exact prefix rest)
+      (dolist (todo todos)
+        (when (seq-some
+               (lambda (field)
+                 (and (stringp field)
+                      (string-match-p (regexp-quote needle) (downcase field))))
+               (org-agenda-api--todo-search-field-strings todo))
+          (let ((title (downcase (or (cdr (assoc "title" todo)) ""))))
+            (cond
+             ((string= title needle) (push todo exact))
+             ((string-prefix-p needle title) (push todo prefix))
+             (t (push todo rest))))))
+      (append (nreverse exact) (nreverse prefix) (nreverse rest)))))
+
 (defservlet get-all-todos application/json (_path query)
   "Endpoint: Return all TODO items from agenda files as JSON.
 Response is wrapped with notification defaults.
 Accepts optional query params:
   - 'refresh' (true/1) to git pull repos first
-  - 'include_archives' (true/1) to include archive files/trees."
-  (let* ((refresh-param (cadr (assoc "refresh" query)))
+  - 'include_archives' (true/1) to include archive files/trees
+  - 'q' for case-insensitive search across title, tags, todo state, and category
+  - 'limit' to return at most that many matching todos."
+  (condition-case err
+      (let* ((refresh-param (cadr (assoc "refresh" query)))
          (include-archives-param (cadr (assoc "include_archives" query)))
+         (q-present (assoc "q" query))
+         (limit-present (assoc "limit" query))
+         (q (cadr q-present))
+         (limit (org-agenda-api--parse-positive-integer-query-param
+                 "limit" (cadr limit-present)))
          (include-archives (org-agenda-api--include-archives-p include-archives-param))
          (git-results (when (member refresh-param '("true" "1"))
                         (org-agenda-api--git-refresh-all)))
@@ -33,12 +84,24 @@ Accepts optional query params:
             (let* ((todos (if include-archives
                               (org-agenda-api--get-agenda-todos-from-files org-agenda-files)
                             (org-agenda-api--get-agenda-todos)))
+                   (matching-todos (org-agenda-api--filter-and-rank-todos todos q))
+                   (total (length matching-todos))
+                   (returned-todos (if limit
+                                       (seq-take matching-todos limit)
+                                     matching-todos))
                    (defaults `(("notifyBefore" . ,(vconcat (org-agenda-api--get-default-notify-before))))))
               `(("defaults" . ,defaults)
-                ("todos" . ,(vconcat todos)))))))
-    (when git-results
-      (push `("gitRefresh" . ,(vconcat git-results)) response))
-    (insert (json-encode response)))
+                ("todos" . ,(vconcat returned-todos))
+                ,@(when (or q-present limit-present)
+                    `(("total" . ,total))))))))
+        (when git-results
+          (push `("gitRefresh" . ,(vconcat git-results)) response))
+        (insert (json-encode response)))
+    (org-agenda-api-invalid-query-parameter
+     (insert (json-encode `(("status" . "error")
+                            ("code" . "invalid_query_parameter")
+                            ("message" . ,(error-message-string err)))))
+     (httpd-send-header t "application/json; charset=utf-8" 400)))
   (org-agenda-api--track-request))
 
 (defservlet get-todays-agenda application/json ()
@@ -354,6 +417,52 @@ Accepts query params:
      (httpd-send-header t "application/json; charset=utf-8" 500)))
   (org-agenda-api--track-request))
 
+(define-error 'org-agenda-api-strict-lookup-error
+  "Strict todo lookup failed")
+
+(defun org-agenda-api--strict-todo-location (id file pos title)
+  "Resolve ID or FILE, POS, and TITLE without fallback.
+Signal `org-agenda-api-strict-lookup-error' when the exact entry is absent."
+  (if id
+      (let* ((location (org-agenda-api--find-todo-by-id id))
+             (matching-id
+              (when location
+                (with-current-buffer (find-file-noselect (car location))
+                  (save-excursion
+                    (goto-char (cdr location))
+                    (and (org-at-heading-p)
+                         (string= (org-entry-get (point) "ID") id)))))))
+        (if matching-id
+            location
+          (signal 'org-agenda-api-strict-lookup-error
+                  (list (format "No todo found with org id '%s'" id) nil))))
+    (unless (and file pos title)
+      (signal 'org-agenda-api-strict-lookup-error
+              (list "Strict lookup requires either 'id' or 'file', 'pos', and 'title'" nil)))
+    (let ((found-title
+           (when (file-exists-p file)
+             (with-current-buffer (find-file-noselect file)
+               (save-excursion
+                 (goto-char pos)
+                 (when (org-at-heading-p)
+                   (org-get-heading t t t t)))))))
+      (if (and found-title (string= found-title title))
+          (cons file pos)
+        (signal 'org-agenda-api-strict-lookup-error
+                (list (if found-title
+                          (format "Expected todo title '%s' at position %s, but found '%s'"
+                                  title pos found-title)
+                        (format "No todo heading found at position %s in '%s'" pos file))
+                      found-title))))))
+
+(defun org-agenda-api--send-strict-lookup-error (err)
+  "Send strict lookup condition ERR as a JSON HTTP 409 response."
+  (insert (json-encode `(("status" . "error")
+                         ("code" . "strict_lookup_conflict")
+                         ("message" . ,(cadr err))
+                         ("foundTitle" . ,(or (caddr err) :json-null)))))
+  (httpd-send-header t "application/json; charset=utf-8" 409))
+
 (defservlet update application/json (_path _query headers)
   "Endpoint: Update a TODO's state, title, scheduled date, deadline, priority, tags, effort, or properties.
 Accepts JSON body with:
@@ -361,6 +470,7 @@ Accepts JSON body with:
   - file: file path (fallback)
   - pos: position in file (fallback)
   - title: heading title (can match by title alone or with file)
+  - strict: when true, require an exact id match or exact file+pos+title match
   - state: new TODO state (e.g., TODO, DONE, STARTED, etc.)
   - new_title: new title to set for the heading
   - scheduled: object {date, time?, repeater?} or null to clear
@@ -381,6 +491,7 @@ Returns updated todo with new file and pos for cache update."
                (file (gethash "file" json-data))
                (pos (gethash "pos" json-data))
                (title (gethash "title" json-data))
+               (strict (eq (gethash "strict" json-data) t))
                (state (gethash "state" json-data))
                (new-title (gethash "new_title" json-data))
                (scheduled (gethash "scheduled" json-data))
@@ -396,7 +507,7 @@ Returns updated todo with new file and pos for cache update."
         (message "[/update] Request: id=%s file=%s pos=%s title=%s state=%s new_title=%s scheduled=%s deadline=%s priority=%s effort=%s"
                  id file pos title state new-title scheduled deadline priority effort)
         ;; Check for unrecognized fields
-        (let ((allowed-fields '("id" "file" "pos" "title" "state" "new_title" "scheduled" "deadline" "priority" "tags" "effort" "properties" "body"))
+        (let ((allowed-fields '("id" "file" "pos" "title" "strict" "state" "new_title" "scheduled" "deadline" "priority" "tags" "effort" "properties" "body"))
               (unrecognized nil))
           (maphash (lambda (key _value)
                      (unless (member key allowed-fields)
@@ -436,27 +547,31 @@ Returns updated todo with new file and pos for cache update."
         (unless (eq (gethash "body" json-data :not-found) :not-found)
           (push (cons "body" (if (eq body :null) nil body)) updates))
         (message "[/update] Updates to apply: %S" updates)
+        ;; Strict requests never fall back to another identifier.
+        (when strict
+          (setq location (org-agenda-api--strict-todo-location id file pos title)))
         ;; Try to find by ID first
-        (setq location (org-agenda-api--find-todo-by-id id))
+        (unless strict
+          (setq location (org-agenda-api--find-todo-by-id id)))
         (when location (message "[/update] Found by ID"))
         ;; Fall back to file+pos+title (includes lenient matching)
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title))
           (when location (message "[/update] Found by file+pos+title")))
         ;; Fall back to file+title strict match (handles position drift)
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-file-title file title))
           (when location (message "[/update] Found by file+title")))
         ;; Fall back to title only strict match across all agenda files
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-title title))
           (when location (message "[/update] Found by title only")))
         ;; Fall back to file+title lenient match (handles whitespace/unicode differences)
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-file-title file title t))
           (when location (message "[/update] Found by file+title (lenient)")))
         ;; Fall back to title only lenient match across all agenda files
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-title title t))
           (when location (message "[/update] Found by title only (lenient)")))
         (message "[/update] Location: %S" location)
@@ -466,6 +581,8 @@ Returns updated todo with new file and pos for cache update."
               (insert (json-encode result)))
           (insert (json-encode `(("status" . "error")
                                  ("message" . "Todo not found")))))))
+    (org-agenda-api-strict-lookup-error
+     (org-agenda-api--send-strict-lookup-error err))
     (error
      (org-agenda-api--log-error-with-backtrace "/update" err)
      (insert (json-encode `(("status" . "error")
@@ -479,6 +596,7 @@ Accepts JSON body with:
   - file: file path (fallback)
   - pos: position in file (fallback)
   - title: heading title (for verification)
+  - strict: when true, require an exact id match or exact file+pos+title match
   - state: new state (optional, defaults to DONE)
   - override_date: ISO date string to use as effective date for the state change
                    (affects LOGBOOK timestamp, useful for retroactive completions)"
@@ -489,6 +607,7 @@ Accepts JSON body with:
              (file (gethash "file" json-data))
              (pos (gethash "pos" json-data))
              (title (gethash "title" json-data))
+             (strict (eq (gethash "strict" json-data) t))
              (new-state (gethash "state" json-data))
              (override-date-str (gethash "override_date" json-data))
              (override-date (when (and override-date-str
@@ -496,28 +615,31 @@ Accepts JSON body with:
                                        (not (string-empty-p override-date-str)))
                               (org-agenda-api--parse-datetime override-date-str)))
              (location nil))
+        ;; Strict requests use the id exclusively when it is present.
+        (when strict
+          (setq location (org-agenda-api--strict-todo-location id file pos title)))
         ;; If both file+pos AND id are provided, prefer file+pos since it's more
         ;; reliable (org-id-find can return stale cached paths from previous runs)
-        (when (and file pos)
+        (when (and (not strict) file pos)
           (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
         ;; Fall back to ID lookup if file+pos wasn't found or not provided
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-id id)))
         ;; Fall back to file+title (for when position drifted)
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
         ;; Fall back to file+title strict match (handles position drift)
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-file-title file title)))
         ;; Fall back to title only strict match across all agenda files
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-title title)))
         ;; Fall back to file+title lenient match (handles whitespace/unicode differences)
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-file-title file title t))
           (when location (message "[/complete] Found by file+title (lenient)")))
         ;; Fall back to title only lenient match across all agenda files
-        (unless location
+        (unless (or strict location)
           (setq location (org-agenda-api--find-todo-by-title title t))
           (when location (message "[/complete] Found by title only (lenient)")))
         (if location
@@ -526,6 +648,8 @@ Accepts JSON body with:
               (insert (json-encode result)))
           (insert (json-encode `(("status" . "error")
                                  ("message" . "Todo not found"))))))
+    (org-agenda-api-strict-lookup-error
+     (org-agenda-api--send-strict-lookup-error err))
     (error
      (org-agenda-api--log-error-with-backtrace "/complete" err)
      (insert (json-encode `(("status" . "error")
@@ -541,6 +665,7 @@ Accepts JSON body with:
   - file: file path (fallback)
   - pos: position in file (fallback)
   - title: heading title (for verification)
+  - strict: when true, require an exact id match or exact file+pos+title match
   - state: new state (required for this endpoint)
   - override_date: ISO date string to use as effective date for the state change
                    (affects LOGBOOK timestamp, useful for retroactive state changes)"
@@ -552,6 +677,7 @@ Accepts JSON body with:
                (file (gethash "file" json-data))
                (pos (gethash "pos" json-data))
                (title (gethash "title" json-data))
+               (strict (eq (gethash "strict" json-data) t))
                (new-state (gethash "state" json-data))
                (override-date-str (gethash "override_date" json-data))
                (override-date (when (and override-date-str
@@ -564,23 +690,26 @@ Accepts JSON body with:
             (insert (json-encode `(("status" . "error")
                                    ("message" . "Missing required 'state' parameter"))))
             (throw 'done nil))
+          (when strict
+            (setq location (org-agenda-api--strict-todo-location id file pos title)))
           ;; Try to find by ID first
-          (setq location (org-agenda-api--find-todo-by-id id))
+          (unless strict
+            (setq location (org-agenda-api--find-todo-by-id id)))
           ;; Fall back to file+pos+title (includes lenient matching)
-          (unless location
+          (unless (or strict location)
             (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
           ;; Fall back to file+title strict match (handles position drift)
-          (unless location
+          (unless (or strict location)
             (setq location (org-agenda-api--find-todo-by-file-title file title)))
           ;; Fall back to title only strict match across all agenda files
-          (unless location
+          (unless (or strict location)
             (setq location (org-agenda-api--find-todo-by-title title)))
           ;; Fall back to file+title lenient match (handles whitespace/unicode differences)
-          (unless location
+          (unless (or strict location)
             (setq location (org-agenda-api--find-todo-by-file-title file title t))
             (when location (message "[/set-state] Found by file+title (lenient)")))
           ;; Fall back to title only lenient match across all agenda files
-          (unless location
+          (unless (or strict location)
             (setq location (org-agenda-api--find-todo-by-title title t))
             (when location (message "[/set-state] Found by title only (lenient)")))
           (if location
@@ -589,6 +718,8 @@ Accepts JSON body with:
                 (insert (json-encode result)))
             (insert (json-encode `(("status" . "error")
                                    ("message" . "Todo not found")))))))
+    (org-agenda-api-strict-lookup-error
+     (org-agenda-api--send-strict-lookup-error err))
     (error
      (org-agenda-api--log-error-with-backtrace "/set-state" err)
      (insert (json-encode `(("status" . "error")
