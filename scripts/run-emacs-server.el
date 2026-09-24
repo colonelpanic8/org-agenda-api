@@ -102,6 +102,7 @@
 (setq org-agenda-api-port test-port)
 (when test-inbox
   (setq org-agenda-api-inbox-file test-inbox))
+(setq org-agenda-api-memory-file (expand-file-name "agents/memory.org" test-org-dir))
 
 ;; Configure test capture templates for API use
 ;; These use org-capture template format with %^{Prompt} for interactive fields

@@ -193,6 +193,7 @@
           cp ${./org-agenda-api-endpoints.el} $out/share/emacs/site-lisp/org-agenda-api-endpoints.el
           cp ${./org-agenda-api-categories.el} $out/share/emacs/site-lisp/org-agenda-api-categories.el
           cp ${./org-agenda-api-window-habit.el} $out/share/emacs/site-lisp/org-agenda-api-window-habit.el
+          cp ${./org-agenda-api-memory.el} $out/share/emacs/site-lisp/org-agenda-api-memory.el
         '';
 
         # Import the container builder

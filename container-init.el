@@ -53,6 +53,10 @@
 (setq org-agenda-api-inbox-file
       (or (getenv "ORG_INBOX_FILE") "/data/org/inbox.org"))
 
+;; Memory notes file, disabled unless configured
+(when (getenv "ORG_MEMORY_FILE")
+  (setq org-agenda-api-memory-file (getenv "ORG_MEMORY_FILE")))
+
 ;; Set port from environment
 (setq org-agenda-api-port
       (string-to-number (or (getenv "ORG_API_PORT") "2025")))

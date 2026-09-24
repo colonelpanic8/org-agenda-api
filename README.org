@@ -101,6 +101,23 @@ Additionally, when org-window-habit is enabled:
 - =/agenda= entries include =isWindowHabit= and =habitSummary= fields
 - =/complete= response includes =habitSummary= when completing a window-habit
 
+*** Memory Endpoints
+
+Enabled when =org-agenda-api-memory-file= (or =ORG_MEMORY_FILE=) names an org
+file. Each top-level heading is a note: the title is its name and the body is
+its text. Notes are hand-editable; the API keeps =ID=, =CREATED=, =UPDATED= and
+an optional =SOURCE= in the property drawer.
+
+| Endpoint              | Description                                                        |
+|-----------------------+--------------------------------------------------------------------|
+| =GET /memory=         | Search notes. =q= matches every whitespace-separated term, case-insensitively, against name, text and tags; name matches rank first. =offset=, =limit= (default 20, max 100) page results |
+| =POST /memory/save=   | ={name, text, source?}= keeps a note, replacing one with the same name |
+| =POST /memory/learn=  | Same body; adds the note tagged =:unreviewed:=. Returns 409 if a reviewed note has that name |
+| =POST /memory/forget= | ={name}= deletes the note; 404 if none has that exact name        |
+
+Saving over an unreviewed note, or removing its tag by hand, marks it reviewed.
+Validation failures return 400 and change nothing.
+
 ** Environment Variables
 
 | Variable               | Description                                   |
@@ -113,6 +130,7 @@ Additionally, when org-window-habit is enabled:
 | =GIT_USER_NAME=        | Git user name for commits                     |
 | =ORG_AGENDA_FILES=     | Colon-separated list of org file paths        |
 | =ORG_INBOX_FILE=       | Path for new captures (default: /data/org/inbox.org) |
+| =ORG_MEMORY_FILE=      | Org file backing the /memory endpoints (disabled when unset) |
 | =ORG_API_MAX_REQUESTS= | Max requests before worker restart            |
 | =ORG_API_MAX_LIFETIME= | Max seconds before worker restart             |
 

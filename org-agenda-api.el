@@ -4,7 +4,7 @@
 
 ;; Author: Ivan Malison <IvanMalison@gmail.com>
 ;; URL: https://github.com/IvanMalison/org-agenda-api
-;; Version: 4.6.0
+;; Version: 4.7.0
 ;; Package-Requires: ((emacs "26.1") (simple-httpd "1.5.1"))
 ;; Keywords: org, agenda, api, json
 
@@ -42,6 +42,7 @@
 (require 'org-agenda-api-capture)
 (require 'org-agenda-api-mutations)
 (require 'org-agenda-api-endpoints)
+(require 'org-agenda-api-memory)
 
 ;; Optional modules - load if dependencies available
 (require 'org-agenda-api-categories nil t)
