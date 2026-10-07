@@ -57,6 +57,21 @@
 (when (getenv "ORG_MEMORY_FILE")
   (setq org-agenda-api-memory-file (getenv "ORG_MEMORY_FILE")))
 
+;; Notes directories default to the synced repos; an empty value disables them
+(setq org-agenda-api-notes-directories
+      (let ((dirs (getenv "ORG_NOTES_DIRS"))
+            (repos (getenv "GIT_SYNC_REPOSITORIES")))
+        (cond
+         (dirs (split-string dirs ":" t))
+         (repos
+          (condition-case nil
+              (delq nil (mapcar (lambda (repo)
+                                  (let ((path (gethash "path" repo)))
+                                    (and path (concat "/data/" path))))
+                                (json-parse-string repos :array-type 'list)))
+            (error nil)))
+         ((file-directory-p "/data/org/.git") (list "/data/org")))))
+
 ;; Set port from environment
 (setq org-agenda-api-port
       (string-to-number (or (getenv "ORG_API_PORT") "2025")))

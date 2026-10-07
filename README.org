@@ -118,6 +118,23 @@ an optional =SOURCE= in the property drawer.
 Saving over an unreviewed note, or removing its tag by hand, marks it reviewed.
 Validation failures return 400 and change nothing.
 
+*** Notes Endpoints
+
+Read-only access to every org file under =org-agenda-api-notes-directories=
+(=ORG_NOTES_DIRS= in the container, defaulting to the synced repos). A note is
+either a whole file, with ref =file:<path>=, or a heading with an =ID=, with ref
+=id:<uuid>=. A file with a file-level =ID= is addressed by that ID. Headings
+with a TODO keyword are left out of listings and search but open by ref.
+Paths starting with =.= and =node_modules= directories are skipped.
+
+| Endpoint             | Description                                                        |
+|----------------------+--------------------------------------------------------------------|
+| =GET /notes=         | List notes, most recently modified files first. With =q=, return notes containing every whitespace-separated term, title matches first, each with a =snippet=. =limit= caps results (searches default to 50) |
+| =GET /note?ref=<ref>= | The note's =content= as structured =blocks= and nested heading =children=, plus resolved outgoing =links= and =backlinks= (each with the linking line as =context=) |
+
+Links in content carry the =ref= of the note they point to when it is indexed,
+whether written as =id:= links or as =file:= links to org files.
+
 ** Environment Variables
 
 | Variable               | Description                                   |
@@ -131,6 +148,7 @@ Validation failures return 400 and change nothing.
 | =ORG_AGENDA_FILES=     | Colon-separated list of org file paths        |
 | =ORG_INBOX_FILE=       | Path for new captures (default: /data/org/inbox.org) |
 | =ORG_MEMORY_FILE=      | Org file backing the /memory endpoints (disabled when unset) |
+| =ORG_NOTES_DIRS=       | Colon-separated directories served by /notes (default: synced repos; empty disables) |
 | =ORG_API_MAX_REQUESTS= | Max requests before worker restart            |
 | =ORG_API_MAX_LIFETIME= | Max seconds before worker restart             |
 

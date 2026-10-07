@@ -1,0 +1,17 @@
+:PROPERTIES:
+:ID:       hub-0001
+:END:
+#+title: Hub
+#+filetags: :index:
+
+Start at [[id:topic-0002][Topic]] or the [[file:plain.org][plain note]].
+
+* Section
+Loose text under a section.
+** Subtopic
+:PROPERTIES:
+:ID:       sub-0003
+:END:
+A zebra lives here; see [[id:topic-0002][Topic]].
+*** Detail
+Detail text.

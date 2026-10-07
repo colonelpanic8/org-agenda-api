@@ -432,6 +432,7 @@ def org_test_dir(tmp_path_factory):
         shutil.copy(fixture_file, test_dir / fixture_file.name)
     for fixture_file in fixtures_dir.glob("*.org_archive"):
         shutil.copy(fixture_file, test_dir / fixture_file.name)
+    shutil.copytree(fixtures_dir / "notes", test_dir / "notes")
 
     # Create a fixture with the fake "today" date for agenda tests
     today_org = test_dir / "today.org"

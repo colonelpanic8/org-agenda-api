@@ -1,0 +1,3 @@
+#+TITLE: Plain note
+
+A quokka note with no ID.

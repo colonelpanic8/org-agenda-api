@@ -43,6 +43,7 @@
 (require 'org-agenda-api-mutations)
 (require 'org-agenda-api-endpoints)
 (require 'org-agenda-api-memory)
+(require 'org-agenda-api-notes)
 
 ;; Optional modules - load if dependencies available
 (require 'org-agenda-api-categories nil t)
