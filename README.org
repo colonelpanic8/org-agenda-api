@@ -176,4 +176,4 @@ container = org-agenda-api.lib.${system}.mkContainer {
 
 ** License
 
-GPL v3
+MIT. See [[file:LICENSE][LICENSE]].
