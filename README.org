@@ -130,10 +130,17 @@ Paths starting with =.= and =node_modules= directories are skipped.
 | Endpoint             | Description                                                        |
 |----------------------+--------------------------------------------------------------------|
 | =GET /notes=         | List notes, most recently modified files first. With =q=, return notes containing every whitespace-separated term, title matches first, each with a =snippet=. =limit= caps results (searches default to 50) |
-| =GET /note?ref=<ref>= | The note's =content= as structured =blocks= and nested heading =children=, plus resolved outgoing =links= and =backlinks= (each with the linking line as =context=) |
+| =GET /notes/graph=   | Every listed note as a node (=id= is its ref) and the =links= between them: =link= edges for links and =parent= edges from a heading note to the note enclosing it |
+| =GET /note?ref=<ref>= | The note's =content= as structured =blocks= and nested heading =children=, resolved outgoing =links=, =backlinks= and =unlinked= references |
 
 Links in content carry the =ref= of the note they point to when it is indexed,
 whether written as =id:= links or as =file:= links to org files.
+
+Each backlink lists its =occurrences=, like the =*org-roam*= buffer: the outline
+path to the link (=olp=) and a =preview= of the heading, list item, paragraph or
+table holding it, rendered as blocks. Unlinked references are notes that
+mention the title (four or more characters, as a whole phrase) outside a link
+without linking to the note, each with the mentioning line as =context=.
 
 ** Environment Variables
 

@@ -86,6 +86,43 @@ class TestNotes:
         assert text_of(section["title"]) == "Section"
         assert section["children"][0]["ref"] == "id:sub-0003"
 
+    def test_backlinks_preview_each_occurrence_in_context(self, api):
+        hub = get_note(api, "id:hub-0001")
+        backlinks = {link["ref"]: link for link in hub["backlinks"]}
+        [occurrence] = backlinks["id:topic-0002"]["occurrences"]
+        assert occurrence["olp"] == []
+        [paragraph] = occurrence["preview"]
+        assert text_of(paragraph["content"]).startswith("Some bold and italic text")
+        [todo] = backlinks["id:todo-0004"]["occurrences"]
+        assert todo["olp"] == ["Fix thing"]
+
+        [item] = get_note(api, "id:topic-0002")["backlinks"][0]["occurrences"]
+        assert text_of(item["preview"][0]["content"]).startswith("Start at Topic")
+
+    def test_unlinked_references_skip_linking_notes(self, api):
+        unlinked = get_note(api, "id:topic-0002")["unlinked"]
+        assert [(u["ref"], u["context"]) for u in unlinked] == [
+            ("file:notes/plain.org", "It mentions Topic without linking.")
+        ]
+
+    def test_graph_has_link_and_parent_edges(self, api):
+        response = api.get("/notes/graph")
+        assert response.status_code == 200
+        graph = response.json()
+        ids = {node["id"] for node in graph["nodes"]}
+        assert {"id:hub-0001", "id:sub-0003", "file:notes/plain.org"} <= ids
+        assert "id:todo-0004" not in ids
+        edges = {(e["source"], e["target"], e["type"]) for e in graph["links"]}
+        assert {
+            ("id:hub-0001", "id:topic-0002", "link"),
+            ("id:hub-0001", "file:notes/plain.org", "link"),
+            ("id:topic-0002", "id:hub-0001", "link"),
+            ("id:sub-0003", "id:topic-0002", "link"),
+            ("id:sub-0003", "id:hub-0001", "parent"),
+        } <= edges
+        assert not any("todo-0004" in e[0] + e[1] for e in edges)
+        assert api.get("/notes/nope").status_code == 404
+
     def test_heading_note_renders_only_its_subtree(self, api):
         body = get_note(api, "id:sub-0003")
         assert body["note"]["olp"] == ["Section"]

@@ -7,8 +7,9 @@
 ;; Serves every org file under `org-agenda-api-notes-directories' for reading:
 ;;
 ;;   GET /notes?q=&limit=  list notes, or search them when q is given
-;;   GET /note?ref=        one note as structured blocks, with its links and
-;;                         backlinks
+;;   GET /notes/graph      every listed note and the links between them
+;;   GET /note?ref=        one note as structured blocks, with its links,
+;;                         backlinks and unlinked references
 ;;
 ;; A note is a whole file (ref "file:<path>") or a heading with an ID (ref
 ;; "id:<uuid>").  A file with a file-level ID is addressed by its ID, though
@@ -45,6 +46,9 @@ When nil those endpoints are disabled."
 (defconst org-agenda-api-notes-default-search-limit 50)
 (defconst org-agenda-api-notes-max-limit 10000)
 (defconst org-agenda-api-notes-context-length 200)
+(defconst org-agenda-api-notes-preview-max-length 2000)
+(defconst org-agenda-api-notes-max-previews 200)
+(defconst org-agenda-api-notes-max-unlinked 50)
 
 (define-error 'org-agenda-api-notes-error "org-agenda-api notes error")
 
@@ -60,7 +64,7 @@ When nil those endpoints are disabled."
 (cl-defstruct (org-agenda-api--note
                (:constructor org-agenda-api--note-create)
                (:copier nil))
-  ref id file title olp level todo tags links text)
+  ref id file title olp level todo tags parent links text)
 
 (defvar org-agenda-api--notes-files (make-hash-table :test 'equal)
   "Indexed files keyed by absolute path.")
@@ -132,13 +136,14 @@ Point should be at the end of a heading line.  Planning lines are skipped."
           (match-string-no-properties 1))))))
 
 (defun org-agenda-api--notes-segment-links (start end)
-  "Return the links between START and END as (KIND TARGET CONTEXT) lists.
+  "Return the links between START and END as (KIND TARGET CONTEXT POSITION) lists.
 KIND is `id' or `file'; file targets are absolute paths."
   (let (links)
     (save-excursion
       (goto-char start)
       (while (re-search-forward org-agenda-api--notes-link-regexp end t)
         (let* ((target (match-string-no-properties 1))
+               (position (match-beginning 0))
                (link
                 (cond
                  ((string-match "\\`id:\\([^:]+\\)" target)
@@ -154,7 +159,8 @@ KIND is `id' or `file'; file targets are absolute paths."
                                (line-beginning-position) (line-end-position)))))))
               (push (append link
                             (list (truncate-string-to-width
-                                   context org-agenda-api-notes-context-length nil nil "…")))
+                                   context org-agenda-api-notes-context-length nil nil "…")
+                                  position))
                     links))))))
     (nreverse links)))
 
@@ -206,7 +212,7 @@ The first note is always the file itself."
                            (org-agenda-api--note-create
                             :ref (concat "id:" id) :id id :file rel
                             :title (nth 0 parsed) :todo (nth 1 parsed) :tags (nth 2 parsed)
-                            :level level
+                            :level level :parent (org-agenda-api--note-ref owner)
                             :olp (reverse (mapcar (lambda (frame) (nth 1 frame)) stack))))))
               (when note (push note notes))
               (push (list level (nth 0 parsed) note) stack)
@@ -311,16 +317,25 @@ ATTRIBUTES are its `file-attributes'."
                   :files files :notes (nreverse notes)
                   :by-ref by-ref :by-path by-path :by-rel by-rel :backlinks backlinks)))
       (dolist (source (org-agenda-api--notes-index-notes index))
-        (let (targets)
-          (pcase-dolist (`(,kind ,target ,context) (org-agenda-api--note-links source))
-            (let ((ref (org-agenda-api--notes-link-ref index kind target)))
-              (when (and ref
-                         (not (equal ref (org-agenda-api--note-ref source)))
-                         (not (member ref targets)))
-                (push ref targets)
-                (puthash ref (cons (cons source context) (gethash ref backlinks)) backlinks))))))
+        (pcase-dolist (`(,ref . ,occurrences) (org-agenda-api--notes-outgoing index source))
+          (puthash ref (cons (cons source occurrences) (gethash ref backlinks)) backlinks)))
       (maphash (lambda (ref sources) (puthash ref (nreverse sources) backlinks)) backlinks)
       index)))
+
+(defun org-agenda-api--notes-outgoing (index source)
+  "Return SOURCE's links in INDEX as (REF . OCCURRENCES), one per target.
+Each occurrence is a (CONTEXT POSITION) list; links to SOURCE itself and to
+unindexed notes are dropped."
+  (let (groups)
+    (pcase-dolist (`(,kind ,target ,context ,position) (org-agenda-api--note-links source))
+      (let ((ref (org-agenda-api--notes-link-ref index kind target)))
+        (when (and ref (not (equal ref (org-agenda-api--note-ref source))))
+          (let ((group (assoc ref groups)))
+            (if group
+                (push (list context position) (cdr group))
+              (push (list ref (list context position)) groups))))))
+    (mapcar (lambda (group) (cons (car group) (reverse (cdr group))))
+            (nreverse groups))))
 
 (defun org-agenda-api--notes-link-ref (index kind target)
   "Return the ref of the indexed note a KIND link to TARGET points at, or nil."
@@ -611,51 +626,175 @@ With SOFT, single newlines in text are rendered as spaces."
                             (seq-filter (lambda (element) (eq (org-element-type element) 'headline))
                                         elements))))))
 
+(defmacro org-agenda-api--notes-with-org-file (file &rest body)
+  "Evaluate BODY in an `org-mode' buffer holding FILE, an indexed file entry.
+Links are resolved against the index bound to
+`org-agenda-api--notes-render-index'."
+  (declare (indent 1))
+  `(with-temp-buffer
+     (insert-file-contents (org-agenda-api--notes-file-path ,file))
+     (let ((org-inhibit-startup t)
+           (org-element-use-cache nil)
+           (org-agenda-api--notes-render-directory
+            (file-name-directory (org-agenda-api--notes-file-path ,file))))
+       (delay-mode-hooks (org-mode))
+       ,@body)))
+
 (defun org-agenda-api--notes-render (index note)
   "Return the content of NOTE in INDEX as an alist with blocks and children."
-  (let ((file (org-agenda-api--notes-file-of index note))
-        (id (org-agenda-api--note-id note)))
-    (with-temp-buffer
-      (insert-file-contents (org-agenda-api--notes-file-path file))
-      (let ((org-inhibit-startup t)
-            (org-element-use-cache nil))
-        (delay-mode-hooks (org-mode))
-        (when (and id (> (org-agenda-api--note-level note) 0))
-          (goto-char (point-min))
-          (unless (re-search-forward
-                   (format "^[ \t]*:ID:[ \t]+%s[ \t]*$" (regexp-quote id)) nil t)
-            (org-agenda-api--notes-fail 404 "not_found" "The note changed on disk; try again"))
-          (org-back-to-heading t)
-          (narrow-to-region (point) (save-excursion (org-end-of-subtree t t) (point))))
-        (let* ((org-agenda-api--notes-render-index index)
-               (org-agenda-api--notes-render-directory
-                (file-name-directory (org-agenda-api--notes-file-path file)))
-               (data (org-element-contents (org-element-parse-buffer 'object))))
-          (if (> (org-agenda-api--note-level note) 0)
-              (org-agenda-api--notes-content (org-element-contents (car data)))
-            (org-agenda-api--notes-content data)))))))
+  (let ((id (org-agenda-api--note-id note)))
+    (org-agenda-api--notes-with-org-file (org-agenda-api--notes-file-of index note)
+      (when (and id (> (org-agenda-api--note-level note) 0))
+        (goto-char (point-min))
+        (unless (re-search-forward
+                 (format "^[ \t]*:ID:[ \t]+%s[ \t]*$" (regexp-quote id)) nil t)
+          (org-agenda-api--notes-fail 404 "not_found" "The note changed on disk; try again"))
+        (org-back-to-heading t)
+        (narrow-to-region (point) (save-excursion (org-end-of-subtree t t) (point))))
+      (let ((data (org-element-contents (org-element-parse-buffer 'object))))
+        (if (> (org-agenda-api--note-level note) 0)
+            (org-agenda-api--notes-content (org-element-contents (car data)))
+          (org-agenda-api--notes-content data))))))
+
+(defun org-agenda-api--notes-parse-blocks (text)
+  "Return org TEXT parsed and rendered as a vector of blocks."
+  (with-temp-buffer
+    (insert text)
+    (let ((org-inhibit-startup t)
+          (org-element-use-cache nil))
+      (delay-mode-hooks (org-mode))
+      (org-agenda-api--notes-blocks (org-element-contents (org-element-parse-buffer 'object))))))
+
+(defun org-agenda-api--notes-preview-at (position)
+  "Return the outline path and preview blocks of the element at POSITION.
+The preview is the heading, list item, paragraph or table holding POSITION,
+or just its line when that element is long."
+  (goto-char (min position (point-max)))
+  (let* ((at-heading (org-at-heading-p))
+         (olp (condition-case nil
+                  (mapcar #'org-agenda-api--notes-strip-links
+                          (org-get-outline-path (not at-heading)))
+                (error nil)))
+         (item (and (not at-heading) (org-in-item-p)))
+         (element (and (not at-heading) (not item) (org-element-at-point)))
+         (region
+          (cond
+           (at-heading nil)
+           (item (save-excursion
+                   (goto-char item)
+                   (cons item (org-list-get-item-end item (org-list-struct)))))
+           ((memq (org-element-type element) '(paragraph table quote-block verse-block))
+            (cons (org-element-property :contents-begin element)
+                  (org-element-property :contents-end element)))))
+         (text (cond
+                (at-heading (org-get-heading t t t t))
+                ((and region (car region) (cdr region)
+                      (<= (- (cdr region) (car region)) org-agenda-api-notes-preview-max-length))
+                 (buffer-substring-no-properties (car region) (cdr region)))
+                (t (buffer-substring-no-properties
+                    (line-beginning-position) (line-end-position))))))
+    `(("olp" . ,(vconcat olp))
+      ("preview" . ,(org-agenda-api--notes-parse-blocks (string-trim text))))))
+
+(defun org-agenda-api--notes-backlinks (index note)
+  "Return NOTE's backlinks in INDEX, each with a preview of every occurrence."
+  (let ((budget org-agenda-api-notes-max-previews))
+    (mapcar
+     (pcase-lambda (`(,source . ,occurrences))
+       (append
+        (org-agenda-api--notes-summary index source)
+        `(("context" . ,(caar occurrences))
+          ("occurrences"
+           . ,(vconcat
+               (org-agenda-api--notes-with-org-file (org-agenda-api--notes-file-of index source)
+                 (mapcar (pcase-lambda (`(,context ,position))
+                           (if (<= budget 0)
+                               `(("olp" . [])
+                                 ("preview" . ,(org-agenda-api--notes-parse-blocks context)))
+                             (cl-decf budget)
+                             (org-agenda-api--notes-preview-at position)))
+                         occurrences)))))))
+     (gethash (org-agenda-api--note-ref note) (org-agenda-api--notes-index-backlinks index)))))
+
+(defun org-agenda-api--notes-mention-regexp (title)
+  "Return a regexp matching TITLE as a whole phrase, or nil if it is too short."
+  (when (>= (length title) 4)
+    (concat "\\(?:\\`\\|[^[:alnum:]]\\)" (regexp-quote title) "\\(?:[^[:alnum:]]\\|\\'\\)")))
+
+(defun org-agenda-api--notes-unlinked (index note)
+  "Return notes in INDEX that mention NOTE's title without linking to it.
+Each is (SOURCE . CONTEXT), CONTEXT being the first line with a mention."
+  (let ((regexp (org-agenda-api--notes-mention-regexp (org-agenda-api--note-title note)))
+        (linked (mapcar #'car (gethash (org-agenda-api--note-ref note)
+                                       (org-agenda-api--notes-index-backlinks index))))
+        (case-fold-search t)
+        results)
+    (when regexp
+      (catch 'full
+        (dolist (other (org-agenda-api--notes-index-notes index))
+          (unless (or (eq other note)
+                      (org-agenda-api--note-todo other)
+                      (memq other linked)
+                      (not (string-match-p regexp (org-agenda-api--note-text other))))
+            (let ((line (seq-find
+                         (lambda (line)
+                           (and (not (string-match-p "\\`[ \t]*\\(?:#\\+\\|:\\|\\*+[ \t]\\)" line))
+                                (string-match-p regexp (replace-regexp-in-string
+                                                        org-agenda-api--notes-link-regexp " " line))))
+                         (split-string (org-agenda-api--note-text other) "\n"))))
+              (when line
+                (push (cons other (truncate-string-to-width
+                                   (string-trim (org-agenda-api--notes-strip-links line))
+                                   org-agenda-api-notes-context-length nil nil "…"))
+                      results)
+                (when (>= (length results) org-agenda-api-notes-max-unlinked)
+                  (throw 'full nil))))))))
+    (nreverse results)))
 
 (defun org-agenda-api--notes-get (ref)
   "Return the full response for the note with REF."
   (let* ((index (org-agenda-api--notes-index))
+         (org-agenda-api--notes-render-index index)
          (note (org-agenda-api--notes-lookup index ref))
-         (summary (lambda (other &optional context)
-                    (append (org-agenda-api--notes-summary index other)
-                            (when context `(("context" . ,context))))))
-         (outgoing nil))
-    (pcase-dolist (`(,kind ,target ,_) (org-agenda-api--note-links note))
-      (let ((target-ref (org-agenda-api--notes-link-ref index kind target)))
-        (when (and target-ref (not (member target-ref outgoing))
-                   (not (equal target-ref (org-agenda-api--note-ref note))))
-          (push target-ref outgoing))))
-    `(("note" . ,(funcall summary note))
+         (by-ref (org-agenda-api--notes-index-by-ref index)))
+    `(("note" . ,(org-agenda-api--notes-summary index note))
       ("content" . ,(org-agenda-api--notes-render index note))
-      ("links" . ,(vconcat (mapcar (lambda (target-ref)
-                                     (funcall summary (gethash target-ref (org-agenda-api--notes-index-by-ref index))))
-                                   (nreverse outgoing))))
-      ("backlinks" . ,(vconcat (mapcar (lambda (backlink) (funcall summary (car backlink) (cdr backlink)))
-                                       (gethash (org-agenda-api--note-ref note)
-                                                (org-agenda-api--notes-index-backlinks index))))))))
+      ("links" . ,(vconcat (mapcar (lambda (group)
+                                     (org-agenda-api--notes-summary index (gethash (car group) by-ref)))
+                                   (org-agenda-api--notes-outgoing index note))))
+      ("backlinks" . ,(vconcat (org-agenda-api--notes-backlinks index note)))
+      ("unlinked" . ,(vconcat (mapcar (lambda (mention)
+                                        (append (org-agenda-api--notes-summary index (car mention))
+                                                `(("context" . ,(cdr mention)))))
+                                      (org-agenda-api--notes-unlinked index note)))))))
+
+(defun org-agenda-api--notes-graph ()
+  "Return every listed note as a graph node, with link and parent edges.
+Parent edges join a heading note to the note that encloses it."
+  (let* ((index (org-agenda-api--notes-index))
+         (nodes (seq-remove #'org-agenda-api--note-todo (org-agenda-api--notes-index-notes index)))
+         (included (make-hash-table :test 'equal))
+         edges)
+    (dolist (node nodes)
+      (puthash (org-agenda-api--note-ref node) t included))
+    (dolist (node nodes)
+      (let ((ref (org-agenda-api--note-ref node))
+            (parent (org-agenda-api--note-parent node)))
+        (dolist (group (org-agenda-api--notes-outgoing index node))
+          (when (gethash (car group) included)
+            (push `(("source" . ,ref) ("target" . ,(car group)) ("type" . "link")) edges)))
+        (when (and parent (gethash parent included))
+          (push `(("source" . ,ref) ("target" . ,parent) ("type" . "parent")) edges))))
+    `(("nodes" . ,(vconcat
+                   (mapcar (lambda (node)
+                             `(("id" . ,(org-agenda-api--note-ref node))
+                               ("title" . ,(org-agenda-api--note-title node))
+                               ("file" . ,(org-agenda-api--note-file node))
+                               ("olp" . ,(vconcat (org-agenda-api--note-olp node)))
+                               ("level" . ,(org-agenda-api--note-level node))
+                               ("tags" . ,(vconcat (org-agenda-api--note-tags node)))))
+                           nodes)))
+      ("links" . ,(vconcat (nreverse edges))))))
 
 ;;; Endpoints
 
@@ -690,13 +829,18 @@ With SOFT, single newlines in text are rendered as spaces."
         (httpd-send-header t "application/json; charset=utf-8" 500)))
      (org-agenda-api--track-request)))
 
-(defservlet notes application/json (_path query)
-  "Endpoint: list or search notes; see `org-agenda-api-notes-directories'."
+(defservlet notes application/json (path query)
+  "Endpoint: list or search notes, or return the note graph.
+See `org-agenda-api-notes-directories'."
   (org-agenda-api--notes-respond "/notes"
-    (org-agenda-api--notes-list (cadr (assoc "q" query)) (org-agenda-api--notes-limit query))))
+    (pcase (split-string path "/" t)
+      ('("notes") (org-agenda-api--notes-list (cadr (assoc "q" query))
+                                              (org-agenda-api--notes-limit query)))
+      ('("notes" "graph") (org-agenda-api--notes-graph))
+      (_ (org-agenda-api--notes-fail 404 "not_found" "Unknown notes endpoint")))))
 
 (defservlet note application/json (_path query)
-  "Endpoint: one note's content, links and backlinks by ref."
+  "Endpoint: one note's content, links, backlinks and unlinked references."
   (org-agenda-api--notes-respond "/note"
     (let ((ref (cadr (assoc "ref" query))))
       (unless ref
