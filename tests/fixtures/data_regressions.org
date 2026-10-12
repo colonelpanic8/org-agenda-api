@@ -1,0 +1,29 @@
+#+TITLE: Entry extraction regressions
+#+TODO: TODO(t) DONE(d)
+
+* TODO Parent with its own appointment
+  :PROPERTIES:
+  :ID: review-data-parent
+  :END:
+  <2024-06-18 Tue 09:00>
+** DONE Child with completion and appointment
+   CLOSED: [2024-06-15 Sat 10:30]
+   :PROPERTIES:
+   :ID: review-data-child
+   :END:
+   :LOGBOOK:
+   - State "DONE" from "TODO" [2024-06-15 Sat 10:30]
+   :END:
+   <2024-06-19 Wed 11:00>
+
+* DONE Completion without a LOGBOOK
+  CLOSED: [2024-06-15 Sat 14:45]
+  :PROPERTIES:
+  :ID: review-data-closed
+  :END:
+
+* TODO Hourly repeater
+  SCHEDULED: <2024-06-15 Sat 09:00 +1h>
+  :PROPERTIES:
+  :ID: review-data-hourly
+  :END:

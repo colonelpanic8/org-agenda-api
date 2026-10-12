@@ -124,6 +124,24 @@ class TestCategoryTasksEndpoint:
         response = api.get("/category-tasks")
         assert response.status_code == 200
 
+    def test_tasks_exclude_category_and_notes_headings(
+        self, api, org_dir, has_projects_strategy
+    ):
+        if not has_projects_strategy:
+            pytest.skip("org-category-capture not available in test environment")
+        projects = org_dir / "projects.org"
+        content = projects.read_text()
+        projects.write_text(
+            content.replace("* Project Beta", "** Notes\n\n* Project Beta")
+        )
+        assert api.reload().status_code == 200
+        data = api.get("/category-tasks?type=projects&category=Project%20Alpha").json()
+        assert data["tasks"]
+        assert all(task["todo"] for task in data["tasks"])
+        assert {task["title"] for task in data["tasks"]}.isdisjoint(
+            {"Project Alpha", "Notes"}
+        )
+
     def test_missing_type_returns_error(self, api):
         """Missing type parameter returns error."""
         response = api.get("/category-tasks")

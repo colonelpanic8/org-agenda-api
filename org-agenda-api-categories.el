@@ -126,7 +126,8 @@ Uses occ-map-entries-for-category to traverse entries."
                                    (effort (org-agenda-api--get-entry-effort))
                                    (all-properties (org-agenda-api--get-all-entry-properties))
                                    (timestamps (org-agenda-api--get-entry-timestamps)))
-                              `(("todo" . ,todo)
+                              (when todo
+                                `(("todo" . ,todo)
                                 ("title" . ,title)
                                 ("tags" . ,(if tags (vconcat tags) nil))
                                 ("level" . ,level)
@@ -145,14 +146,14 @@ Uses occ-map-entries-for-category to traverse entries."
                                 ("olpath" . ,(if olpath (vconcat olpath) nil))
                                 ("priority" . ,priority)
                                 ("effort" . ,effort)
-                                ("properties" . ,all-properties))))
+                                ("properties" . ,all-properties)))))
                           :get-category-from-element
                           (if (fboundp 'org-project-capture-get-category-from-heading)
                               'org-project-capture-get-category-from-heading
                             'org-get-heading))
                        (error nil))))
                 (when category-tasks
-                  (setq tasks (nconc tasks category-tasks))))))))
+                  (setq tasks (nconc tasks (delq nil category-tasks)))))))))
       tasks)))
 
 ;;; Category Capture Functions

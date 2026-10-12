@@ -324,15 +324,15 @@ Uses patterns similar to `org-habit-parse-todo' for robust parsing."
                               (stringp org-log-into-drawer))
                          org-log-into-drawer)
                         (t "LOGBOOK")))
-          (end-of-subtree (save-excursion (org-end-of-subtree t) (point)))
+          (entry-end (org-entry-end-position))
           ;; Use org's built-in inactive timestamp regex for robust matching
           (ts-re org-ts-regexp-inactive))
       ;; Find the LOGBOOK drawer
       (when (re-search-forward
              (format "^[ \t]*:%s:[ \t]*$" (regexp-quote drawer-name))
-             end-of-subtree t)
+             entry-end t)
         (let ((drawer-end (save-excursion
-                           (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t))))
+                           (re-search-forward "^[ \t]*:END:[ \t]*$" entry-end t))))
           (when drawer-end
             ;; Parse entries within the drawer
             (while (re-search-forward "^[ \t]*\\(?:- \\|CLOCK:\\)" drawer-end t)
@@ -436,7 +436,7 @@ Returns alist with start, end (if range), hasTime, type, and raw fields."
 Returns a list of timestamp alists, excluding SCHEDULED/DEADLINE/CLOSED.
 Each alist has: start, end (if range), hasTime, type, raw."
   (save-excursion
-    (let ((entry-end (save-excursion (org-end-of-subtree t t)))
+    (let ((entry-end (org-entry-end-position))
           (timestamps nil))
       ;; Move past the headline
       (forward-line 1)
@@ -646,12 +646,8 @@ Returns ISO format timestamp string or nil."
     (when (looking-at org-planning-line-re)
       (let ((line (buffer-substring-no-properties (point) (line-end-position))))
         ;; Look for CLOSED: [timestamp]
-        (when (string-match "CLOSED: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)[^]]*\\( [0-9]\\{2\\}:[0-9]\\{2\\}\\)?\\]" line)
-          (let ((date-part (match-string 1 line))
-                (time-part (match-string 2 line)))
-            (if time-part
-                (format "%sT%s:00" date-part (string-trim time-part))
-              date-part)))))))
+        (when (string-match "CLOSED: \\[\\([^]]+\\)\\]" line)
+          (org-agenda-api--parse-inactive-timestamp (match-string 1 line)))))))
 
 (defun org-agenda-api--extract-completed-timestamp-from-agenda-line (agenda-line)
   "Extract completion timestamp from AGENDA-LINE when it logs a done state change.
@@ -1287,11 +1283,12 @@ Returns nil if KEY is not found or OBJ is nil."
 
 (defun org-agenda-api--unit-to-letter (unit)
   "Convert UNIT to single letter for org repeater format.
-Accepts both full names (day, week, month, year) and single letters (d, w, m, y).
+Accepts both full names (hour, day, week, month, year) and single letters.
 Returns the single letter, or nil if UNIT is not recognized."
   (when unit
     (let ((unit-str (downcase (if (stringp unit) unit (format "%s" unit)))))
       (pcase unit-str
+        ("h" "h") ("hour" "h")
         ("d" "d") ("day" "d")
         ("w" "w") ("week" "w")
         ("m" "m") ("month" "m")
@@ -1368,7 +1365,7 @@ Example: <2026-01-25 Sat 10:00 +1w> -> ((date . \"2026-01-25\") (time . \"10:00\
       (when (string-match "\\([0-9]\\{2\\}:[0-9]\\{2\\}\\)" ts-string)
         (push (cons "time" (match-string 1 ts-string)) result))
       ;; Extract repeater if present (+1w, ++2d, .+1m)
-      (when (string-match "\\(\\.?\\+\\+?\\)\\([0-9]+\\)\\([dwmy]\\)" ts-string)
+      (when (string-match "\\(\\.?\\+\\+?\\)\\([0-9]+\\)\\([hdwmy]\\)" ts-string)
         (let ((type (match-string 1 ts-string))
               (value (string-to-number (match-string 2 ts-string)))
               (unit (match-string 3 ts-string)))
@@ -1405,7 +1402,9 @@ and vector keyword sets are accepted."
            (t
             (let ((clean-keyword (org-agenda-api--clean-todo-keyword keyword)))
               (when (and clean-keyword (not (string-empty-p clean-keyword)))
-                (if in-done-section
+                (if (or in-done-section
+                        (and (not (member "|" keywords))
+                             (eq keyword (car (last keywords)))))
                     (push clean-keyword done-states)
                   (push clean-keyword active-states)))))))))
     `(("active" . ,(vconcat (nreverse active-states)))
