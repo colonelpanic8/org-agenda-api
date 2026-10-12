@@ -29,7 +29,9 @@ important difference between an omitted `org_update` field and an explicit JSON
 
 Agenda responses are reduced to the documented fields. The HTTP API returns a
 flat `entries` array for a day and a date-keyed `days` object for a week; the
-adapter flattens the latter to the MCP tool's single `entries` array. Scheduled
+adapter flattens the latter to the MCP tool's single `entries` array, retaining
+each day key as the entry's `date`. Agenda dates are calendar-validated before
+making an HTTP request. Scheduled
 and deadline arguments use compact ISO strings (`YYYY-MM-DD` or
 `YYYY-MM-DDTHH:MM`) and are translated to the HTTP API's timestamp objects.
 

@@ -85,7 +85,8 @@ def test_week_agenda_is_flattened(fake_api) -> None:
             "endDate": "2026-08-23",
             "days": {
                 "2026-08-17": [],
-                "2026-08-18": [{"todo": "TODO", "title": "Tuesday task", "tags": []}],
+                "2026-08-18": [{"todo": "TODO", "title": "Repeat habit", "tags": []}],
+                "2026-08-21": [{"todo": "TODO", "title": "Repeat habit", "tags": []}],
             },
         }
     )
@@ -93,7 +94,27 @@ def test_week_agenda_is_flattened(fake_api) -> None:
     result = client(fake_api).agenda(span="week", date="2026-08-17")
 
     assert result["date"] == "2026-08-17"
-    assert [entry["title"] for entry in result["entries"]] == ["Tuesday task"]
+    assert [entry["title"] for entry in result["entries"]] == [
+        "Repeat habit",
+        "Repeat habit",
+    ]
+    assert [entry["date"] for entry in result["entries"]] == [
+        "2026-08-18",
+        "2026-08-21",
+    ]
+
+
+@pytest.mark.parametrize("date", ["2026-02-30", "2025-02-29", "2026-13-01"])
+def test_invalid_agenda_dates_are_rejected_before_http(fake_api, date: str) -> None:
+    with pytest.raises(OrgAgendaAPIError, match="invalid calendar date"):
+        client(fake_api).agenda(date=date)
+    assert fake_api.requests.empty()
+
+
+def test_leap_day_agenda_date_is_valid(fake_api) -> None:
+    fake_api.enqueue({"date": "2028-02-29", "span": "day", "entries": []})
+    assert client(fake_api).agenda(date="2028-02-29")["date"] == "2028-02-29"
+    assert "date=2028-02-29" in fake_api.next_request().path
 
 
 def test_capture_uses_gtd_template_and_omits_unset_values(fake_api) -> None:
@@ -205,6 +226,23 @@ def test_api_errors_become_safe_tool_messages(fake_api, status: int) -> None:
     assert "test-secret" not in str(raised.value)
     if status == 500:
         assert "HTTP 500" in str(raised.value)
+
+
+@pytest.mark.parametrize("status", [200, 500])
+def test_encoded_credentials_are_redacted_from_errors(fake_api, status: int) -> None:
+    encoded = base64.b64encode(b"test-user:test-secret").decode()
+    fake_api.enqueue(
+        {
+            "status": "error",
+            "message": f"Authorization: Basic {encoded}; token={encoded}",
+        },
+        status=status,
+    )
+    with pytest.raises(OrgAgendaAPIError) as raised:
+        client(fake_api).agenda()
+    assert encoded not in str(raised.value)
+    assert "test-secret" not in str(raised.value)
+    assert "[REDACTED]" in str(raised.value)
 
 
 def test_redirect_is_a_non_success_without_forwarding_auth(fake_api) -> None:

@@ -9,6 +9,7 @@ import socket
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import date as calendar_date
 from datetime import datetime
 from typing import Any
 
@@ -53,6 +54,10 @@ class OrgAgendaClient:
     ) -> dict[str, Any]:
         query: dict[str, str] = {"span": span}
         if date is not None:
+            try:
+                calendar_date.fromisoformat(date)
+            except ValueError:
+                raise OrgAgendaAPIError(f"invalid calendar date: {date}") from None
             query["date"] = date
         if include_overdue is not None:
             query["include_overdue"] = str(include_overdue).lower()
@@ -60,12 +65,16 @@ class OrgAgendaClient:
         response = self._request("GET", "/agenda", query=query)
         entries = response.get("entries")
         if entries is None and isinstance(response.get("days"), dict):
-            entries = [
-                entry
-                for day_entries in response["days"].values()
-                if isinstance(day_entries, list)
-                for entry in day_entries
-            ]
+            entries = []
+            for day, day_entries in response["days"].items():
+                if not isinstance(day_entries, list):
+                    raise OrgAgendaAPIError(
+                        "org-agenda-api returned invalid agenda days"
+                    )
+                for entry in day_entries:
+                    entries.append({**self._condense_agenda_entry(entry), "date": day})
+        elif isinstance(entries, list):
+            entries = [self._condense_agenda_entry(entry) for entry in entries]
         if not isinstance(entries, list):
             raise OrgAgendaAPIError("org-agenda-api returned no agenda entries")
 
@@ -73,7 +82,7 @@ class OrgAgendaClient:
         return {
             "date": response_date,
             "span": response.get("span", span),
-            "entries": [self._condense_agenda_entry(entry) for entry in entries],
+            "entries": entries,
         }
 
     def capture(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -194,7 +203,13 @@ class OrgAgendaClient:
         return None
 
     def _redact(self, message: str) -> str:
-        return message.replace(self.config.password, "[REDACTED]")
+        for secret in (
+            self._authorization,
+            self._authorization.removeprefix("Basic "),
+            self.config.password,
+        ):
+            message = message.replace(secret, "[REDACTED]")
+        return message
 
     @staticmethod
     def _timestamp(value: str) -> dict[str, str]:

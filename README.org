@@ -88,7 +88,9 @@ The sidecar accepts these environment variables:
 | =ORG_AGENDA_MCP_PORT=                 | Streamable HTTP port (container default: =2026=) |
 
 Scheduled and deadline tool arguments use =YYYY-MM-DD= or
-=YYYY-MM-DDTHH:MM=. In =org_update=, an explicit =null= clears a field, while
+=YYYY-MM-DDTHH:MM=; agenda dates must be valid =YYYY-MM-DD= calendar dates.
+Flattened week entries include a =date= field identifying their occurrence day.
+In =org_update=, an explicit =null= clears a field, while
 an omitted field is left unchanged. There is deliberately no delete tool.
 =org_capture= always selects =capture-g=, so the target API deployment must
 register that template in =org-agenda-api-capture-templates=; the fallback
