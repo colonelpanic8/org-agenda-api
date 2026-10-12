@@ -29,6 +29,20 @@ class TestProspectiveHabitFields:
         ]
         assert sorted(required_dates) == [f"2024-07-{day}" for day in range(15, 22)]
 
+    def test_prospective_summary_uses_reference_date(self, api):
+        data = api.get_agenda(span="week", date="2024-07-15", today=TEST_DATE).json()
+        entry = next(
+            entry
+            for entry in data["days"]["2024-07-15"]
+            if entry.get("id") == "habit-required-daily"
+        )
+        summary = entry["habitSummary"]
+        assert summary["nextRequiredInterval"] == TEST_DATE
+        assert summary["completionNeededToday"] is True
+        assert summary["windowSpecsStatus"][0]["windowStart"] == (
+            f"{TEST_DATE}T00:00:00"
+        )
+
     def test_projection_bounds_excessive_future_distance(self, api):
         response = api.get_agenda(span="week", date="2026-07-15", today=TEST_DATE)
         assert response.status_code == 200

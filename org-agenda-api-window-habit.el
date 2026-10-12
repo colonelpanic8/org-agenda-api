@@ -131,9 +131,9 @@ Returns an alist suitable for JSON encoding, or nil if not a window-habit."
                             (org-agenda-api--active-window-habit-instance
                              reference-time))))
             (when habit
-              (let* ((next-required (org-window-habit-get-next-required-interval habit))
+              (let* ((next-required (org-window-habit-get-next-required-interval habit reference-time))
                  ;; Get per-window-spec conforming data using new function
-                 (specs-status (org-window-habit-get-window-specs-status habit))
+                 (specs-status (org-window-habit-get-window-specs-status habit reference-time))
                  (window-specs-status (cdr (assoc "windowSpecsStatus" specs-status)))
                  (aggregated-ratio (cdr (assoc "aggregatedConformingRatio" specs-status)))
                  ;; Format each window spec status for JSON
@@ -142,15 +142,17 @@ Returns an alist suitable for JSON encoding, or nil if not a window-habit."
                                            window-specs-status)))
                  ;; Get first spec's window for completion-needed-today check
                  (first-spec (car (oref habit window-specs)))
-                 (iterator (org-window-habit-iterator-from-time first-spec))
+                 (iterator (org-window-habit-iterator-from-time first-spec reference-time))
                  (window (oref iterator window))
                  (completion-needed-today
-                  (org-window-habit-time-falls-in-assessment-interval window next-required)))
+                  (and next-required
+                       (org-window-habit-time-falls-in-assessment-interval window next-required))))
               `(("conformingRatio" . ,aggregated-ratio)  ; backwards compatibility
                 ("aggregatedConformingRatio" . ,aggregated-ratio)
                 ("windowSpecsStatus" . ,formatted-specs)
                 ("completionNeededToday" . ,(if completion-needed-today t :json-false))
-                ("nextRequiredInterval" . ,(format-time-string "%Y-%m-%d" next-required))))))
+                ("nextRequiredInterval" . ,(when next-required
+                                             (format-time-string "%Y-%m-%d" next-required)))))))
         (error
          (org-agenda-api--log 'warn "Failed to get habit summary: %s" (error-message-string err))
          nil))))
@@ -170,6 +172,7 @@ Returns a list of alists suitable for JSON encoding."
            (assessment-decrement (org-window-habit-negate-plist assessment-interval))
            (start-time (oref habit start-time))
            (max-reps (oref habit max-repetitions-per-interval))
+           (next-required (org-window-habit-get-next-required-interval habit now))
            (result nil))
       ;; Calculate start point by going back `preceding` intervals
       (let* ((target-start (org-window-habit-normalize-time-to-duration now assessment-interval)))
@@ -203,9 +206,9 @@ Returns a list of alists suitable for JSON encoding."
                    (no-completion-val (nth 2 assess-data))
                    (with-completion-val (nth 3 assess-data))
                    (completion-count (nth 4 assess-data))
-                   (next-required (org-window-habit-get-next-required-interval habit))
-                   (completion-expected (org-window-habit-time-falls-in-assessment-interval
-                                         window next-required)))
+                   (completion-expected (and next-required
+                                             (org-window-habit-time-falls-in-assessment-interval
+                                              window next-required))))
               (push `(("date" . ,(format-time-string "%Y-%m-%d" assessment-start))
                       ("assessmentStart" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" assessment-start))
                       ("assessmentEnd" . ,(format-time-string "%Y-%m-%dT%H:%M:%S" assessment-end))
@@ -460,7 +463,7 @@ REFERENCE-TIME is used for calculations."
                (effective-category (org-get-category))
                (effort (org-agenda-api--get-entry-effort))
                (all-properties (org-agenda-api--get-all-entry-properties))
-               (habit-summary (org-agenda-api--get-habit-summary))
+               (habit-summary (org-agenda-api--get-habit-summary reference-time habit))
                ;; Check if completed on this date
                (completed-on-date (org-agenda-api--habit-completed-on-date-p date-str)))
           `(("title" . ,title)

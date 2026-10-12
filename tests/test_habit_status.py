@@ -1,5 +1,7 @@
 """Tests for /habit-status endpoint."""
 
+import pytest
+
 
 class TestHabitStatus:
     """Tests for the /habit-status endpoint."""
@@ -101,6 +103,20 @@ class TestHabitStatus:
 
 class TestWindowSpecsStatus:
     """Tests for per-window-spec conforming data in habit status."""
+
+    @pytest.mark.parametrize("date", ["2024-06-15", "2024-06-16"])
+    def test_summary_and_graph_assess_the_reference_date(self, api, date):
+        data = api.get_habit_status("habit-required-daily", date=date).json()
+        assert data["status"] == "ok"
+        state = data["currentState"]
+        assert state["nextRequiredInterval"] == date
+        assert state["completionNeededToday"] is True
+        assert state["aggregatedConformingRatio"] == 0
+        window = state["windowSpecsStatus"][0]
+        assert window["windowStart"] == f"{date}T00:00:00"
+        assert window["windowEnd"] == (f"2024-06-{int(date[-2:]) + 1}T00:00:00")
+        present = next(entry for entry in data["graph"] if entry["date"] == date)
+        assert present["completionExpectedToday"] is True
 
     def test_current_state_has_window_specs_status(self, api):
         """Current state should contain windowSpecsStatus array."""
