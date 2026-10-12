@@ -1,0 +1,13 @@
+#+TITLE: Agenda occurrence regressions
+
+* TODO Multi-day scheduled task
+  SCHEDULED: <2024-06-10 Mon>--<2024-06-20 Thu>
+  :PROPERTIES:
+  :ID: regression-agenda-range
+  :END:
+
+* TODO Upcoming deadline warning
+  DEADLINE: <2024-06-17 Mon -3d>
+  :PROPERTIES:
+  :ID: regression-agenda-warning
+  :END:

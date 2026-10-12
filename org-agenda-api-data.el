@@ -812,6 +812,27 @@ QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completio
               ,@(when habit-completed-on-query-date
                   `(("habitCompletedOnQueryDate" . t)))))))))))
 
+(defun org-agenda-api--agenda-row-on-date-p (line query-date)
+  "Return non-nil if agenda LINE occurs on QUERY-DATE."
+  (let ((date (get-text-property 0 'date line)))
+    (when date
+      (let ((day (if (integerp date)
+                     date
+                   (calendar-absolute-from-gregorian date))))
+        (= day (org-time-string-to-absolute query-date))))))
+
+(defun org-agenda-api--agenda-row-relevant-p
+    (entry line query-date include-overdue include-completed)
+  "Return non-nil if ENTRY from agenda LINE belongs in the response."
+  (and (or (not include-completed)
+           (cdr (assoc "scheduled" entry))
+           (cdr (assoc "deadline" entry))
+           (equal (org-agenda-api--extract-date
+                   (cdr (assoc "completedAt" entry))) query-date)
+           (cdr (assoc "habitCompletedOnQueryDate" entry)))
+       (or include-overdue
+           (org-agenda-api--agenda-row-on-date-p line query-date))))
+
 (defun org-agenda-api--run-agenda (span &optional start-date include-overdue include-completed)
   "Run org-agenda and return entries as a list of JSON-encodable alists.
 SPAN should be `day' or `week'.
@@ -820,6 +841,7 @@ INCLUDE-OVERDUE when non-nil includes overdue items from previous days.
 INCLUDE-COMPLETED when non-nil includes items completed on the query date."
   (let* ((org-agenda-span span)
          (org-agenda-use-time-grid t)
+         (org-agenda-prefer-last-repeat t)
          (org-agenda-start-on-weekday nil)
          (org-agenda-window-setup 'current-window)
          ;; Parse date string to calendar date format (month day year) if provided,
@@ -895,7 +917,10 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
                     (org-agenda-api--log 'debug "run-agenda: Found marker, extracting data")
                     (let ((entry-data (org-agenda-api--extract-entry-data marker line start-date)))
                       (org-agenda-api--log 'debug "run-agenda: entry-data=%S" entry-data)
-                      (when entry-data
+                      (when (and entry-data
+                                 (org-agenda-api--agenda-row-relevant-p
+                                  entry-data line start-date
+                                  include-overdue include-completed))
                         (push entry-data entries)))))
                 (forward-line 1)))
             (kill-buffer "*Org Agenda*")))
@@ -907,122 +932,64 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
               org-agenda-start-with-log-mode orig-org-agenda-start-with-log-mode
               org-agenda-log-mode-items orig-org-agenda-log-mode-items)))
     (org-agenda-api--log 'debug "run-agenda: Total entries found: %d" (length entries))
-    (let ((all-entries (nreverse entries)))
-      ;; Filter entries based on their scheduled date
-      ;; When include-overdue is true: keep items scheduled for query date OR earlier (overdue)
-      ;; When include-overdue is false: keep only items scheduled for query date exactly
-      ;;
-      ;; IMPORTANT: Use org-agenda-api--extract-date to compare only the date portion.
-      ;; Without this, "2026-01-19T10:00:00" > "2026-01-19" due to string comparison of "T" vs end.
-      (let ((filtered-entries
-             (if include-overdue
-                 ;; Include overdue: keep items where scheduled date <= start-date
-                 (cl-remove-if-not
-                  (lambda (entry)
-                    (let ((scheduled-date (org-agenda-api--extract-date
-                                           (cdr (assoc "scheduled" entry))))
-                          (deadline-date (org-agenda-api--extract-date
-                                          (cdr (assoc "deadline" entry))))
-                          (completed-at-date (org-agenda-api--extract-date
-                                              (cdr (assoc "completedAt" entry))))
-                          (habit-completed (cdr (assoc "habitCompletedOnQueryDate" entry))))
-                      ;; Keep entries with:
-                      ;; - scheduled date <= start-date (includes overdue)
-                      ;; - deadline date <= start-date
-                      ;; - completed on the query date (via CLOSED timestamp)
-                      ;; - habit completed on the query date (via LOGBOOK done-times)
-                      ;; - no scheduled/deadline ONLY when not in log mode
-                      ;;   (When include-completed is true, log mode shows state change entries
-                      ;;   that have no scheduled/deadline - these should only be kept if they
-                      ;;   have a completedAt matching the query date)
-                      (or (and (null scheduled-date) (null deadline-date) (not include-completed))
-                          (and scheduled-date (not (string-greaterp scheduled-date start-date)))
-                          (and deadline-date (not (string-greaterp deadline-date start-date)))
-                          (and completed-at-date (string= completed-at-date start-date))
-                          habit-completed)))
-                  all-entries)
-               ;; Default: only items scheduled for the exact query date
-               (cl-remove-if-not
-                (lambda (entry)
-                  (let ((scheduled-date (org-agenda-api--extract-date
-                                         (cdr (assoc "scheduled" entry))))
-                        (deadline-date (org-agenda-api--extract-date
-                                        (cdr (assoc "deadline" entry))))
-                        (completed-at-date (org-agenda-api--extract-date
-                                            (cdr (assoc "completedAt" entry))))
-                        (habit-completed (cdr (assoc "habitCompletedOnQueryDate" entry))))
-                    ;; Keep entries that have either:
-                    ;; - scheduled date matching start-date
-                    ;; - deadline date matching start-date
-                    ;; - completed at date matching start-date (log entries)
-                    ;; - habit completed on the query date (via LOGBOOK done-times)
-                    ;; - no scheduled/deadline (time grid items) ONLY when not in log mode
-                    ;;   (When include-completed is true, log mode shows state change entries
-                    ;;   that have no scheduled/deadline - these should only be kept if they
-                    ;;   have a completedAt matching the query date)
-                    (or (and (null scheduled-date) (null deadline-date) (not include-completed))
-                        (and scheduled-date (string= scheduled-date start-date))
-                        (and deadline-date (string= deadline-date start-date))
-                        (and completed-at-date (string= completed-at-date start-date))
-                        habit-completed)))
-                all-entries))))
-        ;; When include-completed is requested, also fetch habits that were
-        ;; completed on the query date but might not appear in the agenda
-        ;; (because habits reschedule to future dates when completed)
-        (when (and include-completed
-                   (fboundp 'org-agenda-api--get-habits-completed-on-date))
-          (org-agenda-api--log 'debug "run-agenda: Checking for habits completed on %s" start-date)
-          (let ((habit-locations (org-agenda-api--get-habits-completed-on-date start-date)))
-            (org-agenda-api--log 'debug "run-agenda: Found %d habit locations: %S"
-                                 (length habit-locations) habit-locations)
-            (dolist (loc habit-locations)
-              (let* ((file (car loc))
-                     (pos (cdr loc))
-                     (already-present
-                      (cl-some (lambda (entry)
-                                 (and (string= (cdr (assoc "file" entry)) file)
-                                      (= (cdr (assoc "pos" entry)) pos)))
-                               filtered-entries)))
-                (org-agenda-api--log 'debug "run-agenda: Habit at %s:%d already-present=%s"
-                                     file pos already-present)
-                (unless already-present
-                  (with-current-buffer (find-file-noselect file)
-                    (save-excursion
-                      (goto-char pos)
-                      (when (org-at-heading-p)
-                        (let ((entry-data (org-agenda-api--extract-habit-entry-data pos file start-date)))
-                          (org-agenda-api--log 'debug "run-agenda: Extracted habit entry: %S"
-                                               (when entry-data (cdr (assoc "title" entry-data))))
-                          (when entry-data
-                            (setq filtered-entries (cons entry-data filtered-entries))))))))))))
-        ;; Add non-habit completions from LOGBOOK as a fallback. This covers
-        ;; reopened/re-completed tasks where org-agenda log mode may omit older
-        ;; completion events.
-        (when include-completed
-          (let ((logbook-completed-entries
-                 (org-agenda-api--get-logbook-completed-entries-on-date start-date)))
-            (dolist (entry logbook-completed-entries)
-              (let* ((file (cdr (assoc "file" entry)))
-                     (pos (cdr (assoc "pos" entry)))
-                     (completed-date
-                      (org-agenda-api--extract-date (cdr (assoc "completedAt" entry))))
-                     (already-present
-                      (cl-some
-                       (lambda (existing)
-                         (and (string= (cdr (assoc "file" existing)) file)
-                              (= (cdr (assoc "pos" existing)) pos)
-                              (string= (org-agenda-api--extract-date
-                                        (cdr (assoc "completedAt" existing)))
-                                       completed-date)))
-                       filtered-entries)))
-                (unless already-present
-                  (push entry filtered-entries))))))
-        ;; Deduplicate entries - when an item has both SCHEDULED and DEADLINE
-        ;; on the same day, org-agenda shows it twice. Keep only unique entries
-        ;; based on (file, pos).
-        ;; Then group untimed habits together at the end.
-        (org-agenda-api--group-habits-in-agenda
-         (org-agenda-api--deduplicate-entries filtered-entries))))))
+    (let ((filtered-entries (nreverse entries)))
+      ;; When include-completed is requested, also fetch habits that were
+      ;; completed on the query date but might not appear in the agenda
+      ;; (because habits reschedule to future dates when completed)
+      (when (and include-completed
+                 (fboundp 'org-agenda-api--get-habits-completed-on-date))
+        (org-agenda-api--log 'debug "run-agenda: Checking for habits completed on %s" start-date)
+        (let ((habit-locations (org-agenda-api--get-habits-completed-on-date start-date)))
+          (org-agenda-api--log 'debug "run-agenda: Found %d habit locations: %S"
+                               (length habit-locations) habit-locations)
+          (dolist (loc habit-locations)
+            (let* ((file (car loc))
+                   (pos (cdr loc))
+                   (already-present
+                    (cl-some (lambda (entry)
+                               (and (string= (cdr (assoc "file" entry)) file)
+                                    (= (cdr (assoc "pos" entry)) pos)))
+                             filtered-entries)))
+              (org-agenda-api--log 'debug "run-agenda: Habit at %s:%d already-present=%s"
+                                   file pos already-present)
+              (unless already-present
+                (with-current-buffer (find-file-noselect file)
+                  (save-excursion
+                    (goto-char pos)
+                    (when (org-at-heading-p)
+                      (let ((entry-data (org-agenda-api--extract-habit-entry-data pos file start-date)))
+                        (org-agenda-api--log 'debug "run-agenda: Extracted habit entry: %S"
+                                             (when entry-data (cdr (assoc "title" entry-data))))
+                        (when entry-data
+                          (setq filtered-entries (cons entry-data filtered-entries))))))))))))
+      ;; Add non-habit completions from LOGBOOK as a fallback. This covers
+      ;; reopened/re-completed tasks where org-agenda log mode may omit older
+      ;; completion events.
+      (when include-completed
+        (let ((logbook-completed-entries
+               (org-agenda-api--get-logbook-completed-entries-on-date start-date)))
+          (dolist (entry logbook-completed-entries)
+            (let* ((file (cdr (assoc "file" entry)))
+                   (pos (cdr (assoc "pos" entry)))
+                   (completed-date
+                    (org-agenda-api--extract-date (cdr (assoc "completedAt" entry))))
+                   (already-present
+                    (cl-some
+                     (lambda (existing)
+                       (and (string= (cdr (assoc "file" existing)) file)
+                            (= (cdr (assoc "pos" existing)) pos)
+                            (string= (org-agenda-api--extract-date
+                                      (cdr (assoc "completedAt" existing)))
+                                     completed-date)))
+                     filtered-entries)))
+              (unless already-present
+                (push entry filtered-entries))))))
+      ;; Deduplicate entries - when an item has both SCHEDULED and DEADLINE
+      ;; on the same day, org-agenda shows it twice. Keep only unique entries
+      ;; based on (file, pos).
+      ;; Then group untimed habits together at the end.
+      (org-agenda-api--group-habits-in-agenda
+       (org-agenda-api--deduplicate-entries filtered-entries)))))
 
 (defun org-agenda-api--extract-habit-entry-data (pos file query-date)
   "Extract entry data for a habit at POS in FILE.
