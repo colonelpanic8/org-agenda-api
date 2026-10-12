@@ -1863,16 +1863,24 @@ OVERDUE-BEHAVIOR is \"original\", \"today\", or \"both\":
     (dolist (date-str dates)
       (let* ((day-entries (org-agenda-api--collect-entries-for-date
                            date-str include-overdue include-completed))
-             ;; Filter out window habits from regular entries (they'll be added from habits-by-date)
-             (non-habit-entries (if habits-by-date
-                                    (cl-remove-if #'org-agenda-api--entry-is-window-habit-p day-entries)
-                                  day-entries))
+             ;; Preserve historical and completed habits before merging projections.
+             (regular-entries
+              (if habits-by-date
+                  (cl-remove-if
+                   (lambda (entry)
+                     (and (org-agenda-api--entry-is-window-habit-p entry)
+                          (not (string< date-str today-str))
+                          (not (cdr (assoc "habitCompletedOnQueryDate" entry)))
+                          (not (equal (org-agenda-api--extract-date
+                                       (cdr (assoc "completedAt" entry))) date-str))))
+                   day-entries)
+                day-entries))
              ;; Get habit entries for this date
              (habit-entries (cdr (assoc date-str habits-by-date)))
              ;; Merge regular entries with habit entries
              (all-entries (if habit-entries
-                              (org-agenda-api--merge-habit-entries non-habit-entries habit-entries)
-                            non-habit-entries))
+                              (org-agenda-api--merge-habit-entries regular-entries habit-entries)
+                            regular-entries))
              ;; Add dateRelevance to each entry (habits already have it)
              (entries-with-relevance
               (mapcar (lambda (entry)

@@ -32,3 +32,17 @@
   :LOGBOOK:
   - State "NEXT"       from "TODO"       [2024-06-15 Sat 09:00]
   :END:
+
+* TODO Completed daily window habit
+  SCHEDULED: <2024-06-16 Sun .+1d>
+  :PROPERTIES:
+  :ID: regression-agenda-completed-habit
+  :STYLE: habit
+  :OWH_ASSESSMENT_INTERVAL: 1d
+  :OWH_WINDOW_DURATION: 1d
+  :OWH_REPETITIONS_REQUIRED: 1
+  :END:
+  :LOGBOOK:
+  - State "DONE"       from "TODO"       [2024-06-15 Sat 10:00]
+  - State "DONE"       from "TODO"       [2024-06-14 Fri 09:00]
+  :END:

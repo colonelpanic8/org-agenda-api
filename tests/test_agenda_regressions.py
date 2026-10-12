@@ -66,3 +66,24 @@ def test_plain_appointments_remain_when_completion_logs_are_enabled(
     ids = {entry["id"] for entry in entries}
     assert {"regression-agenda-plain", "regression-agenda-planned-appointment"} <= ids
     assert "regression-agenda-next-log" not in ids
+
+
+@pytest.mark.parametrize("date", ["2024-06-14", TEST_DATE])
+def test_completed_habits_survive_multi_day_projection_merge(api, date):
+    org_id = "regression-agenda-completed-habit"
+    day_entries = api.get_agenda(date=date, include_completed=True).json()["entries"]
+    day_habit = next(entry for entry in day_entries if entry["id"] == org_id)
+    assert day_habit["habitCompletedOnQueryDate"] is True
+
+    days = api.get_agenda(
+        start_date="2024-06-14",
+        end_date="2024-06-21",
+        today=TEST_DATE,
+        include_completed=True,
+    ).json()["days"]
+    habits = [entry for entry in days[date] if entry["id"] == org_id]
+    assert len(habits) == 1
+    assert habits[0]["habitCompletedOnQueryDate"] is True
+    assert habits[0]["completedAt"] == day_habit["completedAt"]
+    assert habits[0]["scheduled"] == day_habit["scheduled"]
+    assert any(entry["id"] == org_id for entry in days["2024-06-16"])
