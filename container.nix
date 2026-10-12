@@ -41,7 +41,13 @@ let
       }
 
       upstream mcp {
-        server 127.0.0.1:${toString mcpPort};
+        include /tmp/nginx-mcp-upstream.conf;
+      }
+
+      map $http_origin $mcp_origin_allowed {
+        default 0;
+        "" 1;
+        include /tmp/nginx-mcp-origins.conf;
       }
 
       server {
@@ -119,6 +125,9 @@ let
         # Hosted MCP endpoint - authenticated by the same nginx Basic Auth
         # configuration as the JSON API. The upstream only listens on loopback.
         location = /mcp {
+          if ($mcp_origin_allowed = 0) {
+            return 403;
+          }
           if ($request_method = 'OPTIONS') {
             add_header 'Access-Control-Allow-Origin' '*' always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, DELETE, OPTIONS' always;
@@ -137,7 +146,7 @@ let
           proxy_buffering off;
           proxy_cache off;
           proxy_read_timeout 300s;
-          proxy_set_header Host 127.0.0.1:${toString mcpPort};
+          include /tmp/nginx-mcp-proxy.conf;
           proxy_set_header Origin "";
           proxy_set_header Authorization "";
           proxy_set_header X-Real-IP $remote_addr;
@@ -314,8 +323,11 @@ let
 
     export ORG_AGENDA_API_URL="''${ORG_AGENDA_API_URL:-http://127.0.0.1}"
     export ORG_AGENDA_API_USER="''${ORG_AGENDA_API_USER:-''${AUTH_USER:-mcp-internal}}"
-    if [ -z "$ORG_AGENDA_API_PASSWORD" ] && [ -z "$ORG_AGENDA_API_PASSWORD_COMMAND" ]; then
-      export ORG_AGENDA_API_PASSWORD="''${AUTH_PASSWORD:-mcp-internal}"
+    if [ -z "$ORG_AGENDA_API_PASSWORD" ]; then
+      unset ORG_AGENDA_API_PASSWORD
+      if [ -z "$ORG_AGENDA_API_PASSWORD_COMMAND" ]; then
+        export ORG_AGENDA_API_PASSWORD="''${AUTH_PASSWORD:-mcp-internal}"
+      fi
     fi
 
     exec ${mcpServer}/bin/org-agenda-mcp \
@@ -402,6 +414,29 @@ let
   containerStartupScript = pkgs.writeShellScriptBin "start-org-agenda-api" ''
     set -e
 
+    MCP_HOST="''${ORG_AGENDA_MCP_HOST:-127.0.0.1}"
+    MCP_PORT="''${ORG_AGENDA_MCP_PORT:-${toString mcpPort}}"
+    if [ "$MCP_HOST" != "127.0.0.1" ]; then
+      echo "ORG_AGENDA_MCP_HOST must be 127.0.0.1 in the container" >&2
+      exit 1
+    fi
+    if [[ ! "$MCP_PORT" =~ ^[0-9]{1,5}$ ]] || [ "$((10#$MCP_PORT))" -lt 1 ] || [ "$((10#$MCP_PORT))" -gt 65535 ]; then
+      echo "ORG_AGENDA_MCP_PORT must be an integer from 1 to 65535" >&2
+      exit 1
+    fi
+    export ORG_AGENDA_MCP_PORT="$((10#$MCP_PORT))"
+    printf 'server 127.0.0.1:%s;\n' "$ORG_AGENDA_MCP_PORT" > /tmp/nginx-mcp-upstream.conf
+    printf 'proxy_set_header Host 127.0.0.1:%s;\n' "$ORG_AGENDA_MCP_PORT" > /tmp/nginx-mcp-proxy.conf
+    if ! ${pkgs.jq}/bin/jq -er '
+      if type == "array" and all(.[];
+        type == "string" and test("^https?://([A-Za-z0-9._-]+|\\[[A-Fa-f0-9:]+\\])(:[0-9]+)?$"))
+      then map("\"\(.)\" 1;") | join("\n")
+      else error("expected an array of HTTP(S) origins") end
+    ' <<< "''${ORG_AGENDA_MCP_ALLOWED_ORIGINS:-[]}" > /tmp/nginx-mcp-origins.conf; then
+      echo "ORG_AGENDA_MCP_ALLOWED_ORIGINS must be a JSON array of HTTP(S) origins" >&2
+      exit 1
+    fi
+
     # Create necessary directories
     ${pkgs.coreutils}/bin/mkdir -p /tmp/nginx_client_body /tmp/nginx_proxy /tmp/nginx_fastcgi /tmp/nginx_uwsgi /tmp/nginx_scgi
     ${pkgs.coreutils}/bin/mkdir -p /data/org
@@ -428,18 +463,32 @@ let
 
     # Setup nginx authentication
     setup_nginx_auth() {
-      if [ -n "$AUTH_HTPASSWD_FILE" ] && [ -f "$AUTH_HTPASSWD_FILE" ]; then
+      if [ -n "$AUTH_HTPASSWD_FILE" ]; then
+        if [ ! -f "$AUTH_HTPASSWD_FILE" ] || [ ! -r "$AUTH_HTPASSWD_FILE" ]; then
+          echo "AUTH_HTPASSWD_FILE must name a readable file" >&2
+          exit 1
+        fi
+        if [ -z "''${ORG_AGENDA_API_USER:-$AUTH_USER}" ] || { [ -z "''${ORG_AGENDA_API_PASSWORD:-$AUTH_PASSWORD}" ] && [ -z "$ORG_AGENDA_API_PASSWORD_COMMAND" ]; }; then
+          echo "Htpasswd authentication requires MCP upstream credentials: set ORG_AGENDA_API_USER and ORG_AGENDA_API_PASSWORD or ORG_AGENDA_API_PASSWORD_COMMAND" >&2
+          exit 1
+        fi
+        AUTH_FILE="''${AUTH_HTPASSWD_FILE//\\/\\\\}"
+        AUTH_FILE="''${AUTH_FILE//\"/\\\"}"
         # Use provided htpasswd file
         ${pkgs.coreutils}/bin/echo "Using htpasswd file: $AUTH_HTPASSWD_FILE"
         ${pkgs.coreutils}/bin/cat > /tmp/nginx-auth.conf << EOF
     auth_basic "org-agenda-api";
-    auth_basic_user_file $AUTH_HTPASSWD_FILE;
+    auth_basic_user_file "$AUTH_FILE";
     EOF
-      elif [ -n "$AUTH_USER" ] && [ -n "$AUTH_PASSWORD" ]; then
+      elif [ -n "$AUTH_USER" ] || [ -n "$AUTH_PASSWORD" ]; then
+        if [ -z "$AUTH_USER" ] || [ -z "$AUTH_PASSWORD" ]; then
+          echo "AUTH_USER and AUTH_PASSWORD must both be set" >&2
+          exit 1
+        fi
         # Generate htpasswd from env vars
         ${pkgs.coreutils}/bin/echo "Generating htpasswd for user: $AUTH_USER"
         # Create htpasswd file using openssl
-        ${pkgs.openssl}/bin/openssl passwd -apr1 "$AUTH_PASSWORD" > /tmp/htpasswd.tmp
+        printf '%s\n' "$AUTH_PASSWORD" | ${pkgs.openssl}/bin/openssl passwd -apr1 -stdin > /tmp/htpasswd.tmp
         ${pkgs.coreutils}/bin/echo "$AUTH_USER:$(cat /tmp/htpasswd.tmp)" > /tmp/htpasswd
         rm /tmp/htpasswd.tmp
         ${pkgs.coreutils}/bin/cat > /tmp/nginx-auth.conf << EOF

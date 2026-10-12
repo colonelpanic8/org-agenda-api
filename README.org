@@ -84,8 +84,27 @@ The sidecar accepts these environment variables:
 | =ORG_AGENDA_API_USER=                 | Required Basic Auth username |
 | =ORG_AGENDA_API_PASSWORD=             | Basic Auth password; takes precedence over the command |
 | =ORG_AGENDA_API_PASSWORD_COMMAND=     | Shell command whose first stdout line supplies the password |
-| =ORG_AGENDA_MCP_HOST=                 | Streamable HTTP bind host (container default: =127.0.0.1=) |
+| =ORG_AGENDA_MCP_HOST=                 | Streamable HTTP bind host (container requires =127.0.0.1=) |
 | =ORG_AGENDA_MCP_PORT=                 | Streamable HTTP port (container default: =2026=) |
+| =ORG_AGENDA_MCP_ALLOWED_ORIGINS=      | Container nginx allowlist: JSON array of browser origins (default: =[]=) |
+
+nginx rejects =/mcp= requests with an Origin header unless it matches the
+allowlist, including preflight requests. Server-to-server clients that send no
+Origin continue to work. For example, browser access from your own application
+can be enabled with =ORG_AGENDA_MCP_ALLOWED_ORIGINS='["https://app.example.com"]'=
+(origins have no trailing slash or path). nginx checks the public Origin before
+removing it and setting the loopback Host for the internal MCP transport.
+Changing =ORG_AGENDA_MCP_PORT= also updates nginx's upstream; invalid ports and
+non-loopback container bind hosts abort startup.
+
+Container authentication supports =AUTH_USER= together with =AUTH_PASSWORD=,
+or =AUTH_HTPASSWD_FILE=. An absent/unreadable configured htpasswd file or an
+incomplete username/password pair aborts startup. The username/password mode
+also supplies MCP's upstream credentials. With an htpasswd file, provide
+=ORG_AGENDA_API_USER= and =ORG_AGENDA_API_PASSWORD= (or the password command)
+for an account in that file; an =AUTH_USER=/=AUTH_PASSWORD= pair can also supply
+these credentials. No authentication settings leaves authentication disabled
+for local development, so configure them before exposing the container.
 
 Scheduled and deadline tool arguments use =YYYY-MM-DD= or
 =YYYY-MM-DDTHH:MM=; agenda dates must be valid =YYYY-MM-DD= calendar dates.

@@ -49,6 +49,14 @@ API. The HTTP process calls the JSON API back through nginx, keeping
 authentication and org behavior in their existing layers. Stdio remains an
 on-demand process owned by its MCP host.
 
+nginx rejects browser Origins unless they are listed in the JSON array
+`ORG_AGENDA_MCP_ALLOWED_ORIGINS` (default empty), while allowing requests without
+Origin for server-to-server clients. It validates the Origin before rewriting
+the internal Host and stripping Origin. The runtime MCP port configures both
+the listener and nginx. Missing configured authentication files and incomplete
+credentials abort startup; htpasswd-file deployments must provide credentials
+for the MCP upstream client separately.
+
 ## Verification
 
 Pytest tests will use an in-process fake HTTP server to cover query and mutation
