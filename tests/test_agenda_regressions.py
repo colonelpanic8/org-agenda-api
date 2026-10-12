@@ -87,3 +87,55 @@ def test_completed_habits_survive_multi_day_projection_merge(api, date):
     assert habits[0]["completedAt"] == day_habit["completedAt"]
     assert habits[0]["scheduled"] == day_habit["scheduled"]
     assert any(entry["id"] == org_id for entry in days["2024-06-16"])
+
+
+@pytest.mark.parametrize(
+    ("behavior", "expected_dates"),
+    [
+        ("original", {"2024-06-14"}),
+        ("today", {"2024-06-15"}),
+        ("both", {"2024-06-14", "2024-06-15"}),
+    ],
+)
+def test_overdue_behavior_places_task_only_on_requested_dates(
+    api, behavior, expected_dates
+):
+    days = api.get_agenda(
+        start_date="2024-06-14",
+        end_date="2024-06-21",
+        today=TEST_DATE,
+        include_overdue=True,
+        overdue_behavior=behavior,
+    ).json()["days"]
+    actual_dates = {
+        date
+        for date, entries in days.items()
+        if any(entry["title"] == "Task scheduled for yesterday" for entry in entries)
+    }
+    assert actual_dates == expected_dates
+    assert {
+        date
+        for date, entries in days.items()
+        if any(entry["id"] == "regression-agenda-overdue-deadline" for entry in entries)
+    } == expected_dates
+    assert any(
+        entry["title"] == "Task scheduled for tomorrow" for entry in days["2024-06-16"]
+    )
+    assert "repeater-daily-plus" in {entry["id"] for entry in days["2024-06-17"]}
+
+
+@pytest.mark.parametrize("behavior", ["original", "today", "both"])
+def test_overdue_behavior_preserves_timestamp_and_range_occurrences(api, behavior):
+    days = api.get_agenda(
+        start_date="2024-06-14",
+        end_date="2024-06-21",
+        today=TEST_DATE,
+        include_overdue=True,
+        overdue_behavior=behavior,
+    ).json()["days"]
+    assert "regression-agenda-plain" in {entry["id"] for entry in days[TEST_DATE]}
+    assert "regression-agenda-overdue-appointment" in {
+        entry["id"] for entry in days["2024-06-17"]
+    }
+    for date in ("2024-06-14", "2024-06-16", "2024-06-20"):
+        assert "regression-agenda-range" in {entry["id"] for entry in days[date]}

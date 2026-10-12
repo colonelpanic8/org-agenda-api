@@ -46,3 +46,16 @@
   - State "DONE"       from "TODO"       [2024-06-15 Sat 10:00]
   - State "DONE"       from "TODO"       [2024-06-14 Fri 09:00]
   :END:
+
+* TODO Overdue deadline task
+  DEADLINE: <2024-06-14 Fri>
+  :PROPERTIES:
+  :ID: regression-agenda-overdue-deadline
+  :END:
+
+* TODO Appointment with an overdue schedule
+  SCHEDULED: <2024-06-12 Wed>
+  :PROPERTIES:
+  :ID: regression-agenda-overdue-appointment
+  :END:
+  <2024-06-17 Mon 11:00>

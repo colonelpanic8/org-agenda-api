@@ -167,20 +167,27 @@ Supports ranged timestamps like <2024-06-15>--<2024-06-20>."
         (deadline-end-time . ,deadline-end-time)
         (deadline-end-has-time . ,deadline-end-has-time)))))
 
-(defun org-agenda-api--deduplicate-entries (entries)
+(defun org-agenda-api--deduplicate-entries (entries &optional query-date)
   "Remove duplicate entries that point to the same org headline.
 When an item has both SCHEDULED and DEADLINE on the same day,
 org-agenda shows it twice. This function deduplicates by (file, pos),
-keeping only one entry per unique headline location."
+keeping only one entry per unique headline location.
+When QUERY-DATE is non-nil, prefer its occurrence over an overdue row."
   (let ((seen (make-hash-table :test 'equal))
         (result nil))
     (dolist (entry entries)
       (let* ((file (cdr (assoc "file" entry)))
              (pos (cdr (assoc "pos" entry)))
-             (key (cons file pos)))
-        (unless (gethash key seen)
-          (puthash key t seen)
-          (push entry result))))
+             (key (cons file pos))
+             (previous (gethash key seen)))
+        (cond
+         ((not previous)
+          (push entry result)
+          (puthash key result seen))
+         ((and query-date
+               (org-agenda-api--agenda-entry-on-date-p entry query-date)
+               (not (org-agenda-api--agenda-entry-on-date-p (car previous) query-date)))
+          (setcar previous entry)))))
     (nreverse result)))
 
 (defun org-agenda-api--entry-has-scheduled-time-p (entry)
@@ -802,7 +809,7 @@ QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completio
               ("priority" . ,priority)
               ("notifyBefore" . ,(when notify-before (vconcat notify-before)))
               ("effectiveCategory" . ,effective-category)
-              ("agendaLine" . ,(substring-no-properties agenda-line))
+              ("agendaLine" . ,(org-agenda-api--agenda-line-with-occurrence agenda-line))
               ("effort" . ,effort)
               ("properties" . ,all-properties)
               ("completedAt" . ,completed-at)
@@ -811,6 +818,23 @@ QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completio
                   `(("habitSummary" . ,habit-summary)))
               ,@(when habit-completed-on-query-date
                   `(("habitCompletedOnQueryDate" . t)))))))))))
+
+(defun org-agenda-api--agenda-line-with-occurrence (line)
+  "Copy LINE with its occurrence properties for internal filtering."
+  (let ((copy (substring-no-properties line)))
+    (add-text-properties 0 (length copy)
+                         (list 'date (get-text-property 0 'date line)
+                               'type (get-text-property 0 'type line))
+                         copy)
+    copy))
+
+(defun org-agenda-api--agenda-entry-on-date-p (entry query-date)
+  "Return non-nil if ENTRY occurs or was completed on QUERY-DATE."
+  (or (equal (org-agenda-api--extract-date
+              (cdr (assoc "completedAt" entry))) query-date)
+      (cdr (assoc "habitCompletedOnQueryDate" entry))
+      (let ((line (cdr (assoc "agendaLine" entry))))
+        (and line (org-agenda-api--agenda-row-on-date-p line query-date)))))
 
 (defun org-agenda-api--agenda-row-on-date-p (line query-date)
   "Return non-nil if agenda LINE occurs on QUERY-DATE."
@@ -989,7 +1013,7 @@ INCLUDE-COMPLETED when non-nil includes items completed on the query date."
       ;; based on (file, pos).
       ;; Then group untimed habits together at the end.
       (org-agenda-api--group-habits-in-agenda
-       (org-agenda-api--deduplicate-entries filtered-entries)))))
+       (org-agenda-api--deduplicate-entries filtered-entries start-date)))))
 
 (defun org-agenda-api--extract-habit-entry-data (pos file query-date)
   "Extract entry data for a habit at POS in FILE.
@@ -1824,21 +1848,22 @@ An entry is overdue if its scheduled or deadline date is before today."
     (entries date-str today-str overdue-behavior)
   "Filter ENTRIES for DATE-STR based on OVERDUE-BEHAVIOR.
 TODAY-STR is the reference date for overdue calculations.
-OVERDUE-BEHAVIOR is \"original\", \"today\", or \"both\":
-  - \"original\": no filtering (items appear on queried date)
-  - \"today\": remove overdue items from dates that are not today
-  - \"both\": no filtering (overdue items appear on all dates)"
-  (cond
-   ;; "today" behavior: only show overdue items on today, filter them from other dates
-   ((and (equal overdue-behavior "today")
-         (not (string= date-str today-str)))
-    ;; This date is not today, so filter out overdue items
-    (cl-remove-if (lambda (entry)
+Overdue rows appear on their original date for original, only on today
+for today, or on both dates for both."
+  (cl-remove-if
+   (lambda (entry)
+     (unless (or (org-agenda-api--entry-is-window-habit-p entry)
+                 (equal (cdr (assoc "dateRelevance" entry)) "completed"))
+       (let* ((line (cdr (assoc "agendaLine" entry)))
+              (type (and line (get-text-property 0 'type line))))
+         (when (member type '("scheduled" "past-scheduled" "deadline"))
+           (if (org-agenda-api--agenda-entry-on-date-p entry date-str)
+               (and (equal overdue-behavior "today")
+                    (string< date-str today-str)
                     (org-agenda-api--entry-is-overdue-p entry today-str))
-                  entries))
-   ;; "original" and "both" behavior: no filtering needed
-   ;; (entries already appear on their queried dates)
-   (t entries)))
+             (not (and (string= date-str today-str)
+                       (member overdue-behavior '("today" "both")))))))))
+   entries))
 
 (defun org-agenda-api--build-multi-day-response
     (span start-date end-date-param today-str include-overdue include-completed overdue-behavior)
