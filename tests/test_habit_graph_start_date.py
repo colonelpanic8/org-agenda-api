@@ -7,12 +7,41 @@ even when there was a completion on that date.
 Test date is 2024-06-15 (configured in conftest.py).
 """
 
+import pytest
+
 # Test date from conftest.py
 TEST_DATE = "2024-06-15"
 
 
 class TestHabitGraphStartDate:
     """Tests that habit graph correctly includes the start date."""
+
+    @pytest.mark.parametrize("following", [0, 4])
+    @pytest.mark.parametrize("bulk", [False, True])
+    def test_clamped_history_preserves_future_boundary(self, api, following, bulk):
+        if bulk:
+            data = api.get_all_habit_statuses(
+                preceding=21, following=following, date=TEST_DATE
+            ).json()
+            habit = next(
+                item for item in data["habits"] if item["id"] == "habit-newly-started"
+            )
+        else:
+            habit = api.get_habit_status(
+                "habit-newly-started", preceding=21, following=following, date=TEST_DATE
+            ).json()
+        assert habit["status"] == "ok"
+        assert [entry["date"] for entry in habit["graph"]] == [
+            f"2024-06-{day}" for day in range(14, 16 + following)
+        ]
+
+    def test_unclamped_history_keeps_requested_interval_count(self, api):
+        data = api.get_habit_status(
+            "habit-required-daily", preceding=5, following=4, date=TEST_DATE
+        ).json()
+        assert [entry["date"] for entry in data["graph"]] == [
+            f"2024-06-{day}" for day in range(10, 20)
+        ]
 
     def test_graph_includes_start_date_with_completion(self, api):
         """Graph should include the habit start date when requesting preceding intervals.
