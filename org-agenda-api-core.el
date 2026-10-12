@@ -539,6 +539,24 @@ directory can be determined."
 
 ;;; Utility Functions
 
+(defconst org-agenda-api--capture-escape-regexp
+  "\\(\\\\*\\)%\\(?:[][(^<aAcfFikKlLntTuUx]\\|:[-A-Za-z]\\|\\\\[1-9]\\)"
+  "Regexp matching `%' sequences that `org-capture-fill-template' expands.")
+
+(defun org-agenda-api--escape-capture-value (value)
+  "Escape VALUE so `org-capture-fill-template' inserts it literally.
+Without this, client-supplied text such as \"%(shell-command ...)\" or
+\"%[/path/to/file]\" would be evaluated or expanded by org-capture."
+  (if (stringp value)
+      (replace-regexp-in-string
+       org-agenda-api--capture-escape-regexp
+       (lambda (match)
+         (let ((backslashes (length (match-string 1 match))))
+           (concat (make-string (1+ (* 2 backslashes)) ?\\)
+                   (substring match backslashes))))
+       value t t)
+    value))
+
 (defun org-agenda-api--plist-to-alist (plist)
   "Convert PLIST to an alist for JSON encoding.
 Converts :key to \"key\" string."

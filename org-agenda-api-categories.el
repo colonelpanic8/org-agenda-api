@@ -163,17 +163,21 @@ VALUES is an alist with title, state, scheduled, deadline, priority, tags, effor
 scheduled and deadline are objects with {date, time?, repeater?}.
 Accepts both \"state\" and \"todo\" for the TODO state (for backwards compatibility).
 Returns a template string with all values pre-filled (no interactive prompts)."
-  (let* ((title (or (cdr (assoc "title" values)) ""))
+  (let* ((esc #'org-agenda-api--escape-capture-value)
+         (title (funcall esc (or (cdr (assoc "title" values)) "")))
          ;; Accept both "state" and "todo" for backwards compatibility
-         (todo-state (or (cdr (assoc "state" values))
-                         (cdr (assoc "todo" values))
-                         "TODO"))
+         (todo-state (funcall esc (or (cdr (assoc "state" values))
+                                      (cdr (assoc "todo" values))
+                                      "TODO")))
          (scheduled (cdr (assoc "scheduled" values)))
          (deadline (cdr (assoc "deadline" values)))
-         (priority (cdr (assoc "priority" values)))
-         (tags (cdr (assoc "tags" values)))
+         (priority (funcall esc (cdr (assoc "priority" values))))
+         (tags (mapcar esc (cdr (assoc "tags" values))))
          (effort (cdr (assoc "effort" values)))
-         (properties (cdr (assoc "properties" values)))
+         (properties (mapcar (lambda (prop)
+                               (cons (funcall esc (car prop))
+                                     (funcall esc (cdr prop))))
+                             (cdr (assoc "properties" values))))
          (parts nil))
     ;; Build headline: * TODO [#A] Title :tag1:tag2:
     (push (format "* %s " todo-state) parts)

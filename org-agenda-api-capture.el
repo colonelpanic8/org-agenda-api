@@ -203,7 +203,14 @@ like %(sexp), %U, %t, etc."
            (t template-raw)))
          (result template-string)
          (prompt-regexp
-          "%\\^{\\([^}|]+\\)\\(?:|[^}]*\\)?}\\([tTuUgGC]\\)?"))
+          "%\\^{\\([^}|]+\\)\\(?:|[^}]*\\)?}\\([tTuUgGC]\\)?")
+         ;; Client values are first replaced by placeholder tokens so they are
+         ;; never rescanned as prompts or mistaken for template escapes.
+         (substitutions nil)
+         (placeholder (lambda (value)
+                        (push (org-agenda-api--escape-capture-value value)
+                              substitutions)
+                        (format "\uE000%d\uE001" (1- (length substitutions))))))
     ;; Replace named prompts, including choice/default forms, without invoking
     ;; Org's interactive prompt reader.
     (while (string-match prompt-regexp result)
@@ -233,13 +240,14 @@ like %(sexp), %U, %t, etc."
         (unless prompt
           (org-agenda-api--capture-client-error
            "Template contains unregistered interactive prompt: %s" name))
-        (setq result (replace-match formatted-value t t result))))
+        (setq result (replace-match (funcall placeholder formatted-value)
+                                    t t result))))
     ;; Replace %? with Title value if present, otherwise remove it
     ;; (do this before org-capture-fill-template which would leave %? for cursor)
     (let ((title-value (cdr (assoc "Title" values))))
       (setq result (replace-regexp-in-string
                     "%\\?"
-                    (or title-value "")
+                    (funcall placeholder (or title-value ""))
                     result t t)))
     ;; Any remaining %^ escape is interactive (for example anonymous %^T).
     ;; Calling `org-capture-fill-template' with it in a headless server would
@@ -249,6 +257,12 @@ like %(sexp), %U, %t, etc."
        "Template contains unsupported anonymous interactive escape: %s"
        (substring result (match-beginning 0)
                   (min (length result) (+ (match-beginning 0) 12)))))
+    (let ((escaped (vconcat (reverse substitutions))))
+      (setq result (replace-regexp-in-string
+                    "\uE000\\([0-9]+\\)\uE001"
+                    (lambda (token)
+                      (aref escaped (string-to-number (match-string 1 token))))
+                    result t t)))
     ;; Use org-capture-fill-template to handle all other escape sequences:
     ;; %(sexp), %U, %u, %T, %t, %a, %c, %i, etc.
     (require 'org-capture)

@@ -427,3 +427,21 @@ class TestCaptureWithSexpExpansion:
         assert len(unique_uuids) >= 2, (
             f"Expected unique UUIDs but found duplicates: {uuids}"
         )
+
+
+class TestCaptureValueEscaping:
+    """Client values must never be interpreted as capture template escapes."""
+
+    def test_template_escapes_in_values_are_inserted_literally(self, api, org_dir):
+        title = 'Literal %(concat "ev" "aluated") %[/etc/hostname] %U \\%(x)'
+        response = api.capture("todo", {"Title": title})
+
+        assert response.json()["status"] == "created"
+        assert f"* TODO {title}\n" in (org_dir / "inbox.org").read_text()
+
+    def test_prompt_syntax_in_value_is_not_reexpanded(self, api, org_dir):
+        title = "Prompt lookalike %^{Title} %^{Other}t"
+        response = api.capture("todo", {"Title": title})
+
+        assert response.json()["status"] == "created"
+        assert f"* TODO {title}\n" in (org_dir / "inbox.org").read_text()
