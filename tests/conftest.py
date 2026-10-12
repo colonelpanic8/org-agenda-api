@@ -92,10 +92,13 @@ class EmacsServer:
 
         script_path = PROJECT_ROOT / "scripts" / "run-emacs-server.el"
 
+        # Log to a file: an unread pipe fills up and blocks Emacs mid-request.
+        self.log_path = self.org_dir.parent / f"emacs-{self.port}.log"
+        self.log_file = open(self.log_path, "w")
         self.process = subprocess.Popen(
             ["emacs", "--batch", "--script", str(script_path)],
             env=env,
-            stdout=subprocess.PIPE,
+            stdout=self.log_file,
             stderr=subprocess.STDOUT,
             text=True,
         )
@@ -112,9 +115,9 @@ class EmacsServer:
 
             # Check if process died
             if self.process.poll() is not None:
-                stdout = self.process.stdout.read() if self.process.stdout else ""
                 raise RuntimeError(
-                    f"Emacs process died during startup. Output:\n{stdout}"
+                    "Emacs process died during startup. Output:\n"
+                    f"{self.log_path.read_text()}"
                 )
 
             time.sleep(0.1)
@@ -131,6 +134,7 @@ class EmacsServer:
                 self.process.kill()
                 self.process.wait()
             self.process = None
+            self.log_file.close()
 
 
 class APIClient:
