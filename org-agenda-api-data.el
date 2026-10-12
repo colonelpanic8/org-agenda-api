@@ -554,11 +554,12 @@ Uses caching to avoid re-processing unchanged files."
   (if (org-agenda-api--cache-valid-p)
       org-agenda-api--todos-cache
     ;; Rebuild cache
-    (setq org-agenda-api--cache-mtime (org-agenda-api--get-max-mtime)
-          org-agenda-api--todos-cache
+    (setq org-agenda-api--todos-cache
           (delq nil
                 (mapcan #'org-agenda-api--get-todo-elements-from-filepath
-                        org-agenda-files)))
+                        org-agenda-files))
+          ;; Taken after building, since building visits the files.
+          org-agenda-api--cache-fingerprint (org-agenda-api--files-fingerprint))
     org-agenda-api--todos-cache))
 
 (defun org-agenda-api--get-agenda-todos-from-files (files)
@@ -1182,12 +1183,47 @@ Returns t if normalized versions are equal."
     (string= (org-agenda-api--normalize-string s1)
              (org-agenda-api--normalize-string s2))))
 
+(defun org-agenda-api--allowed-file-p (file)
+  "Return non-nil if FILE is an agenda file or a known archive file.
+Mutations must never touch files outside this set."
+  (and (stringp file)
+       (let ((expanded (expand-file-name file)))
+         (or (member expanded (mapcar #'expand-file-name org-agenda-files))
+             (member expanded (org-agenda-api--agenda-files-with-archives))))
+       t))
+
+(defun org-agenda-api--file-buffer (file)
+  "Return a buffer visiting FILE, re-read from disk if it changed there.
+Buffers with unsaved modifications are never reverted.
+Signals an error if FILE is not an agenda or archive file, since every
+mutation reaches its target buffer through here."
+  (unless (org-agenda-api--allowed-file-p file)
+    (error "File is not an agenda file: %s" file))
+  (let ((buf (find-file-noselect file t)))
+    (with-current-buffer buf
+      (unless (or (buffer-modified-p)
+                  (verify-visited-file-modtime buf))
+        (revert-buffer t t t)))
+    buf))
+
+(defun org-agenda-api--refresh-agenda-buffers ()
+  "Re-read unmodified agenda buffers whose files changed on disk.
+Call before resolving a mutation target so positions refer to the
+current file contents."
+  (dolist (file (org-agenda-api--agenda-files-with-archives))
+    (let ((buf (get-file-buffer file)))
+      (when (and buf (file-exists-p file))
+        (with-current-buffer buf
+          (unless (or (buffer-modified-p)
+                      (verify-visited-file-modtime buf))
+            (revert-buffer t t t)))))))
+
 (defun org-agenda-api--find-todo-by-id (id)
   "Find a TODO entry by its org ID.
 Returns (file . pos) cons or nil if not found."
-  (when id
+  (when (stringp id)
     (let ((loc (org-id-find id)))
-      (when loc
+      (when (and loc (org-agenda-api--allowed-file-p (car loc)))
         (cons (car loc) (cdr loc))))))
 
 (defun org-agenda-api--find-todo-by-file-pos-title (file pos title)
@@ -1195,11 +1231,12 @@ Returns (file . pos) cons or nil if not found."
 Verifies the title matches at the given position.
 Uses lenient matching as fallback if strict match fails.
 Returns (file . pos) cons or nil if not found."
-  (when (and file pos (file-exists-p file))
-    (with-current-buffer (find-file-noselect file)
+  (when (and (integerp pos) (org-agenda-api--allowed-file-p file)
+             (file-exists-p file))
+    (with-current-buffer (org-agenda-api--file-buffer file)
       (save-excursion
         (goto-char pos)
-        (when (org-at-heading-p)
+        (when (and (= (point) pos) (org-at-heading-p))
           (let ((heading (org-get-heading t t t t)))
             ;; Try strict match first, then lenient
             (when (or (not title)
@@ -1211,33 +1248,48 @@ Returns (file . pos) cons or nil if not found."
   "Find a TODO entry by FILE and TITLE only.
 Searches the file for a heading matching TITLE.
 If LENIENT is non-nil, uses lenient matching (whitespace/unicode normalized).
-Returns (file . pos) cons or nil if not found."
-  (when (and file title (file-exists-p file))
-    (with-current-buffer (find-file-noselect file)
-      (save-excursion
-        (goto-char (point-min))
-        (let ((found nil)
-              (match-fn (if lenient
-                            #'org-agenda-api--string-match-lenient
-                          #'string=)))
-          (while (and (not found) (re-search-forward org-heading-regexp nil t))
-            (when (org-at-heading-p)
-              (let ((heading (org-get-heading t t t t)))
-                (when (funcall match-fn heading title)
-                  (setq found (cons file (line-beginning-position)))))))
-          found)))))
+Returns (file . pos) cons or nil if not found.
+Signals an error if more than one heading matches."
+  (car (org-agenda-api--unique-title-match
+        title (org-agenda-api--title-matches-in-file file title lenient))))
+
+(defun org-agenda-api--title-matches-in-file (file title lenient)
+  "Return all (FILE . POS) headings in FILE whose title matches TITLE.
+If LENIENT is non-nil, uses lenient matching."
+  (when (and (stringp title) (org-agenda-api--allowed-file-p file)
+             (file-exists-p file))
+    (with-current-buffer (org-agenda-api--file-buffer file)
+      (org-with-wide-buffer
+       (goto-char (point-min))
+       (let ((matches nil)
+             (match-fn (if lenient
+                           #'org-agenda-api--string-match-lenient
+                         #'string=)))
+         (while (re-search-forward org-heading-regexp nil t)
+           (when (org-at-heading-p)
+             (let ((heading (org-get-heading t t t t)))
+               (when (funcall match-fn heading title)
+                 (push (cons file (line-beginning-position)) matches)))))
+         (nreverse matches))))))
+
+(defun org-agenda-api--unique-title-match (title matches)
+  "Return MATCHES for TITLE, signaling an error if there is more than one."
+  (when (cdr matches)
+    (error "Multiple headings (%d) match title %S; specify id or file and pos"
+           (length matches) title))
+  matches)
 
 (defun org-agenda-api--find-todo-by-title (title &optional lenient)
   "Find a TODO entry by TITLE across all agenda files.
 Searches all org-agenda-files for a heading matching TITLE.
 If LENIENT is non-nil, uses lenient matching (whitespace/unicode normalized).
 Returns (file . pos) cons or nil if not found."
-  (when title
-    (let ((found nil))
-      (dolist (file org-agenda-files)
-        (when (and (not found) (file-exists-p file))
-          (setq found (org-agenda-api--find-todo-by-file-title file title lenient))))
-      found)))
+  (when (stringp title)
+    (car (org-agenda-api--unique-title-match
+          title
+          (cl-mapcan (lambda (file)
+                       (org-agenda-api--title-matches-in-file file title lenient))
+                     (mapcar #'expand-file-name org-agenda-files))))))
 
 ;;; Date/Time Parsing Utilities
 
@@ -1247,24 +1299,43 @@ Returns (file . pos) cons or nil if not found."
        (not (string-empty-p datetime-string))
        (string-match-p ":" datetime-string)))
 
+(defconst org-agenda-api--iso-datetime-regexp
+  (concat "\\`\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)"
+          "\\(?:[T ]\\([0-9]\\{1,2\\}\\):\\([0-9]\\{2\\}\\)"
+          "\\(?::\\([0-9]\\{2\\}\\)\\(?:\\.[0-9]+\\)?\\)?"
+          "\\(Z\\|[+-][0-9]\\{2\\}:?[0-9]\\{2\\}\\)?\\)?\\'")
+  "Regexp for ISO dates with optional time, seconds and UTC offset.")
+
 (defun org-agenda-api--parse-datetime (datetime-string)
   "Parse DATETIME-STRING into an Emacs time value.
-Accepts ISO format: YYYY-MM-DD or YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM:SS."
-  (when (and datetime-string (not (string-empty-p datetime-string)))
-    (let* ((normalized (replace-regexp-in-string "T" " " datetime-string))
-           (colon-count (cl-count ?: normalized)))
-      (condition-case nil
-          (cond
-           ;; No colons: date only (YYYY-MM-DD)
-           ((= colon-count 0)
-            (date-to-time (concat normalized " 00:00:00")))
-           ;; One colon: time without seconds (YYYY-MM-DD HH:MM)
-           ((= colon-count 1)
-            (date-to-time (concat normalized ":00")))
-           ;; Two colons: full datetime with seconds (YYYY-MM-DD HH:MM:SS)
-           (t
-            (date-to-time normalized)))
-        (error nil)))))
+Accepts ISO format: YYYY-MM-DD, YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM[:SS],
+optionally followed by Z or a UTC offset.  Times without an offset are
+local.  Returns nil for malformed or out-of-range values."
+  (when (and (stringp datetime-string)
+             (string-match org-agenda-api--iso-datetime-regexp datetime-string))
+    (let* ((num (lambda (n)
+                  (let ((m (match-string n datetime-string)))
+                    (if m (string-to-number m) 0))))
+           (year (funcall num 1))
+           (month (funcall num 2))
+           (day (funcall num 3))
+           (hour (funcall num 4))
+           (minute (funcall num 5))
+           (second (funcall num 6))
+           (offset (match-string 7 datetime-string))
+           (zone (cond
+                  ((null offset) nil)
+                  ((string= offset "Z") t)
+                  (t (let ((digits (replace-regexp-in-string ":" "" offset)))
+                       (* (if (eq (aref digits 0) ?-) -1 1)
+                          (+ (* 3600 (string-to-number (substring digits 1 3)))
+                             (* 60 (string-to-number (substring digits 3 5))))))))))
+      (when (and (<= 1 month 12)
+                 (<= 1 day (calendar-last-day-of-month month year))
+                 (<= 0 hour 23)
+                 (<= 0 minute 59)
+                 (<= 0 second 59))
+        (encode-time second minute hour day month year zone)))))
 
 (defun org-agenda-api--format-org-timestamp (time has-time)
   "Format TIME as an org timestamp string.
@@ -1305,6 +1376,9 @@ Returns a string like \"+1w\" or \"++2d\", or nil if REPEATER is invalid."
           (value (org-agenda-api--get-field "value" repeater))
           (unit (org-agenda-api--get-field "unit" repeater)))
       (when (and type value unit)
+        (unless (and (member type '("+" "++" ".+"))
+                     (natnump value) (> value 0))
+          (error "Invalid repeater: type must be +, ++ or .+ and value a positive integer"))
         (let ((unit-letter (org-agenda-api--unit-to-letter unit)))
           (when unit-letter
             (format "%s%d%s" type value unit-letter)))))))
@@ -1329,7 +1403,7 @@ TIMESTAMP can be:
   - A hash-table or alist with keys \"date\" (required),
     \"time\" (optional), and \"repeater\" (optional)
 Returns org timestamp like <2026-01-25 Sat 10:00 +1w>."
-  (when (and timestamp (not (eq timestamp :json-null)))
+  (when (and timestamp (not (memq timestamp '(:json-null :null))))
     (cond
      ;; Handle string format (legacy): "2026-01-25" or "2026-01-25T10:00:00"
      ((stringp timestamp)
@@ -1341,10 +1415,10 @@ Returns org timestamp like <2026-01-25 Sat 10:00 +1w>."
      (t
       (let* ((date-str (org-agenda-api--get-field "date" timestamp))
              (time-str (let ((time-val (org-agenda-api--get-field "time" timestamp)))
-                         (unless (eq time-val :json-null) time-val)))
+                         (unless (memq time-val '(:json-null :null)) time-val)))
              (repeater (let ((repeater-val (org-agenda-api--get-field "repeater" timestamp)))
-                         (unless (eq repeater-val :json-null) repeater-val)))
-             (has-time (and time-str (not (string-empty-p time-str))))
+                         (unless (memq repeater-val '(:json-null :null)) repeater-val)))
+             (has-time (and (stringp time-str) (not (string-empty-p time-str))))
              (datetime-str (if has-time
                                (concat date-str " " time-str)
                              date-str))

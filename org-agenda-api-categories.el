@@ -180,6 +180,14 @@ Returns a template string with all values pre-filled (no interactive prompts)."
                                      (funcall esc (cdr prop))))
                              (cdr (assoc "properties" values))))
          (parts nil))
+    (org-agenda-api--assert-single-line "title" title)
+    (org-agenda-api--assert-single-line "todo" todo-state)
+    (org-agenda-api--assert-single-line "priority" priority)
+    (dolist (tag tags)
+      (org-agenda-api--assert-single-line "tag" tag))
+    (dolist (prop properties)
+      (org-agenda-api--assert-single-line "property name" (car prop))
+      (org-agenda-api--assert-single-line (car prop) (cdr prop)))
     ;; Build headline: * TODO [#A] Title :tag1:tag2:
     (push (format "* %s " todo-state) parts)
     (when (and priority (not (string-empty-p priority)))
@@ -375,7 +383,7 @@ Accepts JSON body with:
   - properties: object of property name/value pairs (optional)"
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (org-agenda-api--parse-json-request-body content-header))
+             (json-data (org-agenda-api--parse-json-object content-header))
              (type-name (gethash "type" json-data))
              (category (gethash "category" json-data))
              (title (gethash "title" json-data))

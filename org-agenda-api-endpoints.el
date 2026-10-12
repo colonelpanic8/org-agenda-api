@@ -378,7 +378,7 @@ Accepts query params:
   "Endpoint: Capture using a registered template with provided values."
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (org-agenda-api--parse-json-request-body content-header))
+             (json-data (org-agenda-api--parse-json-object content-header))
              (template-key (gethash "template" json-data))
              (values-hash (gethash "values" json-data))
              ;; Convert hash-table to alist
@@ -486,7 +486,7 @@ Returns updated todo with new file and pos for cache update."
   (condition-case err
       (catch 'done
         (let* ((content-header (cadr (assoc "Content" headers)))
-               (json-data (org-agenda-api--parse-json-request-body content-header))
+               (json-data (org-agenda-api--parse-json-object content-header))
                (id (gethash "id" json-data))
                (file (gethash "file" json-data))
                (pos (gethash "pos" json-data))
@@ -547,6 +547,7 @@ Returns updated todo with new file and pos for cache update."
         (unless (eq (gethash "body" json-data :not-found) :not-found)
           (push (cons "body" (if (eq body :null) nil body)) updates))
         (message "[/update] Updates to apply: %S" updates)
+        (org-agenda-api--refresh-agenda-buffers)
         ;; Strict requests never fall back to another identifier.
         (when strict
           (setq location (org-agenda-api--strict-todo-location id file pos title)))
@@ -602,7 +603,7 @@ Accepts JSON body with:
                    (affects LOGBOOK timestamp, useful for retroactive completions)"
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (org-agenda-api--parse-json-request-body content-header))
+             (json-data (org-agenda-api--parse-json-object content-header))
              (id (gethash "id" json-data))
              (file (gethash "file" json-data))
              (pos (gethash "pos" json-data))
@@ -615,6 +616,7 @@ Accepts JSON body with:
                                        (not (string-empty-p override-date-str)))
                               (org-agenda-api--parse-datetime override-date-str)))
              (location nil))
+        (org-agenda-api--refresh-agenda-buffers)
         ;; Strict requests use the id exclusively when it is present.
         (when strict
           (setq location (org-agenda-api--strict-todo-location id file pos title)))
@@ -672,7 +674,7 @@ Accepts JSON body with:
   (condition-case err
       (catch 'done
         (let* ((content-header (cadr (assoc "Content" headers)))
-               (json-data (org-agenda-api--parse-json-request-body content-header))
+               (json-data (org-agenda-api--parse-json-object content-header))
                (id (gethash "id" json-data))
                (file (gethash "file" json-data))
                (pos (gethash "pos" json-data))
@@ -690,6 +692,7 @@ Accepts JSON body with:
             (insert (json-encode `(("status" . "error")
                                    ("message" . "Missing required 'state' parameter"))))
             (throw 'done nil))
+          (org-agenda-api--refresh-agenda-buffers)
           (when strict
             (setq location (org-agenda-api--strict-todo-location id file pos title)))
           ;; Try to find by ID first
@@ -735,7 +738,7 @@ Optional:
   - include_children: if true, delete subtree even if item has children"
   (let* ((content-header (cadr (assoc "Content" headers)))
          (json-data (condition-case parse-err
-                        (org-agenda-api--parse-json-request-body content-header)
+                        (org-agenda-api--parse-json-object content-header)
                       (error
                        (org-agenda-api--log 'error "/delete: Failed to parse JSON body: %s (raw: %s)"
                                             (error-message-string parse-err) content-header)
@@ -752,7 +755,9 @@ Optional:
             (insert (json-encode `(("status" . "error")
                                    ("code" . "INVALID_JSON")
                                    ("message" . "Failed to parse request body as JSON"))))
-          (let ((result (org-agenda-api--delete-item id file position include-children)))
+          (let ((result (progn
+                          (org-agenda-api--refresh-agenda-buffers)
+                          (org-agenda-api--delete-item id file position include-children))))
             (org-agenda-api--log 'info "/delete: Success - deleted '%s'" (cdr (assoc "title" result)))
             (insert (json-encode result))))
       (org-agenda-api-delete-error
@@ -784,6 +789,7 @@ Optional:
 
 (defun org-agenda-api--resolve-todo-location (id file pos title)
   "Resolve todo location from ID, FILE, POS, and TITLE."
+  (org-agenda-api--refresh-agenda-buffers)
   (let ((location nil))
     (when (and file pos)
       (setq location (org-agenda-api--find-todo-by-file-pos-title file pos title)))
@@ -811,7 +817,7 @@ Optional:
   - start: ISO datetime of clock start for precise clock deletion"
   (let* ((content-header (cadr (assoc "Content" headers)))
          (json-data (condition-case parse-err
-                        (org-agenda-api--parse-json-request-body content-header)
+                        (org-agenda-api--parse-json-object content-header)
                       (error
                        (org-agenda-api--log 'error "/delete-logbook-entry: Failed to parse JSON: %s"
                                             (error-message-string parse-err))
@@ -859,7 +865,7 @@ Optional:
 Accepts JSON body with id or file+pos, plus required start and end ISO datetimes."
   (let* ((content-header (cadr (assoc "Content" headers)))
          (json-data (condition-case parse-err
-                        (org-agenda-api--parse-json-request-body content-header)
+                        (org-agenda-api--parse-json-object content-header)
                       (error
                        (org-agenda-api--log 'error "/add-clock: Failed to parse JSON: %s"
                                             (error-message-string parse-err))
@@ -902,7 +908,7 @@ Accepts JSON body with id or file+pos, plus required start and end ISO datetimes
   "Endpoint: Update a CLOCK entry identified by original_start."
   (let* ((content-header (cadr (assoc "Content" headers)))
          (json-data (condition-case parse-err
-                        (org-agenda-api--parse-json-request-body content-header)
+                        (org-agenda-api--parse-json-object content-header)
                       (error
                        (org-agenda-api--log 'error "/update-clock: Failed to parse JSON: %s"
                                             (error-message-string parse-err))
@@ -1088,7 +1094,7 @@ The function is called with no arguments. Returns immediately with status ok.
 This is fire-and-forget - use for batch operations like rescheduling."
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
-             (json-data (org-agenda-api--parse-json-request-body content-header))
+             (json-data (org-agenda-api--parse-json-object content-header))
              (func-name (gethash "function" json-data)))
         (cond
          ((null func-name)
@@ -1099,7 +1105,7 @@ This is fire-and-forget - use for batch operations like rescheduling."
           (insert (json-encode `(("status" . "error")
                                  ("message" . ,(format "Function not in whitelist: %s" func-name))))))
          (t
-          (let ((func-sym (intern func-name)))
+          (let ((func-sym (intern-soft func-name)))
             (if (fboundp func-sym)
                 (progn
                   (org-agenda-api--log 'info "/call-function: Calling %s" func-name)

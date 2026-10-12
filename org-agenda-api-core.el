@@ -248,7 +248,7 @@ Each entry has \"id\" (function symbol name) and \"name\" (display name)."
 
 (defun org-agenda-api--function-whitelisted-p (func-name)
   "Return t if FUNC-NAME (string) is in the exposed functions whitelist."
-  (let ((func-sym (intern func-name)))
+  (let ((func-sym (and (stringp func-name) (intern-soft func-name))))
     (cl-some (lambda (entry)
                (if (symbolp entry)
                    (eq entry func-sym)
@@ -393,32 +393,32 @@ Call this at the end of each servlet."
 (defvar org-agenda-api--todos-cache nil
   "Cached TODO items from last computation.")
 
-(defvar org-agenda-api--cache-mtime nil
-  "Maximum modification time of org files when cache was built.")
+(defvar org-agenda-api--cache-fingerprint nil
+  "Value of `org-agenda-api--files-fingerprint' when the cache was built.")
 
-(defun org-agenda-api--get-max-mtime ()
-  "Get the maximum modification time across all `org-agenda-files'."
-  (if (null org-agenda-files)
-      0
-    (apply #'max
-           (mapcar (lambda (file)
-                     (if (file-exists-p file)
-                         (float-time (file-attribute-modification-time
-                                      (file-attributes file)))
-                       0))
-                   org-agenda-files))))
+(defun org-agenda-api--files-fingerprint ()
+  "Return a fingerprint of `org-agenda-files' for cache validation.
+The fingerprint lists each file with its modification time (nil when
+missing) and the modification tick of any buffer visiting it, so adding,
+removing, or editing any file changes it."
+  (mapcar (lambda (file)
+            (let ((buf (get-file-buffer file)))
+              (list file
+                    (file-attribute-modification-time (file-attributes file))
+                    (and buf (buffer-modified-tick buf)))))
+          org-agenda-files))
 
 (defun org-agenda-api--cache-valid-p ()
   "Return t if the TODO cache is still valid."
   (and org-agenda-api--todos-cache
-       org-agenda-api--cache-mtime
-       (<= (org-agenda-api--get-max-mtime)
-           org-agenda-api--cache-mtime)))
+       org-agenda-api--cache-fingerprint
+       (equal (org-agenda-api--files-fingerprint)
+              org-agenda-api--cache-fingerprint)))
 
 (defun org-agenda-api--invalidate-cache ()
   "Invalidate the TODO cache."
   (setq org-agenda-api--todos-cache nil
-        org-agenda-api--cache-mtime nil))
+        org-agenda-api--cache-fingerprint nil))
 
 ;;; Git Refresh
 
@@ -534,10 +534,23 @@ directory can be determined."
   "Return the list of namespaces that have stored config."
   (let ((dir (org-agenda-api--app-config-directory)))
     (when (and dir (file-directory-p dir))
-      (mapcar #'file-name-sans-extension
-              (directory-files dir nil "\\.json\\'")))))
+      (cl-remove-if-not #'org-agenda-api--app-config-valid-namespace-p
+                        (mapcar #'file-name-sans-extension
+                                (directory-files dir nil "\\.json\\'"))))))
 
 ;;; Utility Functions
+
+(defun org-agenda-api--parse-json-object (body)
+  "Parse request BODY as JSON, signaling an error unless it is an object."
+  (let ((data (org-agenda-api--parse-json-request-body (or body ""))))
+    (unless (hash-table-p data)
+      (error "Request body must be a JSON object"))
+    data))
+
+(defun org-agenda-api--assert-single-line (field value)
+  "Signal an error if string VALUE for FIELD spans multiple lines."
+  (when (and (stringp value) (string-match-p "[\n\r]" value))
+    (error "%s must not contain newlines" field)))
 
 (defconst org-agenda-api--capture-escape-regexp
   "\\(\\\\*\\)%\\(?:[][(^<aAcfFikKlLntTuUx]\\|:[-A-Za-z]\\|\\\\[1-9]\\)"

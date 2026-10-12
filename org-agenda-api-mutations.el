@@ -13,6 +13,57 @@
 (require 'org-agenda-api-core)
 (require 'org-agenda-api-data)
 
+(defmacro org-agenda-api--with-rollback (&rest body)
+  "Run BODY in the current buffer, undoing its edits if it exits non-locally.
+Keeps a failed request from leaving a half-applied mutation in the buffer
+that a later save would persist."
+  (declare (indent 0) (debug t))
+  `(atomic-change-group ,@body))
+
+(defun org-agenda-api--entry-end ()
+  "Return the position where the entry at point ends, before any child."
+  (save-excursion
+    (outline-next-heading)
+    (point)))
+
+(defun org-agenda-api--assert-todo-keyword (state)
+  "Signal an error unless STATE is a TODO keyword in the current buffer."
+  (unless (and (stringp state) (member state org-todo-keywords-1))
+    (error "Unknown TODO state: %s" state)))
+
+(defun org-agenda-api--validate-updates (updates)
+  "Signal an error if any value in UPDATES is malformed.
+Validation happens before any edit so bad input cannot corrupt the file."
+  (pcase-dolist (`(,key . ,value) updates)
+    (pcase key
+      ((or "state" "new_title" "priority" "effort")
+       (unless (or (null value) (stringp value))
+         (error "%s must be a string or null" key))
+       (org-agenda-api--assert-single-line key value))
+      ((or "scheduled" "deadline")
+       (when (and value (not (org-agenda-api--timestamp-to-org value)))
+         (error "Invalid %s timestamp" key)))
+      ("tags"
+       (unless (or (vectorp value) (listp value))
+         (error "tags must be an array"))
+       (seq-doseq (tag value)
+         (unless (and (stringp tag)
+                      (string-match-p (concat "\\`" org-tag-re "\\'") tag))
+           (error "Invalid tag: %S" tag))))
+      ("properties"
+       (dolist (prop value)
+         (unless (and (stringp (car prop))
+                      (string-match-p "\\`[^ \t\n\r:]+\\'" (car prop)))
+           (error "Invalid property name: %S" (car prop)))
+         (unless (or (null (cdr prop)) (stringp (cdr prop)))
+           (error "Property %s must be a string or null" (car prop)))
+         (org-agenda-api--assert-single-line (car prop) (cdr prop))))
+      ("body"
+       (unless (or (null value) (stringp value))
+         (error "body must be a string or null"))
+       (when (and value (string-match-p "^\\*+ " value))
+         (error "body must not contain headings"))))))
+
 (defun org-agenda-api--add-logbook-state-change (old-state new-state &optional time)
   "Add a state change entry to the LOGBOOK drawer.
 OLD-STATE and NEW-STATE are the state strings.
@@ -61,47 +112,50 @@ Returns t if entries were reordered, nil otherwise."
                               (stringp org-log-into-drawer))
                          org-log-into-drawer)
                         (t "LOGBOOK")))
-          (end-of-subtree (save-excursion (org-end-of-subtree t) (point))))
+          (end-of-entry (org-agenda-api--entry-end)))
       (when (re-search-forward
              (format "^[ \t]*:%s:[ \t]*$" (regexp-quote drawer-name))
-             end-of-subtree t)
+             end-of-entry t)
         (let ((drawer-start (point))
               (drawer-end (save-excursion
-                           (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t)
-                           (match-beginning 0)))
+                           (when (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-entry t)
+                             (match-beginning 0))))
               (entries nil)
-              (current-entry-start nil)
               (current-entry-lines nil))
           (when drawer-end
-            ;; Parse entries - each entry starts with "- " and may have continuation lines
-            (goto-char drawer-start)
-            (forward-line 1)
-            (while (< (point) drawer-end)
-              (let ((line (buffer-substring (line-beginning-position) (line-end-position))))
-                (cond
-                 ;; New entry starts with "- "
-                 ((string-match "^[ \t]*- " line)
-                  ;; Save previous entry if exists
-                  (when current-entry-lines
-                    (push (cons (org-agenda-api--extract-logbook-entry-timestamp
-                                 (car current-entry-lines))
-                                (nreverse current-entry-lines))
-                          entries))
-                  (setq current-entry-lines (list line)))
-                 ;; Continuation line (indented, not starting with "- " or ":")
-                 ((and current-entry-lines
-                       (string-match "^[ \t]+" line)
-                       (not (string-match "^[ \t]*:" line)))
-                  (push line current-entry-lines))
-                 ;; Other lines (empty, etc) - ignore
-                 (t nil)))
-              (forward-line 1))
-            ;; Don't forget the last entry
-            (when current-entry-lines
-              (push (cons (org-agenda-api--extract-logbook-entry-timestamp
-                           (car current-entry-lines))
-                          (nreverse current-entry-lines))
-                    entries))
+            ;; Each "- " item (with its indented continuation lines) and each
+            ;; CLOCK line is one entry; any other non-blank line is kept as
+            ;; an undated entry so rewriting the drawer never loses content.
+            (cl-flet ((flush ()
+                        (when current-entry-lines
+                          (push (cons (org-agenda-api--extract-logbook-entry-timestamp
+                                       (car (last current-entry-lines)))
+                                      (reverse current-entry-lines))
+                                entries)
+                          (setq current-entry-lines nil))))
+              (goto-char drawer-start)
+              (forward-line 1)
+              (while (< (point) drawer-end)
+                (let ((line (buffer-substring (line-beginning-position) (line-end-position))))
+                  (cond
+                   ((string-match "^[ \t]*- " line)
+                    (flush)
+                    (setq current-entry-lines (list line)))
+                   ((string-match "^[ \t]*CLOCK:" line)
+                    (flush)
+                    (setq current-entry-lines (list line))
+                    (flush))
+                   ((and current-entry-lines
+                         (string-match "^[ \t]+" line)
+                         (not (string-match "^[ \t]*:" line)))
+                    (push line current-entry-lines))
+                   ((string-match-p "\\`[ \t]*\\'" line) nil)
+                   (t
+                    (flush)
+                    (setq current-entry-lines (list line))
+                    (flush))))
+                (forward-line 1))
+              (flush))
             ;; Sort entries by timestamp (newest first)
             ;; Entries without timestamps go to the end
             (setq entries (nreverse entries))
@@ -175,9 +229,8 @@ OVERRIDE-DATE, if provided, should be an encoded time value that will be used
 as the effective date for the state change (affects LOGBOOK timestamps).
 Returns alist with status and details."
   (let ((new-state (or new-state "DONE")))
-    (with-current-buffer (find-file-noselect file t)  ; t = suppress warnings
-      ;; Force re-read from disk to avoid stale buffer issues
-      (revert-buffer t t t)
+    (with-current-buffer (org-agenda-api--file-buffer file)
+      (org-agenda-api--assert-todo-keyword new-state)
       (save-excursion
         (goto-char pos)
         (if (org-at-heading-p)
@@ -187,43 +240,44 @@ Returns alist with status and details."
                   (deadline-before (org-entry-get (point) "DEADLINE"))
                   (scheduled-preserved nil)
                   (deadline-preserved nil))
-              ;; Ensure org-id exists (auto-create if enabled)
-              (org-agenda-api--ensure-org-id)
-              ;; Call org-todo and run post-command-hook, optionally with date override.
-              ;; The post-command-hook must be inside the cl-letf because org-add-log-note
-              ;; is added to post-command-hook and uses org-current-effective-time when run.
-              ;; We also override current-time because some org-mode code paths use it directly.
-              (if override-date
+              (org-agenda-api--with-rollback
+                ;; Ensure org-id exists (auto-create if enabled)
+                (org-agenda-api--ensure-org-id)
+                ;; Call org-todo and run post-command-hook, optionally with date override.
+                ;; The post-command-hook must be inside the cl-letf because org-add-log-note
+                ;; is added to post-command-hook and uses org-current-effective-time when run.
+                ;; We also override current-time because some org-mode code paths use it directly.
+                (if override-date
+                    (progn
+                      (cl-letf (((symbol-function 'current-time)
+                                 (lambda (&rest _) override-date))
+                                ((symbol-function 'org-current-effective-time)
+                                 (lambda (&rest _) override-date))
+                                ((symbol-function 'org-today)
+                                 (lambda (&rest _) (time-to-days override-date))))
+                        (org-todo new-state)
+                        ;; Run post-command-hook inside the override scope
+                        (run-hooks 'post-command-hook))
+                      ;; Reorder logbook entries to maintain chronological order
+                      ;; (override-date may have inserted entry out of order)
+                      (org-back-to-heading t)
+                      (org-agenda-api--reorder-logbook-entries)
+                      (org-back-to-heading t)
+                      (setq scheduled-preserved
+                            (org-agenda-api--preserve-planning-if-regressed
+                             "SCHEDULED" scheduled-before))
+                      (setq deadline-preserved
+                            (org-agenda-api--preserve-planning-if-regressed
+                             "DEADLINE" deadline-before)))
                   (progn
-                    (cl-letf (((symbol-function 'current-time)
-                               (lambda (&rest _) override-date))
-                              ((symbol-function 'org-current-effective-time)
-                               (lambda (&rest _) override-date))
-                              ((symbol-function 'org-today)
-                               (lambda (&rest _) (time-to-days override-date))))
-                      (org-todo new-state)
-                      ;; Run post-command-hook inside the override scope
-                      (run-hooks 'post-command-hook))
-                    ;; Reorder logbook entries to maintain chronological order
-                    ;; (override-date may have inserted entry out of order)
-                    (org-back-to-heading t)
-                    (org-agenda-api--reorder-logbook-entries)
-                    (org-back-to-heading t)
-                    (setq scheduled-preserved
-                          (org-agenda-api--preserve-planning-if-regressed
-                           "SCHEDULED" scheduled-before))
-                    (setq deadline-preserved
-                          (org-agenda-api--preserve-planning-if-regressed
-                           "DEADLINE" deadline-before)))
-                (progn
-                  (org-todo new-state)
-                  ;; Run post-command-hook to trigger org-mode's state change logging
-                  ;; (LOGBOOK entries). In non-interactive contexts, org-add-log-note
-                  ;; is added to post-command-hook but never runs without this.
-                  (run-hooks 'post-command-hook)))
-              ;; Force save to disk using save-buffer (simpler, handles file modes correctly)
-              (set-buffer-modified-p t)
-              (save-buffer)
+                    (org-todo new-state)
+                    ;; Run post-command-hook to trigger org-mode's state change logging
+                    ;; (LOGBOOK entries). In non-interactive contexts, org-add-log-note
+                    ;; is added to post-command-hook but never runs without this.
+                    (run-hooks 'post-command-hook)))
+                ;; Force save to disk using save-buffer (simpler, handles file modes correctly)
+                (set-buffer-modified-p t)
+                (save-buffer))
               (org-agenda-api--invalidate-cache)
               ;; Check if this is a window-habit and get summary if so
               (let* ((is-habit (and (fboundp 'org-agenda-api--is-window-habit-p)
@@ -248,7 +302,11 @@ Returns alist with status and details."
   "Update the TODO at FILE and POS with UPDATES alist.
 UPDATES can contain: state, new_title, scheduled, deadline, priority, tags, effort, properties, body.
 Returns alist with status, details, and new position."
-  (with-current-buffer (find-file-noselect file)
+  (org-agenda-api--validate-updates updates)
+  (with-current-buffer (org-agenda-api--file-buffer file)
+    (let ((new-state (cdr (assoc "state" updates))))
+      (when (and new-state (not (string-empty-p new-state)))
+        (org-agenda-api--assert-todo-keyword new-state)))
     (save-excursion
       (goto-char pos)
       (if (org-at-heading-p)
@@ -256,159 +314,160 @@ Returns alist with status, details, and new position."
                 (applied-updates nil)
                 (new-pos nil)
                 (old-state nil))
-            ;; Ensure org-id exists (auto-create if enabled)
-            (org-agenda-api--ensure-org-id)
-            ;; Handle state change (do this early, before other changes)
-            (when (assoc "state" updates)
-              (let ((new-state (cdr (assoc "state" updates))))
-                (when (and new-state (not (string-empty-p new-state)))
-                  (setq old-state (org-get-todo-state))
-                  (org-todo new-state)
-                  (push `("state" . (("from" . ,old-state) ("to" . ,new-state))) applied-updates))))
-            ;; Handle title update (must be done before other changes as it changes heading structure)
-            (when (assoc "new_title" updates)
-              (let ((new-title-value (cdr (assoc "new_title" updates))))
-                (when (and new-title-value (not (string-empty-p new-title-value)))
-                  (org-edit-headline new-title-value)
-                  (setq title new-title-value)  ; Update title for response
-                  (push `("new_title" . ,new-title-value) applied-updates))))
-            ;; Handle scheduled - accepts object {date, time?, repeater?}
-            (when (assoc "scheduled" updates)
-              (let ((scheduled-value (cdr (assoc "scheduled" updates))))
-                (if (or (null scheduled-value) (eq scheduled-value :json-null))
-                    ;; Clear scheduled
-                    (progn
-                      (org-schedule '(4))  ; Universal arg removes scheduling
-                      (push '("scheduled" . nil) applied-updates))
-                  ;; Set scheduled - convert timestamp object to org format
-                  (let ((org-ts (org-agenda-api--timestamp-to-org scheduled-value)))
-                    (when org-ts
-                      (org-schedule nil org-ts)
-                      (push `("scheduled" . ,scheduled-value) applied-updates))))))
-            ;; Handle deadline - accepts object {date, time?, repeater?}
-            (when (assoc "deadline" updates)
-              (let ((deadline-value (cdr (assoc "deadline" updates))))
-                (if (or (null deadline-value) (eq deadline-value :json-null))
-                    ;; Clear deadline
-                    (progn
-                      (org-deadline '(4))  ; Universal arg removes deadline
-                      (push '("deadline" . nil) applied-updates))
-                  ;; Set deadline - convert timestamp object to org format
-                  (let ((org-ts (org-agenda-api--timestamp-to-org deadline-value)))
-                    (when org-ts
-                      (org-deadline nil org-ts)
-                      (push `("deadline" . ,deadline-value) applied-updates))))))
-            ;; Handle priority
-            (when (assoc "priority" updates)
-              (let ((priority-value (cdr (assoc "priority" updates))))
-                (if (or (null priority-value) (string-empty-p priority-value))
-                    ;; Clear priority - ignore error if no priority cookie exists
-                    (progn
-                      (condition-case nil
-                          (org-priority ?\s)  ; Space removes priority
-                        (error nil))  ; Ignore "No priority cookie found" error
-                      (push '("priority" . nil) applied-updates))
-                  ;; Set priority (A, B, or C)
-                  (let ((priority-char (string-to-char (upcase priority-value))))
-                    (when (memq priority-char '(?A ?B ?C))
-                      (org-priority priority-char)
-                      (push `("priority" . ,priority-value) applied-updates))))))
-            ;; Handle tags
-            (when (assoc "tags" updates)
-              (let ((tags-value (cdr (assoc "tags" updates))))
-                ;; Only process if not null/json-null (null means no change)
-                (unless (or (eq tags-value :json-null)
-                            (and (not (vectorp tags-value)) (null tags-value)))
-                  ;; Convert vector to list if needed, then set tags
-                  (let ((tag-list (if (vectorp tags-value)
-                                      (append tags-value nil)
-                                    tags-value)))
-                    (org-set-tags tag-list)
-                    (push `("tags" . ,(vconcat tag-list)) applied-updates)))))
-            ;; Handle arbitrary properties
-            (when (assoc "properties" updates)
-              (let ((properties-value (cdr (assoc "properties" updates)))
-                    (applied-props nil))
-                ;; properties-value should be an alist of (KEY . VALUE) pairs
-                (when (and properties-value
-                           (not (eq properties-value :json-null)))
-                  (dolist (prop properties-value)
-                    (let ((prop-name (car prop))
-                          (prop-value (cdr prop)))
-                      ;; Convert property name to uppercase for org-mode convention
-                      (let ((prop-name-upper (upcase prop-name)))
-                        (if (or (null prop-value) (string-empty-p prop-value))
-                            ;; Remove property if value is empty
-                            (progn
-                              (org-entry-delete (point) prop-name-upper)
-                              (push (cons prop-name-upper nil) applied-props))
-                          ;; Set property
-                          (org-entry-put (point) prop-name-upper prop-value)
-                          (push (cons prop-name-upper prop-value) applied-props)))))
-                  (when applied-props
-                    (push `("properties" . ,applied-props) applied-updates)))))
-            ;; Handle effort through Org's dedicated effort API
-            (when (assoc "effort" updates)
-              (let ((effort-value (cdr (assoc "effort" updates))))
-                (org-agenda-api--set-entry-effort effort-value)
-                (push `("effort" . ,(org-agenda-api--get-entry-effort))
-                      applied-updates)))
-            ;; Handle body - the content after metadata, before next heading
-            (when (assoc "body" updates)
-              (let ((body-value (cdr (assoc "body" updates))))
-                (save-excursion
-                  ;; Go to end of heading line
-                  (org-back-to-heading t)
-                  (let ((heading-end (line-end-position))
-                        (entry-end (save-excursion
-                                     (org-end-of-subtree t t)
-                                     ;; Don't include the final newline before next heading
-                                     (skip-chars-backward "\n")
-                                     (point)))
-                        (content-start nil))
-                    ;; Move past heading line
-                    (goto-char heading-end)
-                    (forward-line 1)
-                    ;; Skip SCHEDULED, DEADLINE, CLOSED lines
-                    (while (and (< (point) entry-end)
-                                (looking-at "^\\s-*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):"))
-                      (forward-line 1))
-                    ;; Skip properties drawer if present (with boundary check)
-                    (when (and (< (point) entry-end)
-                               (looking-at "^\\s-*:PROPERTIES:"))
-                      (re-search-forward "^\\s-*:END:" entry-end t)
-                      (forward-line 1))
-                    ;; Skip logbook drawer if present (with boundary check)
-                    (when (and (< (point) entry-end)
-                               (looking-at "^\\s-*:LOGBOOK:"))
-                      (re-search-forward "^\\s-*:END:" entry-end t)
-                      (forward-line 1))
-                    ;; Now we're at the start of body content
-                    ;; Ensure content-start is not past entry-end
-                    (setq content-start (min (point) entry-end))
-                    ;; Find end of body (before child headings)
-                    ;; Only search if content-start is before entry-end
-                    (let ((body-end (if (>= content-start entry-end)
-                                        entry-end
-                                      (save-excursion
-                                        (goto-char content-start)
-                                        (if (re-search-forward "^\\*+ " entry-end t)
-                                            (line-beginning-position)
-                                          entry-end)))))
-                      ;; Delete existing body content (only if there's something to delete)
-                      (when (< content-start body-end)
-                        (delete-region content-start body-end))
-                      ;; Insert new body if provided
-                      (goto-char content-start)
-                      (when (and body-value
-                                 (not (eq body-value :json-null))
-                                 (not (string-empty-p body-value)))
-                        (insert body-value)
-                        (unless (bolp) (insert "\n")))
-                      (push `("body" . ,body-value) applied-updates))))))
-            ;; Run post-command-hook to trigger any deferred logging (e.g., reschedule/redeadline)
-            (run-hooks 'post-command-hook)
-            (save-buffer)
+            (org-agenda-api--with-rollback
+              ;; Ensure org-id exists (auto-create if enabled)
+              (org-agenda-api--ensure-org-id)
+              ;; Handle state change (do this early, before other changes)
+              (when (assoc "state" updates)
+                (let ((new-state (cdr (assoc "state" updates))))
+                  (when (and new-state (not (string-empty-p new-state)))
+                    (setq old-state (org-get-todo-state))
+                    (org-todo new-state)
+                    (push `("state" . (("from" . ,old-state) ("to" . ,new-state))) applied-updates))))
+              ;; Handle title update (must be done before other changes as it changes heading structure)
+              (when (assoc "new_title" updates)
+                (let ((new-title-value (cdr (assoc "new_title" updates))))
+                  (when (and new-title-value (not (string-empty-p new-title-value)))
+                    (org-edit-headline new-title-value)
+                    (setq title new-title-value)  ; Update title for response
+                    (push `("new_title" . ,new-title-value) applied-updates))))
+              ;; Handle scheduled - accepts object {date, time?, repeater?}
+              (when (assoc "scheduled" updates)
+                (let ((scheduled-value (cdr (assoc "scheduled" updates))))
+                  (if (or (null scheduled-value) (eq scheduled-value :json-null))
+                      ;; Clear scheduled
+                      (progn
+                        (org-schedule '(4))  ; Universal arg removes scheduling
+                        (push '("scheduled" . nil) applied-updates))
+                    ;; Set scheduled - convert timestamp object to org format
+                    (let ((org-ts (org-agenda-api--timestamp-to-org scheduled-value)))
+                      (when org-ts
+                        (org-schedule nil org-ts)
+                        (push `("scheduled" . ,scheduled-value) applied-updates))))))
+              ;; Handle deadline - accepts object {date, time?, repeater?}
+              (when (assoc "deadline" updates)
+                (let ((deadline-value (cdr (assoc "deadline" updates))))
+                  (if (or (null deadline-value) (eq deadline-value :json-null))
+                      ;; Clear deadline
+                      (progn
+                        (org-deadline '(4))  ; Universal arg removes deadline
+                        (push '("deadline" . nil) applied-updates))
+                    ;; Set deadline - convert timestamp object to org format
+                    (let ((org-ts (org-agenda-api--timestamp-to-org deadline-value)))
+                      (when org-ts
+                        (org-deadline nil org-ts)
+                        (push `("deadline" . ,deadline-value) applied-updates))))))
+              ;; Handle priority
+              (when (assoc "priority" updates)
+                (let ((priority-value (cdr (assoc "priority" updates))))
+                  (if (or (null priority-value) (string-empty-p priority-value))
+                      ;; Clear priority - ignore error if no priority cookie exists
+                      (progn
+                        (condition-case nil
+                            (org-priority ?\s)  ; Space removes priority
+                          (error nil))  ; Ignore "No priority cookie found" error
+                        (push '("priority" . nil) applied-updates))
+                    ;; Set priority (A, B, or C)
+                    (let ((priority-char (string-to-char (upcase priority-value))))
+                      (when (memq priority-char '(?A ?B ?C))
+                        (org-priority priority-char)
+                        (push `("priority" . ,priority-value) applied-updates))))))
+              ;; Handle tags
+              (when (assoc "tags" updates)
+                (let ((tags-value (cdr (assoc "tags" updates))))
+                  ;; Only process if not null/json-null (null means no change)
+                  (unless (or (eq tags-value :json-null)
+                              (and (not (vectorp tags-value)) (null tags-value)))
+                    ;; Convert vector to list if needed, then set tags
+                    (let ((tag-list (if (vectorp tags-value)
+                                        (append tags-value nil)
+                                      tags-value)))
+                      (org-set-tags tag-list)
+                      (push `("tags" . ,(vconcat tag-list)) applied-updates)))))
+              ;; Handle arbitrary properties
+              (when (assoc "properties" updates)
+                (let ((properties-value (cdr (assoc "properties" updates)))
+                      (applied-props nil))
+                  ;; properties-value should be an alist of (KEY . VALUE) pairs
+                  (when (and properties-value
+                             (not (eq properties-value :json-null)))
+                    (dolist (prop properties-value)
+                      (let ((prop-name (car prop))
+                            (prop-value (cdr prop)))
+                        ;; Convert property name to uppercase for org-mode convention
+                        (let ((prop-name-upper (upcase prop-name)))
+                          (if (or (null prop-value) (string-empty-p prop-value))
+                              ;; Remove property if value is empty
+                              (progn
+                                (org-entry-delete (point) prop-name-upper)
+                                (push (cons prop-name-upper nil) applied-props))
+                            ;; Set property
+                            (org-entry-put (point) prop-name-upper prop-value)
+                            (push (cons prop-name-upper prop-value) applied-props)))))
+                    (when applied-props
+                      (push `("properties" . ,applied-props) applied-updates)))))
+              ;; Handle effort through Org's dedicated effort API
+              (when (assoc "effort" updates)
+                (let ((effort-value (cdr (assoc "effort" updates))))
+                  (org-agenda-api--set-entry-effort effort-value)
+                  (push `("effort" . ,(org-agenda-api--get-entry-effort))
+                        applied-updates)))
+              ;; Handle body - the content after metadata, before next heading
+              (when (assoc "body" updates)
+                (let ((body-value (cdr (assoc "body" updates))))
+                  (save-excursion
+                    ;; Go to end of heading line
+                    (org-back-to-heading t)
+                    (let ((heading-end (line-end-position))
+                          (entry-end (save-excursion
+                                       (org-end-of-subtree t t)
+                                       ;; Don't include the final newline before next heading
+                                       (skip-chars-backward "\n")
+                                       (point)))
+                          (content-start nil))
+                      ;; Move past heading line
+                      (goto-char heading-end)
+                      (forward-line 1)
+                      ;; Skip SCHEDULED, DEADLINE, CLOSED lines
+                      (while (and (< (point) entry-end)
+                                  (looking-at "^\\s-*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):"))
+                        (forward-line 1))
+                      ;; Skip properties drawer if present (with boundary check)
+                      (when (and (< (point) entry-end)
+                                 (looking-at "^\\s-*:PROPERTIES:"))
+                        (re-search-forward "^\\s-*:END:" entry-end t)
+                        (forward-line 1))
+                      ;; Skip logbook drawer if present (with boundary check)
+                      (when (and (< (point) entry-end)
+                                 (looking-at "^\\s-*:LOGBOOK:"))
+                        (re-search-forward "^\\s-*:END:" entry-end t)
+                        (forward-line 1))
+                      ;; Now we're at the start of body content
+                      ;; Ensure content-start is not past entry-end
+                      (setq content-start (min (point) entry-end))
+                      ;; Find end of body (before child headings)
+                      ;; Only search if content-start is before entry-end
+                      (let ((body-end (if (>= content-start entry-end)
+                                          entry-end
+                                        (save-excursion
+                                          (goto-char content-start)
+                                          (if (re-search-forward "^\\*+ " entry-end t)
+                                              (line-beginning-position)
+                                            entry-end)))))
+                        ;; Delete existing body content (only if there's something to delete)
+                        (when (< content-start body-end)
+                          (delete-region content-start body-end))
+                        ;; Insert new body if provided
+                        (goto-char content-start)
+                        (when (and body-value
+                                   (not (eq body-value :json-null))
+                                   (not (string-empty-p body-value)))
+                          (insert body-value)
+                          (unless (bolp) (insert "\n")))
+                        (push `("body" . ,body-value) applied-updates))))))
+              ;; Run post-command-hook to trigger any deferred logging (e.g., reschedule/redeadline)
+              (run-hooks 'post-command-hook)
+              (save-buffer))
             (org-agenda-api--invalidate-cache)
             ;; Get new position - go back to beginning of heading line
             (org-back-to-heading t)
@@ -470,7 +529,7 @@ Returns alist with deletion result."
        target-file))
 
     ;; Open file and navigate to position
-    (with-current-buffer (find-file-noselect target-file)
+    (with-current-buffer (org-agenda-api--file-buffer target-file)
       (widen)
       (goto-char target-pos)
 
@@ -504,7 +563,7 @@ Returns alist with deletion result."
 
         ;; Delete the subtree
         (condition-case err
-            (progn
+            (org-agenda-api--with-rollback
               (org-cut-subtree)
               (save-buffer))
           (error
@@ -531,7 +590,7 @@ ENTRY-TYPE if provided filters to only delete entries of that type
 \(e.g., \"state-change\", \"note\", \"clock\").
 START, when non-nil, narrows clock deletion to the entry with that ISO start.
 Returns alist with deletion result."
-  (with-current-buffer (find-file-noselect file)
+  (with-current-buffer (org-agenda-api--file-buffer file)
     (save-excursion
       (goto-char pos)
       (if (not (org-at-heading-p))
@@ -543,7 +602,7 @@ Returns alist with deletion result."
                                    (stringp org-log-into-drawer))
                               org-log-into-drawer)
                              (t "LOGBOOK")))
-               (end-of-subtree (save-excursion (org-end-of-subtree t) (point)))
+               (end-of-subtree (org-agenda-api--entry-end))
                (deleted nil)
                (deleted-entry-raw nil))
           ;; Find the LOGBOOK drawer
@@ -554,8 +613,8 @@ Returns alist with deletion result."
                 ("message" . ,(format "No LOGBOOK drawer found for '%s'" title)))
             (let ((drawer-start (point))
                   (drawer-end (save-excursion
-                                (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t)
-                                (match-beginning 0))))
+                                (when (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t)
+                                  (match-beginning 0)))))
               (if (not drawer-end)
                   `(("status" . "error")
                     ("message" . "Malformed LOGBOOK drawer - no :END: found"))
@@ -678,7 +737,7 @@ Returns alist with deletion result."
   "Add a CLOCK entry at FILE POS from START-ISO to END-ISO."
   (let* ((duration-minutes (org-agenda-api--clock-duration-minutes start-iso end-iso))
          (clock-line (org-agenda-api--clock-line start-iso end-iso)))
-    (with-current-buffer (find-file-noselect file)
+    (with-current-buffer (org-agenda-api--file-buffer file)
       (save-excursion
         (goto-char pos)
         (if (not (org-at-heading-p))
@@ -701,7 +760,7 @@ Returns alist with deletion result."
   "Update CLOCK entry at FILE POS matching ORIGINAL-START."
   (let* ((duration-minutes (org-agenda-api--clock-duration-minutes start-iso end-iso))
          (clock-line (org-agenda-api--clock-line start-iso end-iso)))
-    (with-current-buffer (find-file-noselect file)
+    (with-current-buffer (org-agenda-api--file-buffer file)
       (save-excursion
         (goto-char pos)
         (if (not (org-at-heading-p))
@@ -712,7 +771,7 @@ Returns alist with deletion result."
                                        (stringp org-log-into-drawer)
                                        org-log-into-drawer)
                                   "LOGBOOK"))
-                 (end-of-subtree (save-excursion (org-end-of-subtree t) (point)))
+                 (end-of-subtree (org-agenda-api--entry-end))
                  (updated nil))
             (if (not (re-search-forward
                       (format "^[ \t]*:%s:[ \t]*$" (regexp-quote drawer-name))
@@ -720,8 +779,9 @@ Returns alist with deletion result."
                 `(("status" . "not_found")
                   ("message" . ,(format "No LOGBOOK drawer found for '%s'" title)))
               (let ((drawer-end (save-excursion
-                                  (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t)
-                                  (match-beginning 0))))
+                                  (if (re-search-forward "^[ \t]*:END:[ \t]*$" end-of-subtree t)
+                                      (match-beginning 0)
+                                    (error "Malformed LOGBOOK drawer - no :END: found")))))
                 (while (and (not updated) (< (point) drawer-end))
                   (let ((line (buffer-substring-no-properties
                                (line-beginning-position) (line-end-position))))
