@@ -16,6 +16,14 @@
 (require 'org-element)
 (require 'org-agenda-api-core)
 
+(declare-function org-capture-kill "org-capture" ())
+(declare-function org-wild-notifier-get-upcoming-notifications "org-wild-notifier")
+(declare-function org-agenda-api--is-window-habit-p "org-agenda-api-window-habit" ())
+(declare-function org-agenda-api--active-window-habit-instance
+                  "org-agenda-api-window-habit" (&optional reference-time))
+(declare-function org-agenda-api--date-string-to-time
+                  "org-agenda-api-window-habit" (date-string))
+
 ;;; Timestamp Handling
 
 (defun org-agenda-api--parse-notify-before (value)
@@ -42,7 +50,8 @@ Returns nil if TS-ELEMENT is nil."
 (defun org-agenda-api--timestamp-end-to-time (ts-element)
   "Convert org-element timestamp TS-ELEMENT end to Emacs time.
 Returns nil if TS-ELEMENT is nil or has no end time/date.
-Handles both date ranges (<date>--<date>) and same-day time ranges (<date time-time>).
+Handles date ranges (<date>--<date>) and same-day time ranges
+(<date time-time>).
 For same-day time ranges, uses start date with end time."
   (when ts-element
     (let ((hour-end (org-element-property :hour-end ts-element))
@@ -68,7 +77,7 @@ Otherwise return date-only format."
       (format-time-string "%Y-%m-%d" time))))
 
 (defun org-agenda-api--format-timestamp-object (time has-time repeater)
-  "Format TIME as timestamp object with date, time (optional), and repeater (optional).
+  "Format TIME as a timestamp object with optional time and REPEATER.
 Returns alist like ((date . \"2026-01-25\") (time . \"10:00\") (repeater . ...))
 or nil if TIME is nil."
   (when time
@@ -300,7 +309,8 @@ Returns an alist of (KEY . VALUE) pairs for all properties in the drawer."
 
 (defun org-agenda-api--parse-inactive-timestamp (ts-string)
   "Parse inactive timestamp TS-STRING to ISO format.
-Handles timestamps like 2026-01-21 Wed 10:30 (content from org-ts-regexp-inactive capture)."
+Handles timestamps like 2026-01-21 Wed 10:30, captured with
+`org-ts-regexp-inactive'."
   (when ts-string
     ;; org-ts-regexp-inactive captures: YYYY-MM-DD followed by optional day/time
     ;; e.g., "2026-01-21 Wed 10:30" or "2026-01-21 Wed"
@@ -658,12 +668,12 @@ Returns ISO format timestamp string or nil."
           (org-agenda-api--parse-inactive-timestamp (match-string 1 line)))))))
 
 (defun org-agenda-api--extract-completed-timestamp-from-agenda-line (agenda-line)
-  "Extract completion timestamp from AGENDA-LINE when it logs a done state change.
+  "Extract completion time from a done-state log in AGENDA-LINE.
 Returns ISO timestamp string or nil.
 
-In log mode, org-agenda shows state transitions (e.g. \"State \\\"DONE\\\" ... [ts]\").
-For repeated completion/reopen cycles, these log lines preserve historical completion
-dates even when the heading's current CLOSED timestamp has changed."
+Org log mode shows done-state transitions with their timestamps.
+For repeated completion/reopen cycles, these log lines preserve historical
+completion dates even when the heading's current CLOSED timestamp has changed."
   (when (and (stringp agenda-line)
              (string-match "State \"\\([^\"]+\\)\"" agenda-line))
     (let ((to-state (match-string 1 agenda-line)))
@@ -729,7 +739,8 @@ historical completion rows for reopened/re-completed tasks."
 (defun org-agenda-api--extract-entry-data (marker agenda-line &optional query-date)
   "Extract todo data from the org entry at MARKER.
 AGENDA-LINE is the raw agenda display text for reference.
-QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completions."
+QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit
+completions."
   (when (marker-buffer marker)
     (with-current-buffer (marker-buffer marker)
       (save-excursion
@@ -1420,7 +1431,7 @@ Returns org timestamp like <2026-01-25 Sat 10:00 +1w>."
 (defun org-agenda-api--parse-org-timestamp-to-object (ts-string)
   "Parse org timestamp TS-STRING to timestamp object.
 Returns alist with \"date\", \"time\" (if present), and \"repeater\" (if present).
-Example: <2026-01-25 Sat 10:00 +1w> -> ((date . \"2026-01-25\") (time . \"10:00\") (repeater . ...))"
+Example: <2026-01-25 Sat 10:00 +1w> includes date, time, and repeater fields."
   (when (and ts-string (not (string-empty-p ts-string)))
     (let ((result nil))
       ;; Extract date (YYYY-MM-DD)
@@ -1868,7 +1879,7 @@ for today, or on both dates for both."
 (defun org-agenda-api--build-multi-day-response
     (span start-date end-date-param today-str include-overdue include-completed overdue-behavior)
   "Build multi-day agenda response.
-SPAN is 'day or 'week.
+SPAN is `day' or `week'.
 START-DATE is the first date (YYYY-MM-DD).
 END-DATE-PARAM is optional end date override.
 TODAY-STR is the date to treat as today.
