@@ -519,8 +519,11 @@ let
     if [ -n "$GIT_SYNC_REPOSITORY" ]; then
       ${pkgs.git}/bin/git config --global --add safe.directory /data/org
       if [ ! -d "/data/org/.git" ]; then
-        ${pkgs.coreutils}/bin/echo "Cloning repository from $GIT_SYNC_REPOSITORY..."
-        ${pkgs.git}/bin/git clone "$GIT_SYNC_REPOSITORY" /data/org
+        ${pkgs.coreutils}/bin/echo "Cloning repository into /data/org..."
+        if ! ${pkgs.git}/bin/git clone "$GIT_SYNC_REPOSITORY" /data/org > /dev/null 2>&1; then
+          echo "Failed to clone repository into /data/org" >&2
+          exit 1
+        fi
       fi
     else
       ${pkgs.git}/bin/git config --global --add safe.directory /data/org

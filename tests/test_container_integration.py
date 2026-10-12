@@ -12,9 +12,12 @@ Skip with: pytest tests/ --ignore=tests/test_container_integration.py
 
 import os
 import asyncio
+import io
+import json
 import shutil
 import socket
 import subprocess
+import tarfile
 import time
 import uuid
 from pathlib import Path
@@ -39,29 +42,6 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
-
-
-def cleanup_stale_containers():
-    """Remove any stale test containers from previous runs."""
-    result = subprocess.run(
-        [
-            "docker",
-            "ps",
-            "-a",
-            "--filter",
-            f"name={CONTAINER_NAME_PREFIX}",
-            "--format",
-            "{{.Names}}",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        for container_name in result.stdout.strip().split("\n"):
-            if container_name:
-                subprocess.run(
-                    ["docker", "rm", "-f", container_name], capture_output=True
-                )
 
 
 def wait_for_server(url: str, timeout: float = 60.0, interval: float = 1.0) -> bool:
@@ -103,7 +83,7 @@ class TestContainerBuild:
 
 
 @pytest.fixture(scope="module")
-def container_image():
+def container_image(tmp_path_factory):
     """Build and load the container image."""
     # Build container
     result = run_command(
@@ -115,19 +95,77 @@ def container_image():
 
     image_path = result.stdout.strip()
 
-    # Load into Docker
-    result = run_command(["docker", "load", "-i", image_path])
+    # Load under a unique tag without replacing another session's image tag.
+    image_name = f"{CONTAINER_NAME_PREFIX}:{uuid.uuid4().hex}"
+    archive_path = tmp_path_factory.mktemp("container-image") / "image.tar"
+    with tarfile.open(image_path, "r:gz") as source:
+        with tarfile.open(archive_path, "w") as target:
+            for member in source:
+                contents = source.extractfile(member) if member.isfile() else None
+                if member.name == "manifest.json":
+                    manifest = json.load(contents)
+                    assert len(manifest) == 1
+                    manifest[0]["RepoTags"] = [image_name]
+                    payload = json.dumps(manifest).encode()
+                    member.size = len(payload)
+                    contents = io.BytesIO(payload)
+                target.addfile(member, contents)
+
+    result = run_command(["docker", "load", "-i", str(archive_path)])
+    archive_path.unlink()
     if result.returncode != 0:
         pytest.skip(f"Docker load failed: {result.stderr}")
 
-    # Extract image name from output (format: "Loaded image: name:tag")
-    for line in result.stdout.split("\n"):
-        if "Loaded image:" in line:
-            image_name = line.split("Loaded image:")[-1].strip()
-            return image_name
+    try:
+        yield image_name
+    finally:
+        run_command(["docker", "image", "rm", image_name])
 
-    # Fallback to default name
-    return "org-agenda-api:latest"
+
+@pytest.fixture
+def start_container(container_image):
+    """Start uniquely named containers and remove only this test's containers."""
+    names = []
+
+    def start(*args, ready=True):
+        name = f"{CONTAINER_NAME_PREFIX}-{uuid.uuid4().hex[:12]}"
+        port = find_free_port()
+        names.append(name)
+        result = run_command(
+            ["docker", "run", "-d", "--name", name, "-p", f"{port}:80"]
+            + list(args)
+            + [container_image]
+        )
+        assert result.returncode == 0, result.stderr
+        url = f"http://localhost:{port}"
+        if ready and not wait_for_server(f"{url}/health"):
+            logs = run_command(["docker", "logs", name])
+            pytest.fail(f"Container did not start: {logs.stdout}\n{logs.stderr}")
+        return {"name": name, "url": url, "port": port}
+
+    try:
+        yield start
+    finally:
+        for name in names:
+            run_command(["docker", "rm", "-fv", name])
+
+
+class TestContainerStartup:
+    def test_clone_failure_does_not_log_credentials(self, start_container):
+        container = start_container(
+            "-e",
+            "GIT_SYNC_REPOSITORY=https://test-user:secret-clone-token@127.0.0.1:1/private.git",
+            ready=False,
+        )
+        result = run_command(["docker", "wait", container["name"]], timeout=30)
+        assert result.returncode == 0
+        assert result.stdout.strip() == "1"
+        logs = run_command(["docker", "logs", container["name"]])
+        output = logs.stdout + logs.stderr
+        assert "secret-clone-token" not in output
+        assert "test-user" not in output
+        assert "Cloning repository into /data/org" in output
+        assert "Failed to clone repository into /data/org" in output
 
 
 def make_git_dir_deletable(path: Path):
@@ -207,9 +245,6 @@ def git_repo(tmp_path):
 @pytest.fixture
 def running_container(container_image, git_repo, tmp_path):
     """Start a container for testing."""
-    # Clean up any stale containers from previous runs
-    cleanup_stale_containers()
-
     # Use unique name with UUID to avoid conflicts
     container_name = f"{CONTAINER_NAME_PREFIX}-{uuid.uuid4().hex[:8]}"
     # Use dynamic port to avoid "port already allocated" errors
@@ -250,7 +285,7 @@ def running_container(container_image, git_repo, tmp_path):
     if not wait_for_server(f"{base_url}/get-all-todos", timeout=60):
         # Get container logs for debugging
         logs = run_command(["docker", "logs", container_name])
-        run_command(["docker", "rm", "-f", container_name])
+        run_command(["docker", "rm", "-fv", container_name])
         pytest.fail(
             f"Container did not start in time. Logs:\n{logs.stdout}\n{logs.stderr}"
         )
@@ -280,7 +315,7 @@ def running_container(container_image, git_repo, tmp_path):
             "/data/remote.git",
         ]
     )
-    run_command(["docker", "rm", "-f", container_name])
+    run_command(["docker", "rm", "-fv", container_name])
 
 
 class TestContainerAPI:
