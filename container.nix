@@ -698,7 +698,6 @@ let
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         # Org agenda API settings
-        "ORG_AGENDA_FILES=/data/org"
         "ORG_INBOX_FILE=/data/org/inbox.org"
         "ORG_API_PORT=${toString port}"
         "ORG_AGENDA_API_GIT_COMMIT=${gitCommit}"

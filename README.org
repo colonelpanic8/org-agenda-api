@@ -233,12 +233,15 @@ without linking to the note, each with the mentioning line as =context=.
 | =GIT_SSH_PRIVATE_KEY=  | SSH private key content                       |
 | =GIT_USER_EMAIL=       | Git user email for commits                    |
 | =GIT_USER_NAME=        | Git user name for commits                     |
-| =ORG_AGENDA_FILES=     | Colon-separated list of org file paths        |
+| =ORG_AGENDA_FILES=     | Colon-separated org file paths; discovered under /data when unset; empty disables agenda files |
 | =ORG_INBOX_FILE=       | Path for new captures (default: /data/org/inbox.org) |
 | =ORG_MEMORY_FILE=      | Org file backing the /memory endpoints (disabled when unset) |
 | =ORG_NOTES_DIRS=       | Colon-separated directories served by /notes (default: synced repos; empty disables) |
 | =ORG_API_MAX_REQUESTS= | Max requests before worker restart            |
 | =ORG_API_MAX_LIFETIME= | Max seconds before worker restart             |
+
+Custom Elisp that sets =org-agenda-files= takes precedence over
+=ORG_AGENDA_FILES= and automatic discovery.
 
 Repositories are cloned before the services start. Existing checkouts are reused.
 If any git sync watcher exits, supervisord restarts the whole watcher group.

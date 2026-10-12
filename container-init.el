@@ -99,8 +99,8 @@
     (eval (car (read-from-string (format "(progn %s)" custom-elisp-content))))))
 
 ;; === Auto-discovery of org files ===
-;; If org-agenda-files is not set after loading custom elisp,
-;; auto-discover org files from the data directory
+;; If custom elisp leaves org-agenda-files unset, use ORG_AGENDA_FILES
+;; or discover org files from the data directory.
 
 (defun org-agenda-api--discover-org-files ()
   "Discover org files in /data directory.
@@ -145,20 +145,26 @@ Searches for .org files in:
       org-files))))
 
 (unless org-agenda-files
-  (message "org-agenda-files not set, auto-discovering org files...")
-  (let ((discovered (org-agenda-api--discover-org-files)))
-    (if discovered
+  (let ((configured (getenv "ORG_AGENDA_FILES")))
+    (if configured
         (progn
-          (setq org-agenda-files discovered)
-          (message "Auto-discovered %d org files" (length discovered))
-          ;; Set inbox file to first repo's inbox.org if not explicitly set
-          (unless (getenv "ORG_INBOX_FILE")
-            (let* ((first-file (car discovered))
-                   (first-dir (file-name-directory first-file))
-                   (inbox-candidate (expand-file-name "inbox.org" first-dir)))
-              (setq org-agenda-api-inbox-file inbox-candidate)
-              (message "Auto-set inbox file to: %s" inbox-candidate))))
-      (message "Warning: No org files found in /data"))))
+          (setq org-agenda-files (split-string configured ":" t))
+          (message "Using %d org files from ORG_AGENDA_FILES"
+                   (length org-agenda-files)))
+      (message "org-agenda-files not set, auto-discovering org files...")
+      (let ((discovered (org-agenda-api--discover-org-files)))
+        (if discovered
+            (progn
+              (setq org-agenda-files discovered)
+              (message "Auto-discovered %d org files" (length discovered))
+              ;; Set inbox file to first repo's inbox.org if not explicitly set
+              (unless (getenv "ORG_INBOX_FILE")
+                (let* ((first-file (car discovered))
+                       (first-dir (file-name-directory first-file))
+                       (inbox-candidate (expand-file-name "inbox.org" first-dir)))
+                  (setq org-agenda-api-inbox-file inbox-candidate)
+                  (message "Auto-set inbox file to: %s" inbox-candidate))))
+          (message "Warning: No org files found in /data"))))))
 
 ;; === Default Capture Templates ===
 ;; Set up default capture templates if not already configured

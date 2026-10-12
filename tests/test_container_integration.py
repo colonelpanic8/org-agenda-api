@@ -215,6 +215,103 @@ class TestContainerStartup:
         assert response.status_code == 200
         assert len(response.json()["todos"]) == len(paths)
 
+    def test_single_repo_with_auth_and_mounted_ssh_key(
+        self, start_container, git_repo, tmp_path
+    ):
+        key_file = tmp_path / "ssh_key"
+        key_file.write_text("synthetic-test-key\n")
+        container = start_container(
+            "-v",
+            f"{git_repo['bare']}:/remote.git:ro",
+            "-v",
+            f"{key_file}:/secrets/ssh_key:ro",
+            "-e",
+            "GIT_SYNC_REPOSITORY=file:///remote.git",
+            "-e",
+            "AUTH_USER=test-user",
+            "-e",
+            "AUTH_PASSWORD=test-password",
+        )
+        url = f"{container['url']}/get-all-todos"
+        assert requests.get(url, timeout=10).status_code == 401
+        response = requests.get(url, auth=("test-user", "test-password"), timeout=10)
+        assert response.status_code == 200
+        assert any(todo["title"] == "Initial task" for todo in response.json()["todos"])
+        result = run_command(
+            [
+                "docker",
+                "exec",
+                container["name"],
+                "stat",
+                "-c",
+                "%a",
+                "/root/.ssh/id_rsa",
+            ]
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "600"
+        result = run_command(
+            [
+                "docker",
+                "exec",
+                container["name"],
+                "cat",
+                "/root/.ssh/id_rsa",
+            ]
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == key_file.read_text()
+
+
+class TestContainerAgendaFiles:
+    @pytest.mark.parametrize(
+        ("configuration", "expected"),
+        [
+            ("environment", ["first.org", "second.org"]),
+            ("custom-file", ["third.org"]),
+            ("custom-inline", ["third.org"]),
+            ("discovery", ["first.org", "second.org", "third.org"]),
+            ("empty", []),
+        ],
+    )
+    def test_agenda_files_precedence(
+        self, start_container, tmp_path, configuration, expected
+    ):
+        org_dir = tmp_path / "org"
+        org_dir.mkdir()
+        for filename in ("first.org", "second.org", "third.org"):
+            (org_dir / filename).write_text(f"* TODO Task from {filename}\n")
+        args = ["-v", f"{org_dir}:/data/org:ro"]
+        if configuration != "discovery":
+            value = (
+                ""
+                if configuration == "empty"
+                else "/data/org/first.org:/data/org/second.org"
+            )
+            args += ["-e", f"ORG_AGENDA_FILES={value}"]
+        custom_elisp = '(setq org-agenda-files (list "/data/org/third.org"))'
+        if configuration == "custom-file":
+            custom_file = tmp_path / "custom.el"
+            custom_file.write_text(custom_elisp)
+            args += [
+                "-v",
+                f"{custom_file}:/custom.el:ro",
+                "-e",
+                "ORG_API_CUSTOM_ELISP=/custom.el",
+            ]
+        elif configuration == "custom-inline":
+            args += ["-e", f"ORG_API_CUSTOM_ELISP_CONTENT={custom_elisp}"]
+        container = start_container(*args)
+        response = requests.get(f"{container['url']}/agenda-files", timeout=10)
+        assert response.status_code == 200
+        assert sorted(file["path"] for file in response.json()["files"]) == sorted(
+            f"/data/org/{filename}" for filename in expected
+        )
+        response = requests.get(f"{container['url']}/get-all-todos", timeout=10)
+        assert response.status_code == 200
+        titles = {todo["title"] for todo in response.json()["todos"]}
+        assert titles == {f"Task from {filename}" for filename in expected}
+
 
 def make_git_dir_deletable(path: Path):
     """Make a git directory deletable by fixing permissions on .git objects.
