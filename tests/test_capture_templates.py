@@ -445,3 +445,26 @@ class TestCaptureValueEscaping:
 
         assert response.json()["status"] == "created"
         assert f"* TODO {title}\n" in (org_dir / "inbox.org").read_text()
+
+
+class TestCaptureTargets:
+    """Captures land where org-capture would put them for each target type."""
+
+    def test_file_headline_target_nests_entries_under_heading(self, api, org_dir):
+        for title in ("First nested capture", "Second nested capture"):
+            response = api.capture("under-headline", {"Title": title})
+            assert response.json()["status"] == "created"
+
+        content = (org_dir / "inbox.org").read_text()
+        assert (
+            "* Captured Projects\n"
+            "** TODO First nested capture\n"
+            "** TODO Second nested capture\n"
+        ) in content
+
+    def test_function_target_writes_to_the_located_file(self, api, org_dir):
+        response = api.capture("function-target", {"Title": "Journal entry 5521"})
+
+        assert response.json()["status"] == "created"
+        assert "* Journal entry 5521\n" in (org_dir / "journal.org").read_text()
+        assert "Journal entry 5521" not in (org_dir / "inbox.org").read_text()

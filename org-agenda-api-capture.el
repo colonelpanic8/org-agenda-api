@@ -269,6 +269,43 @@ like %(sexp), %U, %t, etc."
     (setq result (org-capture-fill-template result))
     result))
 
+(defun org-agenda-api--capture-insertion-point (target prepend)
+  "Prepare the buffer for capture TARGET and return (BUFFER POS LEVEL).
+Uses org-capture's own target resolution, so every target type org-capture
+supports (file, id, file+headline, file+olp, datetrees, functions) lands
+where an interactive capture would.  An entry under a target heading is
+inserted as its last child (first when PREPEND is non-nil) at LEVEL;
+otherwise it is a top-level entry at the end (or start) of the file."
+  (when (or (eq target 'here) (memq (car-safe target) '(here clock)))
+    (org-agenda-api--capture-client-error
+     "Capture target %S is not supported through the API" target))
+  (let ((org-capture-plist (list :target target)))
+    (save-window-excursion
+      (org-capture-set-target-location target))
+    (with-current-buffer (org-capture-get :buffer)
+      (save-excursion
+        (goto-char (or (org-capture-get :exact-position)
+                       (org-capture-get :pos)))
+        (if (and (org-capture-get :target-entry-p) (org-at-heading-p))
+            (let ((level (org-get-valid-level (org-outline-level) 1)))
+              (if prepend
+                  (outline-next-heading)
+                (org-end-of-subtree t t))
+              (list (current-buffer) (point) level))
+          (if prepend
+              (progn (goto-char (point-min))
+                     (unless (org-at-heading-p) (outline-next-heading)))
+            (goto-char (point-max)))
+          (list (current-buffer) (point) 1))))))
+
+(defun org-agenda-api--demote-entry-text (text level)
+  "Return entry TEXT with its headings moved down to start at LEVEL."
+  (if (<= level 1)
+      text
+    (replace-regexp-in-string
+     "^\\*+ " (lambda (stars) (concat (make-string (1- level) ?*) stars))
+     text t t)))
+
 (defun org-agenda-api--capture-with-template (template-key values)
   "Capture using TEMPLATE-KEY with VALUES for prompts.
 VALUES is an alist of (PROMPT-NAME . VALUE) pairs.
@@ -289,10 +326,8 @@ Returns an alist with status information."
         (org-agenda-api--capture-client-error "%s" validation-error)))
     (let* ((plist (cdr template-entry))
            (capture-template (plist-get plist :template))
-           (target-file (let ((target (nth 3 capture-template)))
-                          (if (and (listp target) (eq (car target) 'file))
-                              (cadr target)
-                            (org-agenda-api--get-default-capture-target))))
+           (target (or (nth 3 capture-template)
+                       `(file ,(org-agenda-api--get-default-capture-target))))
            (entry-text (org-agenda-api--build-entry-from-template template-entry values))
            ;; Extract universal fields from values (scheduled/deadline are now objects)
            (scheduled (cdr (assoc "scheduled" values)))
@@ -307,13 +342,14 @@ Returns an alist with status information."
            (prepare-finalize (plist-get (nthcdr 5 capture-template)
                                         :prepare-finalize))
            (finalize-error nil)
+           (insertion (org-agenda-api--capture-insertion-point
+                       target (plist-get (nthcdr 5 capture-template) :prepend)))
            (entry-pos nil))
-      ;; Append entry to target file
-      (with-current-buffer (find-file-noselect target-file)
-        (goto-char (point-max))
+      (with-current-buffer (nth 0 insertion)
+        (goto-char (nth 1 insertion))
         (unless (bolp) (insert "\n"))
         (setq entry-pos (point))
-        (insert entry-text)
+        (insert (org-agenda-api--demote-entry-text entry-text (nth 2 insertion)))
         (unless (string-suffix-p "\n" entry-text) (insert "\n"))
         ;; Apply universal fields to the newly created entry
         (save-excursion

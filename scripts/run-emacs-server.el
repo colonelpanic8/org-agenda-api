@@ -174,6 +174,22 @@
          :template ("f" "Full" entry (file ,test-inbox)
                     "* TODO %^{Title}\nSCHEDULED: %(format-time-string \"<%Y-%m-%d %a>\")\n:PROPERTIES:\n:ID: %(org-id-new)\n:CREATED: %U\n:EFFORT: %(number-to-string 30)\n:END:\n"
                     :immediate-finish t)
+         :prompts (("Title" :type string :required t)))
+        ("under-headline"
+         :name "Under Headline"
+         :template ("u" "Under Headline" entry
+                    (file+headline ,test-inbox "Captured Projects")
+                    "* TODO %^{Title}\n"
+                    :immediate-finish t)
+         :prompts (("Title" :type string :required t)))
+        ("function-target"
+         :name "Function Target"
+         :template ("j" "Journal" entry
+                    (function (lambda ()
+                                (find-file (expand-file-name "journal.org" ,test-org-dir))
+                                (goto-char (point-max))))
+                    "* %^{Title}\n"
+                    :immediate-finish t)
          :prompts (("Title" :type string :required t)))))
 
 ;; Set up test category strategy if org-category-capture is available
