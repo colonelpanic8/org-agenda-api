@@ -444,7 +444,11 @@ Projection is limited to 366 days and 3660 required intervals."
         (cl-return-from org-agenda-api--get-habit-required-dates-in-range nil))
       (while (not covered)
         (setq future-intervals
-              (org-window-habit-get-future-required-intervals habit count now))
+              (condition-case err
+                  (org-window-habit-get-future-required-intervals habit count now)
+                (error
+                 (org-agenda-api--log 'warn "Failed to get future intervals: %s" err)
+                 nil)))
         (setq covered
               (or (< (length future-intervals) count)
                   (not (string< (format-time-string "%Y-%m-%d" (car (last future-intervals)))
