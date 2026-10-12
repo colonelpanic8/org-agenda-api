@@ -226,7 +226,8 @@ without linking to the note, each with the mentioning line as =context=.
 
 | Variable               | Description                                   |
 |------------------------+-----------------------------------------------|
-| =GIT_SYNC_REPOSITORY=  | Git repo URL to clone on startup              |
+| =GIT_SYNC_REPOSITORY=  | Git repo URL to clone into /data/org on startup |
+| =GIT_SYNC_REPOSITORIES= | JSON array of objects with =url= and relative =path=; clones into /data/<path> |
 | =GIT_SYNC_INTERVAL=    | Sync interval in seconds (default: 60)        |
 | =GIT_SYNC_NEW_FILES=   | Include untracked files (default: true)       |
 | =GIT_SSH_PRIVATE_KEY=  | SSH private key content                       |
@@ -238,6 +239,15 @@ without linking to the note, each with the mentioning line as =context=.
 | =ORG_NOTES_DIRS=       | Colon-separated directories served by /notes (default: synced repos; empty disables) |
 | =ORG_API_MAX_REQUESTS= | Max requests before worker restart            |
 | =ORG_API_MAX_LIFETIME= | Max seconds before worker restart             |
+
+Repositories are cloned before the services start. Existing checkouts are reused.
+If any git sync watcher exits, supervisord restarts the whole watcher group.
+For example, =GIT_SYNC_REPOSITORIES= can be set to:
+
+#+begin_src json
+[{"url":"git@github.com:user/org.git","path":"org"},
+ {"url":"git@github.com:user/work.git","path":"work"}]
+#+end_src
 
 ** Custom Emacs Configuration
 

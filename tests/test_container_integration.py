@@ -151,12 +151,15 @@ def start_container(container_image):
 
 
 class TestContainerStartup:
-    def test_clone_failure_does_not_log_credentials(self, start_container):
-        container = start_container(
-            "-e",
-            "GIT_SYNC_REPOSITORY=https://test-user:secret-clone-token@127.0.0.1:1/private.git",
-            ready=False,
+    @pytest.mark.parametrize("multi_repo", [False, True])
+    def test_clone_failure_does_not_log_credentials(self, start_container, multi_repo):
+        url = "https://test-user:secret-clone-token@127.0.0.1:1/private.git"
+        configuration = (
+            f"GIT_SYNC_REPOSITORIES={json.dumps([{'url': url, 'path': 'org'}])}"
+            if multi_repo
+            else f"GIT_SYNC_REPOSITORY={url}"
         )
+        container = start_container("-e", configuration, ready=False)
         result = run_command(["docker", "wait", container["name"]], timeout=30)
         assert result.returncode == 0
         assert result.stdout.strip() == "1"
@@ -166,6 +169,51 @@ class TestContainerStartup:
         assert "test-user" not in output
         assert "Cloning repository into /data/org" in output
         assert "Failed to clone repository into /data/org" in output
+
+    @pytest.mark.parametrize("multi_repo", [False, True])
+    def test_fresh_repositories_are_cloned(self, start_container, git_repo, multi_repo):
+        paths = ["personal notes", "nested/work"] if multi_repo else ["org"]
+        url = "file:///remote.git"
+        configuration = (
+            "GIT_SYNC_REPOSITORIES="
+            + json.dumps([{"url": url, "path": path} for path in paths])
+            if multi_repo
+            else f"GIT_SYNC_REPOSITORY={url}"
+        )
+        container = start_container(
+            "-v", f"{git_repo['bare']}:/remote.git:ro", "-e", configuration
+        )
+        for path in paths:
+            result = run_command(
+                [
+                    "docker",
+                    "exec",
+                    container["name"],
+                    "git",
+                    "-C",
+                    f"/data/{path}",
+                    "remote",
+                    "get-url",
+                    "origin",
+                ]
+            )
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.strip() == url
+            result = run_command(
+                ["docker", "exec", container["name"], "cat", f"/data/{path}/inbox.org"]
+            )
+            assert result.returncode == 0, result.stderr
+            assert "Initial task" in result.stdout
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            pids = git_sync_pids(container["name"])
+            if len(pids) == len(paths):
+                break
+            time.sleep(0.5)
+        assert len(pids) == len(paths)
+        response = requests.get(f"{container['url']}/get-all-todos", timeout=10)
+        assert response.status_code == 200
+        assert len(response.json()["todos"]) == len(paths)
 
 
 def make_git_dir_deletable(path: Path):

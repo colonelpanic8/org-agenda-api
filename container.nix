@@ -208,14 +208,14 @@ let
         echo "git-sync-multi: ERROR - Failed to parse GIT_SYNC_REPOSITORIES JSON"
         exit 1
       fi
-      for path in $PATHS; do
+      while IFS= read -r path; do
         repo_dir="/data/$path"
         if [ -d "$repo_dir/.git" ]; then
           start_sync "$repo_dir"
         else
           echo "git-sync-multi: WARNING - $repo_dir is not a git repository, skipping"
         fi
-      done
+      done <<< "$PATHS"
     elif [ -d "/data/org/.git" ]; then
       echo "git-sync-multi: Single-repo mode (legacy)"
       start_sync "/data/org"
@@ -522,16 +522,39 @@ let
       ${pkgs.git}/bin/git config --global user.name "$GIT_USER_NAME"
     fi
 
-    # Handle git repository setup if provided
-    if [ -n "$GIT_SYNC_REPOSITORY" ]; then
-      ${pkgs.git}/bin/git config --global --add safe.directory /data/org
-      if [ ! -d "/data/org/.git" ]; then
-        ${pkgs.coreutils}/bin/echo "Cloning repository into /data/org..."
-        if ! ${pkgs.git}/bin/git clone "$GIT_SYNC_REPOSITORY" /data/org > /dev/null 2>&1; then
-          echo "Failed to clone repository into /data/org" >&2
+    setup_repository() {
+      local repo_url="$1"
+      local repo_dir="$2"
+      ${pkgs.git}/bin/git config --global --add safe.directory "$repo_dir"
+      if [ ! -d "$repo_dir/.git" ]; then
+        ${pkgs.coreutils}/bin/mkdir -p "$repo_dir"
+        echo "Cloning repository into $repo_dir..."
+        if ! ${pkgs.git}/bin/git clone "$repo_url" "$repo_dir" > /dev/null 2>&1; then
+          echo "Failed to clone repository into $repo_dir" >&2
           exit 1
         fi
       fi
+    }
+
+    # Handle git repository setup before starting any watchers
+    if [ -n "$GIT_SYNC_REPOSITORIES" ]; then
+      if ! REPOSITORIES=$(${pkgs.jq}/bin/jq -cer '
+        if type == "array" and length > 0 and all(.[];
+          (.url | type == "string" and length > 0) and
+          (.path | type == "string" and length > 0 and
+            (test("^/|(^|/)\\.\\.(/|$)|[\\r\\n]") | not)))
+        then .[] else error("invalid repositories") end
+      ' <<< "$GIT_SYNC_REPOSITORIES" 2>/dev/null); then
+        echo "GIT_SYNC_REPOSITORIES must be a nonempty JSON array of URLs and relative paths within /data" >&2
+        exit 1
+      fi
+      while IFS= read -r repo; do
+        repo_url=$(${pkgs.jq}/bin/jq -r '.url' <<< "$repo")
+        repo_path=$(${pkgs.jq}/bin/jq -r '.path' <<< "$repo")
+        setup_repository "$repo_url" "/data/$repo_path"
+      done <<< "$REPOSITORIES"
+    elif [ -n "$GIT_SYNC_REPOSITORY" ]; then
+      setup_repository "$GIT_SYNC_REPOSITORY" /data/org
     else
       ${pkgs.git}/bin/git config --global --add safe.directory /data/org
     fi
