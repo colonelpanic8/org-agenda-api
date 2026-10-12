@@ -21,6 +21,26 @@
 (require 'org-agenda-api-data)  ; For date utility functions
 (require 'simple-httpd)  ; For defservlet macro
 
+(eval-and-compile
+  (require 'org-window-habit nil t))
+
+(declare-function org-agenda-api--window-habit-available-p "org-agenda-api-window-habit" ())
+(declare-function org-agenda-api--is-window-habit-p "org-agenda-api-window-habit" ())
+(declare-function org-agenda-api--active-window-habit-instance "org-agenda-api-window-habit" (&optional reference-time))
+(declare-function org-agenda-api--habit-completed-on-date-p "org-agenda-api-window-habit" (date-string))
+(declare-function org-agenda-api--format-window-spec-status "org-agenda-api-window-habit" (spec-status))
+(declare-function org-agenda-api--get-habit-summary "org-agenda-api-window-habit" (&optional reference-time habit))
+(declare-function org-agenda-api--build-habit-graph-data "org-agenda-api-window-habit" (habit &optional preceding following reference-time))
+(declare-function org-agenda-api--habit-status-impl "org-agenda-api-window-habit" (id preceding following &optional reference-time))
+(declare-function org-agenda-api--get-habit-config "org-agenda-api-window-habit" ())
+(declare-function org-agenda-api--find-all-habits "org-agenda-api-window-habit" (&optional reference-time))
+(declare-function org-agenda-api--all-habit-statuses-impl "org-agenda-api-window-habit" (preceding following &optional reference-time))
+(declare-function org-agenda-api--get-habit-required-dates-in-range "org-agenda-api-window-habit" (habit start-date end-date reference-time))
+(declare-function org-agenda-api--date-string-to-time "org-agenda-api-window-habit" (date-string))
+(declare-function org-agenda-api--get-habit-entry-for-date "org-agenda-api-window-habit" (habit file pos date-str reference-time))
+(declare-function org-agenda-api--convert-meta-habit-for-json "org-agenda-api-window-habit" (habit-data))
+(declare-function org-agenda-api--convert-meta-result-for-json "org-agenda-api-window-habit" (result))
+
 ;; Only proceed if org-window-habit is available
 (when (require 'org-window-habit nil t)
 
@@ -164,7 +184,7 @@ FOLLOWING is number of intervals after today (default 4).
 REFERENCE-TIME is the time to use as \"now\" (default current-time).
 Returns a list of alists suitable for JSON encoding."
     (setq preceding (or preceding org-window-habit-preceding-intervals))
-    (setq following (or following org-window-habit-following-days))
+    (setq following (or following org-window-habit-following-intervals))
     (let* ((now (or reference-time (current-time)))
            (today-day (time-to-days now))
            (window-specs (oref habit window-specs))
@@ -295,9 +315,10 @@ Returns a JSON-encodable alist."
                        ("notConforming" . ,org-window-habit-not-conforming-color)
                        ("requiredCompletionForeground" . ,org-window-habit-required-completion-foreground-color)
                        ("nonRequiredCompletionForeground" . ,org-window-habit-non-required-completion-foreground-color)
-                       ("requiredCompletionTodayForeground" . ,org-window-habit-required-completion-today-foreground-color)))
+                       ("requiredCompletionTodayForeground" . ,(with-no-warnings
+                                                                 org-window-habit-required-completion-today-foreground-color))))
           ("display" . (("precedingIntervals" . ,org-window-habit-preceding-intervals)
-                        ("followingDays" . ,org-window-habit-following-days)
+                        ("followingDays" . ,org-window-habit-following-intervals)
                         ("completionNeededTodayGlyph" . ,(char-to-string org-window-habit-completion-needed-today-glyph))
                         ("completedGlyph" . ,(char-to-string org-window-habit-completed-glyph))))
           ("behavior" . (("repeatToDeadline" . ,(if org-window-habit-repeat-to-deadline t :json-false))
@@ -408,7 +429,7 @@ Accepts query params:
 
   (cl-defun org-agenda-api--get-habit-required-dates-in-range (habit start-date end-date reference-time)
     "Get dates when HABIT requires completion within START-DATE to END-DATE range.
-REFERENCE-TIME is the time to treat as 'now' for calculations.
+REFERENCE-TIME is the time to treat as now for calculations.
 Returns required date strings (YYYY-MM-DD).
 Projection is limited to 366 days and 3660 required intervals."
     (let* ((now reference-time)
