@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 import requests
 
+pytest_plugins = ("mcp_fakes",)
+
 
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent

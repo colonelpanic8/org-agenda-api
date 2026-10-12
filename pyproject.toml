@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "org-agenda-api-mcp"
+version = "0.1.0"
+description = "MCP stdio adapter for org-agenda-api"
+requires-python = ">=3.11"
+dependencies = ["mcp>=1.25,<2"]
+
+[project.scripts]
+org-agenda-mcp = "mcp_server.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 88

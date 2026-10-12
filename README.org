@@ -40,6 +40,65 @@ pytest tests/           # Run tests
 pytest tests/ -v        # Verbose output
 #+end_src
 
+** MCP Server
+
+The =org-agenda-mcp= sidecar exposes four MCP tools over the existing HTTP API:
+=org_agenda=, =org_capture=, =org_complete=, and =org_update=. It supports both
+stdio and hosted Streamable HTTP and does not read or modify org files directly.
+
+Configure and run it locally:
+
+#+begin_src bash
+export ORG_AGENDA_API_USER=imalison
+export ORG_AGENDA_API_PASSWORD_COMMAND='pass show org-agenda-api-imalison'
+# ORG_AGENDA_API_URL defaults to the production URL
+nix run .#mcp-server
+#+end_src
+
+An MCP host should launch this exact command and pass the environment variables
+above (or =ORG_AGENDA_API_PASSWORD=) in its server configuration:
+
+#+begin_src text
+nix run /home/imalison/projects/org-agenda-api#mcp-server
+#+end_src
+
+The container also runs the Streamable HTTP transport under supervisord and
+proxies it through nginx at =/mcp=. It uses the same Basic Auth credentials as
+the JSON API. For the production container, remote MCP hosts connect to:
+
+#+begin_src text
+https://org-agenda-api.rocket-sense.duckdns.org/mcp
+#+end_src
+
+To run the HTTP transport directly during development:
+
+#+begin_src bash
+nix run .#mcp-server -- --transport streamable-http --port 2026
+#+end_src
+
+The sidecar accepts these environment variables:
+
+| Variable                              | Description |
+|---------------------------------------+-------------|
+| =ORG_AGENDA_API_URL=                  | HTTP API base URL (default: =https://org-agenda-api.rocket-sense.duckdns.org=) |
+| =ORG_AGENDA_API_USER=                 | Required Basic Auth username |
+| =ORG_AGENDA_API_PASSWORD=             | Basic Auth password; takes precedence over the command |
+| =ORG_AGENDA_API_PASSWORD_COMMAND=     | Shell command whose first stdout line supplies the password |
+| =ORG_AGENDA_MCP_HOST=                 | Streamable HTTP bind host (container default: =127.0.0.1=) |
+| =ORG_AGENDA_MCP_PORT=                 | Streamable HTTP port (container default: =2026=) |
+
+Scheduled and deadline tool arguments use =YYYY-MM-DD= or
+=YYYY-MM-DDTHH:MM=. In =org_update=, an explicit =null= clears a field, while
+an omitted field is left unchanged. There is deliberately no delete tool.
+=org_capture= always selects =capture-g=, so the target API deployment must
+register that template in =org-agenda-api-capture-templates=; the fallback
+templates in the minimal container do not include it.
+
+The Nix container includes =/bin/org-agenda-mcp=. Supervisord runs its HTTP
+transport on the loopback interface alongside Emacs, nginx, git sync, and the
+health checker; only nginx exposes it. The stdio transport remains available
+for hosts that launch MCP servers as child processes.
+
 ** API Endpoints
 
 *** Query Endpoints (GET)
