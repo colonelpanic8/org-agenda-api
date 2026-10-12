@@ -19,6 +19,25 @@ from conftest import TEST_DATE, TEST_WEEK_START
 class TestProspectiveHabitFields:
     """Tests for effectiveCategory and properties on prospective habit entries."""
 
+    def test_distant_week_contains_every_required_daily_occurrence(self, api):
+        data = api.get_agenda(span="week", date="2024-07-15", today=TEST_DATE).json()
+        assert data["startDate"] == "2024-07-15"
+        required_dates = [
+            date
+            for date, entries in data["days"].items()
+            if any(entry.get("id") == "habit-required-daily" for entry in entries)
+        ]
+        assert sorted(required_dates) == [f"2024-07-{day}" for day in range(15, 22)]
+
+    def test_projection_bounds_excessive_future_distance(self, api):
+        response = api.get_agenda(span="week", date="2026-07-15", today=TEST_DATE)
+        assert response.status_code == 200
+        assert not any(
+            entry.get("dateRelevance") == "habit_required"
+            for entries in response.json()["days"].values()
+            for entry in entries
+        )
+
     def test_habit_entry_has_effective_category_in_day_view(self, api):
         """Habit entries in day view should have effectiveCategory."""
         response = api.get_agenda(span="day", date=TEST_DATE)

@@ -401,23 +401,33 @@ Accepts query params:
 
   ;;; Multi-Day Agenda Habit Integration
 
-  (defun org-agenda-api--get-habit-required-dates-in-range (habit start-date end-date reference-time)
+  (cl-defun org-agenda-api--get-habit-required-dates-in-range (habit start-date end-date reference-time)
     "Get dates when HABIT requires completion within START-DATE to END-DATE range.
 REFERENCE-TIME is the time to treat as 'now' for calculations.
-Returns a list of date strings (YYYY-MM-DD) when completion is required."
+Returns required date strings (YYYY-MM-DD).
+Projection is limited to 366 days and 3660 required intervals."
     (let* ((now reference-time)
-           ;; Calculate how many days in the range
-           (start-time (org-agenda-api--date-string-to-time start-date))
            (end-time (org-agenda-api--date-string-to-time end-date))
-           (days-in-range (1+ (/ (float-time (time-subtract end-time start-time)) 86400)))
-           ;; Get enough future intervals to cover the range
-           (future-intervals (condition-case err
-                                 (org-window-habit-get-future-required-intervals
-                                  habit (ceiling (* days-in-range 2)) now)
-                               (error
-                                (org-agenda-api--log 'warn "Failed to get future intervals: %s" err)
-                                nil)))
+           (days-ahead (- (time-to-days end-time) (time-to-days now)))
+           (count (min 3660 (max 1 (* 2 (1+ days-ahead)))))
+           (future-intervals nil)
+           (covered nil)
            (required-dates nil))
+      (when (> days-ahead 366)
+        (org-agenda-api--log 'warn "Habit projection exceeds 366 days")
+        (cl-return-from org-agenda-api--get-habit-required-dates-in-range nil))
+      (while (not covered)
+        (setq future-intervals
+              (org-window-habit-get-future-required-intervals habit count now))
+        (setq covered
+              (or (< (length future-intervals) count)
+                  (not (string< (format-time-string "%Y-%m-%d" (car (last future-intervals)))
+                                end-date))))
+        (unless covered
+          (when (= count 3660)
+            (org-agenda-api--log 'warn "Habit projection exceeds 3660 required intervals")
+            (setq covered t))
+          (setq count (min 3660 (* count 2)))))
       ;; Filter to dates within range
       (dolist (interval future-intervals)
         (let ((date-str (format-time-string "%Y-%m-%d" interval)))
