@@ -388,6 +388,86 @@ class TestContainerAPI:
         asyncio.run(exercise())
 
 
+def git_sync_pids(container_name):
+    result = run_command(
+        [
+            "docker",
+            "exec",
+            container_name,
+            "bash",
+            "-c",
+            "for file in /proc/[0-9]*/exe; do "
+            'case "$(readlink "$file" 2>/dev/null)" in */bin/git-sync-rs) '
+            'pid="${file#/proc/}"; echo "${pid%/exe}";; esac; done',
+        ]
+    )
+    assert result.returncode == 0, result.stderr
+    return set(result.stdout.split())
+
+
+class TestGitSyncSupervision:
+    def test_watcher_exit_restarts_whole_group(
+        self, start_container, git_repo, tmp_path
+    ):
+        work_repo = tmp_path / "work-repo"
+        result = run_command(["git", "clone", str(git_repo["bare"]), str(work_repo)])
+        assert result.returncode == 0, result.stderr
+        run_command(
+            ["git", "remote", "set-url", "origin", "/data/remote.git"], cwd=work_repo
+        )
+        repositories = [
+            {"url": "file:///data/remote.git", "path": path} for path in ("org", "work")
+        ]
+        container = start_container(
+            "-v",
+            f"{git_repo['repo']}:/data/org",
+            "-v",
+            f"{work_repo}:/data/work",
+            "-v",
+            f"{git_repo['bare']}:/data/remote.git:ro",
+            "-e",
+            f"GIT_SYNC_REPOSITORIES={json.dumps(repositories)}",
+        )
+        name = container["name"]
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            status = run_command(
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "supervisorctl",
+                    "-s",
+                    "unix:///tmp/supervisor.sock",
+                    "status",
+                    "git-sync",
+                ]
+            )
+            if "RUNNING" in status.stdout:
+                break
+            time.sleep(0.5)
+        assert "RUNNING" in status.stdout
+        original_pids = git_sync_pids(name)
+        assert len(original_pids) == 2
+        result = run_command(
+            ["docker", "exec", name, "kill", "-KILL", sorted(original_pids)[0]]
+        )
+        assert result.returncode == 0, result.stderr
+
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            current_pids = git_sync_pids(name)
+            if len(current_pids) == 2 and original_pids.isdisjoint(current_pids):
+                break
+            time.sleep(0.5)
+        assert len(current_pids) == 2
+        assert original_pids.isdisjoint(current_pids)
+        logs = run_command(["docker", "logs", name])
+        assert "A git-sync process exited, restarting all repositories" in (
+            logs.stdout + logs.stderr
+        )
+
+
 class TestGitSync:
     """Tests for git synchronization functionality."""
 

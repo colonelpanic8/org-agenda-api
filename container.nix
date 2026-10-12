@@ -189,10 +189,10 @@ let
         kill $pid 2>/dev/null || true
       done
       wait
-      exit 0
+      exit "$1"
     }
 
-    trap cleanup SIGTERM SIGINT
+    trap 'cleanup 0' SIGTERM SIGINT
 
     start_sync() {
       local repo_path="$1"
@@ -226,8 +226,15 @@ let
       done
     fi
 
-    echo "git-sync-multi: Monitoring ''${#PIDS} sync processes"
-    wait
+    if [ -z "$PIDS" ]; then
+      echo "git-sync-multi: ERROR - No git-sync processes started" >&2
+      exit 1
+    fi
+
+    echo "git-sync-multi: Monitoring git-sync processes"
+    wait -n $PIDS || true
+    echo "git-sync-multi: ERROR - A git-sync process exited, restarting all repositories" >&2
+    cleanup 1
   '';
 
   # Health checker script that monitors emacs and restarts if unhealthy
