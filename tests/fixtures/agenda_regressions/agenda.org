@@ -1,0 +1,34 @@
+#+TITLE: Agenda occurrence regressions
+
+* TODO Multi-day scheduled task
+  SCHEDULED: <2024-06-10 Mon>--<2024-06-20 Thu>
+  :PROPERTIES:
+  :ID: regression-agenda-range
+  :END:
+
+* TODO Upcoming deadline warning
+  DEADLINE: <2024-06-17 Mon -3d>
+  :PROPERTIES:
+  :ID: regression-agenda-warning
+  :END:
+
+* TODO Plain appointment without planning
+  :PROPERTIES:
+  :ID: regression-agenda-plain
+  :END:
+  <2024-06-15 Sat 10:00-11:00>
+
+* TODO Appointment with a later schedule
+  SCHEDULED: <2024-06-20 Thu>
+  :PROPERTIES:
+  :ID: regression-agenda-planned-appointment
+  :END:
+  <2024-06-15 Sat 12:00>
+
+* NEXT Non-completion state change
+  :PROPERTIES:
+  :ID: regression-agenda-next-log
+  :END:
+  :LOGBOOK:
+  - State "NEXT"       from "TODO"       [2024-06-15 Sat 09:00]
+  :END:

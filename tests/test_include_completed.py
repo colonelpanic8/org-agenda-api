@@ -632,21 +632,11 @@ class TestStateChangeLogBug:
             )
 
     def test_entries_without_any_date_not_shown(self, api):
-        """Entries with null scheduled/deadline/completedAt should NOT appear.
-
-        This is the core of the bug: the filter condition
-        (and (null scheduled-date) (null deadline-date)) allows entries
-        through even when they have no completedAt.
-
-        With include_completed=true, ONLY entries with a matching date should appear:
-        - scheduled matching query date
-        - deadline matching query date
-        - completedAt matching query date
-
-        An entry with all three as null should NEVER appear.
-        """
+        """Completion logs need a matching date; ordinary agenda rows remain."""
         # Query with include_completed
         query_date = TEST_DATE
+        regular_entries = api.get_agenda(date=query_date).json()["entries"]
+        regular_keys = {(entry["file"], entry["pos"]) for entry in regular_entries}
         agenda_response = api.get(f"/agenda?date={query_date}&include_completed=true")
         entries = agenda_response.json().get("entries", [])
 
@@ -671,6 +661,7 @@ class TestStateChangeLogBug:
                 or deadline_date == query_date
                 or completed_at_date == query_date
                 or is_habit_completed_on_date
+                or (entry["file"], entry["pos"]) in regular_keys
             )
             assert has_matching_date, (
                 f"Entry has no date matching {query_date}: "

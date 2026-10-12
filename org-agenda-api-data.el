@@ -824,14 +824,14 @@ QUERY-DATE is an optional date string (YYYY-MM-DD) used to check habit completio
 (defun org-agenda-api--agenda-row-relevant-p
     (entry line query-date include-overdue include-completed)
   "Return non-nil if ENTRY from agenda LINE belongs in the response."
-  (and (or (not include-completed)
-           (cdr (assoc "scheduled" entry))
-           (cdr (assoc "deadline" entry))
-           (equal (org-agenda-api--extract-date
-                   (cdr (assoc "completedAt" entry))) query-date)
-           (cdr (assoc "habitCompletedOnQueryDate" entry)))
-       (or include-overdue
-           (org-agenda-api--agenda-row-on-date-p line query-date))))
+  (if (member (get-text-property 0 'type line) '("closed" "state" "clock"))
+      (and include-completed
+           (or (equal (org-agenda-api--extract-date
+                       (cdr (assoc "completedAt" entry))) query-date)
+               (cdr (assoc "habitCompletedOnQueryDate" entry))))
+    (or include-overdue
+        (and (not (equal (get-text-property 0 'type line) "upcoming-deadline"))
+             (org-agenda-api--agenda-row-on-date-p line query-date)))))
 
 (defun org-agenda-api--run-agenda (span &optional start-date include-overdue include-completed)
   "Run org-agenda and return entries as a list of JSON-encodable alists.
