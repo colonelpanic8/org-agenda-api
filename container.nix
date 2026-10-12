@@ -529,8 +529,10 @@ let
       if [ ! -d "$repo_dir/.git" ]; then
         ${pkgs.coreutils}/bin/mkdir -p "$repo_dir"
         echo "Cloning repository into $repo_dir..."
-        if ! ${pkgs.git}/bin/git clone "$repo_url" "$repo_dir" > /dev/null 2>&1; then
-          echo "Failed to clone repository into $repo_dir" >&2
+        if ! clone_output=$(${pkgs.git}/bin/git clone "$repo_url" "$repo_dir" 2>&1); then
+          echo "Failed to clone repository into $repo_dir:" >&2
+          # Keep git's diagnostics but drop any credentials embedded in URLs.
+          ${pkgs.gnused}/bin/sed -E 's#(://)[^/@[:space:]]*@#\1#g' <<< "$clone_output" >&2
           exit 1
         fi
       fi
