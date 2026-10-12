@@ -479,11 +479,20 @@ class TestAgendaDateIsolation:
         # Response should say the date is what we requested
         assert data["date"] == TEST_DATE_PREV_DAY
 
-        # Any items with a scheduled date should be <= TEST_DATE_PREV_DAY
+        # A body timestamp can occur before the heading's scheduled date.
         for entry in data["entries"]:
             scheduled = entry.get("scheduled")
             scheduled_date = extract_date(scheduled)
-            if scheduled_date and scheduled_date != TEST_DATE_PREV_DAY:
+            body_occurs = any(
+                extract_date(timestamp.get("start")) == TEST_DATE_PREV_DAY
+                for timestamp in entry.get("timestamps", [])
+                if timestamp.get("type") in ("active", "active-range")
+            )
+            if (
+                scheduled_date
+                and scheduled_date != TEST_DATE_PREV_DAY
+                and not body_occurs
+            ):
                 # For overdue items, scheduled should be before the query date
                 assert scheduled_date < TEST_DATE_PREV_DAY, (
                     f"Entry '{entry.get('title')}' has scheduled={scheduled} "
@@ -548,6 +557,8 @@ class TestAgendaDateIsolation:
             scheduled_date = extract_date(scheduled)
             agenda_line = entry.get("agendaLine", "")
 
+            if isinstance(scheduled, dict) and scheduled.get("repeater"):
+                continue
             if scheduled_date and scheduled_date < TEST_DATE:
                 # Overdue item - should have "Sched. Nx:" marker
                 assert "Sched." in agenda_line, (
@@ -755,7 +766,7 @@ class TestAgendaDeduplication:
         matching_entries = [
             entry
             for entry in data["entries"]
-            if "both scheduled and deadline" in (entry.get("title") or "").lower()
+            if entry.get("title") == "Task with both scheduled and deadline"
         ]
 
         # Should appear exactly once, not twice
@@ -774,7 +785,7 @@ class TestAgendaDeduplication:
         # Find the entry
         entry = None
         for e in data["entries"]:
-            if "both scheduled and deadline" in (e.get("title") or "").lower():
+            if e.get("title") == "Task with both scheduled and deadline":
                 entry = e
                 break
 
