@@ -50,7 +50,7 @@ Configure and run it locally:
 
 #+begin_src bash
 export ORG_AGENDA_API_USER=imalison
-export ORG_AGENDA_API_PASSWORD_COMMAND='pass show org-agenda-api-imalison'
+export ORG_AGENDA_API_PASSWORD_COMMAND='pass show org-agenda-api.duckdns.org/imalison'
 # ORG_AGENDA_API_URL defaults to the production URL
 nix run .#mcp-server
 #+end_src
