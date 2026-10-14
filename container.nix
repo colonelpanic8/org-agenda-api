@@ -159,9 +159,23 @@ let
           add_header 'Access-Control-Expose-Headers' 'Mcp-Session-Id' always;
         }
 
+        # Content-hashed mova bundles and assets. A missing file must 404:
+        # falling back to index.html would hand HTML to a <script> tag.
+        location ~ ^/(_expo/static|assets)/ {
+          try_files $uri =404;
+          add_header Cache-Control "public, max-age=31536000, immutable";
+        }
+
         # Static files - serve mova web app (no auth)
+        # Nix store files all have a 1980 mtime, so nginx's Last-Modified and
+        # mtime+size ETag barely change between releases and browsers keep
+        # serving stale HTML that references bundles which no longer exist.
         location / {
           try_files $uri $uri/ /index.html;
+          etag off;
+          if_modified_since off;
+          more_clear_headers 'Last-Modified';
+          add_header Cache-Control "no-cache" always;
         }
       }
     }
