@@ -3,7 +3,7 @@
 # Production API base URL
 prod_url := "https://org-agenda-api.rocket-sense.duckdns.org"
 prod_user := "imalison"
-pass_entry := "org-agenda-api-imalison"
+pass_entry := "org-agenda-api.duckdns.org/imalison"
 
 # Run authenticated curl against production API
 prod *args:
