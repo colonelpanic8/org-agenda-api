@@ -139,3 +139,26 @@ def test_overdue_behavior_preserves_timestamp_and_range_occurrences(api, behavio
     }
     for date in ("2024-06-14", "2024-06-16", "2024-06-20"):
         assert "regression-agenda-range" in {entry["id"] for entry in days[date]}
+
+
+def test_overdue_rows_carry_over_to_today_by_default(api):
+    days = api.get_agenda(
+        start_date=TEST_DATE, end_date=TEST_DATE, include_overdue=True
+    ).json()["days"]
+    assert "regression-agenda-overdue-deadline" in {
+        entry["id"] for entry in days[TEST_DATE]
+    }
+
+
+def test_past_days_omit_uncompleted_habit_rows(api):
+    days = api.get_agenda(
+        start_date="2024-06-14",
+        end_date=TEST_DATE,
+        today=TEST_DATE,
+        include_overdue=True,
+        include_completed=True,
+        overdue_behavior="today",
+    ).json()["days"]
+    past_ids = {entry["id"] for entry in days["2024-06-14"]}
+    assert "regression-agenda-overdue-habit" not in past_ids
+    assert "regression-agenda-completed-habit" in past_ids

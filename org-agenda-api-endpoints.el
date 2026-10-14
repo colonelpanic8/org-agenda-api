@@ -122,7 +122,8 @@ Accepts optional query params:
   - 'include_overdue' (true/1) to include overdue items from previous days (default: false)
   - 'include_completed' (true/1) to include items completed on this date (default: false)
   - 'include_archives' (true/1) to include archive files/trees
-  - 'overdue_behavior' (original/today/both, controls where overdue items appear)
+  - 'overdue_behavior' (original/today/both, controls where overdue items appear;
+    default: both)
   - 'refresh' (true/1) to git pull repos first.
 
 For span=day (default), returns flat 'entries' array for backwards compatibility.
@@ -143,7 +144,7 @@ For span=week or when end_date is provided, returns 'days' object grouped by dat
          (include-overdue (member include-overdue-param '("true" "1")))
          (include-completed (member include-completed-param '("true" "1")))
          (include-archives (org-agenda-api--include-archives-p include-archives-param))
-         (overdue-behavior (or overdue-behavior-param "original"))
+         (overdue-behavior (or overdue-behavior-param "both"))
          ;; Use requested date or default to today (using calendar-current-date for testability)
          (calendar-today (calendar-current-date))
          (today-str (format "%04d-%02d-%02d"

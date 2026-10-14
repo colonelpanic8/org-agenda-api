@@ -1899,13 +1899,12 @@ OVERDUE-BEHAVIOR is \"original\", \"today\", or \"both\":
     (dolist (date-str dates)
       (let* ((day-entries (org-agenda-api--collect-entries-for-date
                            date-str include-overdue include-completed))
-             ;; Preserve historical and completed habits before merging projections.
+             ;; Preserve completed habits before merging projections.
              (regular-entries
               (if habits-by-date
                   (cl-remove-if
                    (lambda (entry)
                      (and (org-agenda-api--entry-is-window-habit-p entry)
-                          (not (string< date-str today-str))
                           (not (cdr (assoc "habitCompletedOnQueryDate" entry)))
                           (not (equal (org-agenda-api--extract-date
                                        (cdr (assoc "completedAt" entry))) date-str))))
