@@ -166,6 +166,10 @@
             # Create cache directory
             mkdir -p .cache
 
+            # yarnConfigHook installs with --ignore-scripts, so mova's
+            # postinstall that applies its patches/ has to run explicitly.
+            node_modules/.bin/patch-package
+
             # Build web export
             yarn --offline expo export --platform web
 
