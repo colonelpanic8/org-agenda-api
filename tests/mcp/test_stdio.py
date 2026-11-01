@@ -39,16 +39,25 @@ def test_stdio_lists_tools_and_calls_agenda(fake_api) -> None:
                     "org_complete",
                     "org_update",
                 ]
-                result = await session.call_tool("org_agenda", {"date": "2026-08-18"})
-                assert result.isError is False
-                assert result.structuredContent is not None
-                assert result.structuredContent["entries"][0]["title"] == "MCP works"
-                error_result = await session.call_tool(
-                    "org_complete", {"title": "Missing task"}
+                # Wire names are stable across mcp 1.x and 2.x attribute names.
+                result = (
+                    await session.call_tool("org_agenda", {"date": "2026-08-18"})
+                ).model_dump(by_alias=True)
+                assert result["isError"] is False
+                assert result["structuredContent"]["entries"][0]["title"] == (
+                    "MCP works"
                 )
-                assert error_result.isError is True
-                assert error_result.structuredContent is None
-                assert "Todo not found" in error_result.content[0].text
+                error_result = (
+                    await session.call_tool("org_complete", {"title": "Missing task"})
+                ).model_dump(by_alias=True)
+                assert error_result["isError"] is True
+                assert error_result.get("structuredContent") is None
+                assert "Todo not found" in error_result["content"][0]["text"]
+                invalid_result = (
+                    await session.call_tool("org_capture", {"todo": "TODO"})
+                ).model_dump(by_alias=True)
+                assert invalid_result["isError"] is True
+                assert "Input validation error" in invalid_result["content"][0]["text"]
 
     asyncio.run(exercise())
 

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
+import jsonschema
 from mcp import types
 from mcp.server import Server
 
@@ -25,17 +27,6 @@ _TAGS_SCHEMA = {
 
 
 def create_server(api: OrgAgendaClient) -> Server:
-    server = Server(
-        "org-agenda-api",
-        version=__version__,
-        instructions="Capture and query org-mode tasks through org-agenda-api.",
-    )
-
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return _tools()
-
-    @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name == "org_agenda":
             return await asyncio.to_thread(
@@ -52,7 +43,53 @@ def create_server(api: OrgAgendaClient) -> Server:
             return await asyncio.to_thread(api.update, arguments)
         raise ValueError(f"unknown tool: {name}")
 
-    return server
+    options: dict[str, Any] = {
+        "version": __version__,
+        "instructions": "Capture and query org-mode tasks through org-agenda-api.",
+    }
+
+    # mcp 1.x registers handlers with decorators, which also validate input and
+    # wrap results; mcp 2.x takes raw handlers in the constructor.
+    if hasattr(Server, "list_tools"):
+        server = Server("org-agenda-api", **options)
+
+        @server.list_tools()
+        async def list_tools() -> list[types.Tool]:
+            return _tools()
+
+        server.call_tool()(call_tool)
+        return server
+
+    tools = {tool.name: tool for tool in _tools()}
+
+    async def on_list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
+        return types.ListToolsResult(tools=list(tools.values()))
+
+    async def on_call_tool(_ctx: Any, params: Any) -> types.CallToolResult:
+        arguments = params.arguments or {}
+        try:
+            if tool := tools.get(params.name):
+                try:
+                    jsonschema.validate(arguments, tool.input_schema)
+                except jsonschema.ValidationError as error:
+                    raise ValueError(f"Input validation error: {error.message}")
+            result = await call_tool(params.name, arguments)
+        except Exception as error:  # noqa: BLE001 - report as a tool error, as 1.x does
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=str(error))],
+                isError=True,
+            )
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
+            structuredContent=result,
+        )
+
+    return Server(
+        "org-agenda-api",
+        **options,
+        on_list_tools=on_list_tools,
+        on_call_tool=on_call_tool,
+    )
 
 
 def _tools() -> list[types.Tool]:

@@ -69,10 +69,11 @@ def test_streamable_http_lists_tools_and_calls_agenda(fake_api) -> None:
         _wait_until_ready(f"http://127.0.0.1:{port}/health", process)
 
         async def exercise() -> None:
+            # mcp 1.x also yields a session-id getter; 2.x yields only streams.
             async with streamable_http_client(f"http://127.0.0.1:{port}/mcp") as (
                 read_stream,
                 write_stream,
-                _get_session_id,
+                *_,
             ):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
@@ -83,12 +84,11 @@ def test_streamable_http_lists_tools_and_calls_agenda(fake_api) -> None:
                         "org_complete",
                         "org_update",
                     ]
-                    result = await session.call_tool(
-                        "org_agenda", {"date": "2026-08-18"}
-                    )
-                    assert result.isError is False
-                    assert result.structuredContent is not None
-                    assert result.structuredContent["entries"][0]["title"] == (
+                    result = (
+                        await session.call_tool("org_agenda", {"date": "2026-08-18"})
+                    ).model_dump(by_alias=True)
+                    assert result["isError"] is False
+                    assert result["structuredContent"]["entries"][0]["title"] == (
                         "HTTP MCP works"
                     )
 

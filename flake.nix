@@ -191,7 +191,7 @@
           src = ./.;
 
           build-system = [ pkgs.python3Packages.setuptools ];
-          dependencies = [ pkgs.python3Packages.mcp ];
+          dependencies = with pkgs.python3Packages; [ jsonschema mcp ];
 
           # The tests use an in-process HTTP server and therefore run outside
           # the Nix sandbox via `nix develop -c pytest tests/mcp`.
