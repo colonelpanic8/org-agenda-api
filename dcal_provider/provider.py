@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any, Protocol
@@ -109,14 +110,26 @@ class OrgProvider:
 
     def _todo_states(self) -> dict[str, list[str]]:
         if self._states is None:
-            self._states = self.client.request("GET", "/todo-states")
+            states = self.client.request("GET", "/todo-states")
+            for key in ("active", "done"):
+                values = states.get(key)
+                if not isinstance(values, list) or not all(
+                    isinstance(v, str) for v in values
+                ):
+                    raise ProviderError(f"/todo-states returned invalid {key!r}")
+            self._states = states
         return self._states
 
     def _done_states(self) -> set[str]:
         return set(self._todo_states().get("done") or [])
 
     def _todos(self) -> list[dict[str, Any]]:
-        return self.client.request("GET", "/get-all-todos").get("todos") or []
+        # A full snapshot prunes everything missing from it, so a malformed
+        # response must fail rather than read as "no tasks".
+        todos = self.client.request("GET", "/get-all-todos").get("todos")
+        if not isinstance(todos, list) or not all(isinstance(t, dict) for t in todos):
+            raise ProviderError("/get-all-todos returned no todos list")
+        return todos
 
     def _find_todo(self, org_id: str) -> dict[str, Any] | None:
         return next((t for t in self._todos() if t.get("id") == org_id), None)
@@ -148,7 +161,10 @@ class OrgProvider:
 
         task["due"], task["allDay"] = _ts_to_rfc3339(deadline or scheduled, self.tz)
         if scheduled and deadline:
-            task["start"], _ = _ts_to_rfc3339(scheduled, self.tz)
+            # One allDay flag covers both, so only pair a matching schedule.
+            start, start_all_day = _ts_to_rfc3339(scheduled, self.tz)
+            if start_all_day == task["allDay"]:
+                task["start"] = start
         if todo.get("priority") in _PRIORITY_TO_ICAL:
             task["priority"] = _PRIORITY_TO_ICAL[todo["priority"]]
         categories = [c for c in [todo.get("effectiveCategory")] if c]
@@ -214,36 +230,58 @@ class OrgProvider:
         priority = _priority_from_ical(task.get("priority"))
         if priority:
             values["priority"] = priority
-        before = {(t.get("file"), t.get("pos"), t.get("title")) for t in self._todos()}
-        self.client.request(
+        before = self._unidentified(values["Title"])
+        response = self.client.request(
             "POST",
             "/capture",
-            body={"template": self.options.capture_template, "values": values},
+            body={
+                "template": self.options.capture_template,
+                "values": values,
+                "assign_id": True,
+            },
         )
-        created = [
+        org_id = response.get("id") or self._identify_capture(values["Title"], before)
+        return {"task": self._fresh_task(org_id, task)}
+
+    def _unidentified(self, title: str) -> Counter[str]:
+        return Counter(
+            t.get("file")
+            for t in self._todos()
+            if not t.get("id") and t.get("title") == title
+        )
+
+    def _identify_capture(self, title: str, before: Counter[str]) -> str:
+        """Find and ID a capture on servers whose /capture returns no ID.
+
+        Positions shift on insert, so the new entry is recognized as the only
+        ID-less heading with its title in a file that gained one.
+        """
+        after = self._unidentified(title)
+        grown = [f for f in after if after[f] == before[f] + 1]
+        candidates = [
             t
             for t in self._todos()
-            if t.get("title") == values["Title"]
-            and (t.get("file"), t.get("pos"), t.get("title")) not in before
+            if not t.get("id") and t.get("title") == title and t.get("file") in grown
         ]
-        if len(created) != 1:
-            raise ProviderError("could not locate the captured org entry")
-        entry = created[0]
-        org_id = entry.get("id")
-        if not org_id:
-            org_id = str(uuid.uuid4())
-            self.client.request(
-                "POST",
-                "/update",
-                body={
-                    "file": entry["file"],
-                    "pos": entry["pos"],
-                    "title": entry["title"],
-                    "strict": True,
-                    "properties": {"ID": org_id},
-                },
+        if len(grown) != 1 or len(candidates) != 1:
+            raise ProviderError(
+                "the task was captured but could not be identified; "
+                "give it an org ID to show it in the calendar"
             )
-        return {"task": self._fresh_task(org_id, task)}
+        entry = candidates[0]
+        org_id = str(uuid.uuid4())
+        self.client.request(
+            "POST",
+            "/update",
+            body={
+                "file": entry["file"],
+                "pos": entry["pos"],
+                "title": entry["title"],
+                "strict": True,
+                "properties": {"ID": org_id},
+            },
+        )
+        return org_id
 
     def update_task(self, params: dict[str, Any]) -> dict[str, Any]:
         task = params["task"]
@@ -253,7 +291,6 @@ class OrgProvider:
             raise ProviderError(f"org entry {org_id!r} not found")
 
         done_states = self._done_states()
-        currently_done = current["todo"] in done_states
         want = task.get("status") or "needs_action"
         body: dict[str, Any] = {}
 
@@ -278,20 +315,39 @@ class OrgProvider:
         if priority != current.get("priority"):
             body["priority"] = priority
 
-        cancel = next((s for s in done_states if s.upper().startswith("CANCEL")), None)
-        if want == "cancelled" and cancel and current["todo"] != cancel:
-            body["state"] = cancel
-        elif want in ("needs_action", "in_process") and currently_done:
-            active = self._todo_states().get("active") or []
-            body["state"] = (
-                "STARTED" if want == "in_process" and "STARTED" in active else "TODO"
-            )
+        # Only act on a status change, so custom states such as WAIT survive
+        # round trips that leave the status alone.
+        complete = False
+        if want != _status(current["todo"], done_states):
+            if want == "completed":
+                complete = True
+            else:
+                body["state"] = self._state_for(want)
 
         if body:
             self.client.request("POST", "/update", body={"id": org_id, **body})
-        if want == "completed" and not currently_done:
+        if complete:
             self.client.request("POST", "/complete", body={"id": org_id})
         return {"task": self._fresh_task(org_id, task)}
+
+    def _state_for(self, status: str) -> str:
+        active = self._todo_states()["active"]
+        done = self._todo_states()["done"]
+        if status == "cancelled":
+            state = next((s for s in done if s.upper().startswith("CANCEL")), None)
+        elif status == "in_process":
+            state = "STARTED" if "STARTED" in active else None
+        elif status == "needs_action":
+            state = (
+                "TODO"
+                if "TODO" in active
+                else next((s for s in active if s != "STARTED"), None)
+            )
+        else:
+            state = None
+        if state is None:
+            raise ProviderError(f"no org TODO state for task status {status!r}")
+        return state
 
     def delete_task(self, params: dict[str, Any]) -> None:
         task = params["task"]
