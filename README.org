@@ -120,6 +120,26 @@ transport on the loopback interface alongside Emacs, nginx, git sync, and the
 health checker; only nginx exposes it. The stdio transport remains available
 for hosts that launch MCP servers as child processes.
 
+** Dux Calendar provider
+
+=org-agenda-dcal= is an external provider for [[https://github.com/duxlabs-dev/dux-calendar][Dux Calendar]] (dcal). It shows
+dated TODOs (scheduled or deadline) as a task list. Habits are left out
+unless =--include-habits= is given, and tasks completed in the last
+=--done-days= days (default 7) stay visible. Completing, rescheduling,
+renaming, reprioritizing, creating and deleting tasks in the calendar write
+back through =/complete=, =/update=, =/capture= and =/delete=. Only headings
+with an org =ID= are shown, and captured tasks get an =ID= assigned.
+
+It reads the same connection environment as the MCP sidecar:
+
+#+begin_src sh
+dcal account add external org-agenda --name "Org agenda" \
+  --env ORG_AGENDA_API_URL=https://org-agenda-api.example.com \
+  --env ORG_AGENDA_API_USER=me \
+  --env ORG_AGENDA_API_PASSWORD_COMMAND="pass show org-agenda-api" \
+  -- "$(nix build --print-out-paths .#dcal-provider)/bin/org-agenda-dcal"
+#+end_src
+
 ** API Endpoints
 
 *** Query Endpoints (GET)

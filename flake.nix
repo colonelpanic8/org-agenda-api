@@ -182,8 +182,9 @@
           '';
         };
 
-        # Stdio MCP sidecar. Org behavior remains in the HTTP API; this package
-        # only translates MCP tool calls into authenticated JSON requests.
+        # Stdio MCP sidecar and Dux Calendar provider (bin/org-agenda-dcal). Org
+        # behavior remains in the HTTP API; these only translate tool and
+        # calendar calls into authenticated JSON requests.
         mcpServer = pkgs.python3Packages.buildPythonApplication {
           pname = "org-agenda-api-mcp";
           version = "0.1.0";
@@ -335,6 +336,9 @@
           # MCP stdio adapter
           mcp-server = mcpServer;
 
+          # Dux Calendar external provider (same package, bin/org-agenda-dcal)
+          dcal-provider = mcpServer;
+
           # Default Docker container image (minimal, no custom config)
           container = mkContainer {};
           # Cached base image (no org-agenda-api code or emacs config)
@@ -353,6 +357,11 @@
         apps.mcp-server = {
           type = "app";
           program = "${mcpServer}/bin/org-agenda-mcp";
+        };
+
+        apps.dcal-provider = {
+          type = "app";
+          program = "${mcpServer}/bin/org-agenda-dcal";
         };
 
         devShells.default = pkgs.mkShell {

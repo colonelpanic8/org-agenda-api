@@ -140,6 +140,17 @@ class OrgAgendaClient:
         response = self._request("POST", "/update", body=body)
         return self._pick(response, ("status", "title", "id", "updates"))
 
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: dict[str, str] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Send an authenticated request to any endpoint."""
+        return self._request(method, path, query=query, body=body)
+
     def _request(
         self,
         method: str,
