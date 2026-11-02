@@ -11,6 +11,7 @@
 (require 'cl-lib)
 (require 'org)
 (require 'org-capture)
+(require 'org-id)
 (require 'org-agenda-api-core)
 (require 'org-agenda-api-data)
 
@@ -306,8 +307,10 @@ otherwise it is a top-level entry at the end (or start) of the file."
      "^\\*+ " (lambda (stars) (concat (make-string (1- level) ?*) stars))
      text t t)))
 
-(defun org-agenda-api--capture-with-template (template-key values)
+(defun org-agenda-api--capture-with-template (template-key values &optional assign-id)
   "Capture using TEMPLATE-KEY with VALUES for prompts.
+When ASSIGN-ID is non-nil, give the new entry an org ID and return it as
+\"id\", so clients can address the entry without searching for it.
 VALUES is an alist of (PROMPT-NAME . VALUE) pairs.
 In addition to template prompts, VALUES may contain universal org fields:
   - scheduled: object {date, time?, repeater?}
@@ -342,6 +345,7 @@ Returns an alist with status information."
            (prepare-finalize (plist-get (nthcdr 5 capture-template)
                                         :prepare-finalize))
            (finalize-error nil)
+           (new-id nil)
            (insertion (org-agenda-api--capture-insertion-point
                        target (plist-get (nthcdr 5 capture-template) :prepend)))
            (entry-pos nil))
@@ -393,10 +397,16 @@ Returns an alist with status information."
                  (setq finalize-error (error-message-string err))
                  (message "org-agenda-api: :prepare-finalize failed for %s: %s"
                           template-key finalize-error))))))
+        (when assign-id
+          (save-excursion
+            (goto-char entry-pos)
+            (when (org-at-heading-p)
+              (setq new-id (org-id-get-create)))))
         (save-buffer))
       (org-agenda-api--invalidate-cache)
       `(("status" . "created")
         ("template" . ,template-key)
+        ,@(when new-id `(("id" . ,new-id)))
         ,@(when finalize-error
             `(("prepare_finalize_error" . ,finalize-error)))))))
 

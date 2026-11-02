@@ -468,3 +468,31 @@ class TestCaptureTargets:
         assert response.json()["status"] == "created"
         assert "* Journal entry 5521\n" in (org_dir / "journal.org").read_text()
         assert "Journal entry 5521" not in (org_dir / "inbox.org").read_text()
+
+
+class TestCaptureAssignId:
+    """`assign_id` gives the captured entry an org ID and returns it."""
+
+    def test_assign_id_returns_id_of_new_entry(self, api):
+        title = "capture-assign-id-test-8731"
+        response = api.post(
+            "/capture",
+            json={"template": "todo", "values": {"Title": title}, "assign_id": True},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "created"
+        new_id = data.get("id")
+        assert new_id
+
+        todos = api.get_all_todos().json()["todos"]
+        matches = [t for t in todos if t.get("id") == new_id]
+        assert [t["title"] for t in matches] == [title]
+
+    def test_without_assign_id_returns_no_id(self, api):
+        response = api.post(
+            "/capture",
+            json={"template": "todo", "values": {"Title": "capture-no-id-test-8731"}},
+        )
+        assert response.status_code == 200
+        assert "id" not in response.json()

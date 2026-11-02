@@ -376,7 +376,8 @@ Accepts query params:
 ;;; Mutation Endpoints
 
 (defservlet capture application/json (_path _query headers)
-  "Endpoint: Capture using a registered template with provided values."
+  "Endpoint: Capture using a registered template with provided values.
+With \"assign_id\": true, the new entry gets an org ID, returned as \"id\"."
   (condition-case err
       (let* ((content-header (cadr (assoc "Content" headers)))
              (json-data (org-agenda-api--parse-json-object content-header))
@@ -394,7 +395,8 @@ Accepts query params:
                 (let (alist)
                   (maphash (lambda (k v) (push (cons k v) alist)) values-hash)
                   alist)))
-             (result (org-agenda-api--capture-with-template template-key values)))
+             (assign-id (eq (gethash "assign_id" json-data) t))
+             (result (org-agenda-api--capture-with-template template-key values assign-id)))
         (insert (json-encode result)))
     (org-agenda-api-capture-client-error
      (org-agenda-api--log 'warn "Invalid /capture request: %s"
