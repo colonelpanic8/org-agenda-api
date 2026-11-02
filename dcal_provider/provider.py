@@ -90,6 +90,15 @@ def _completed_at(todo: dict[str, Any], done_states: set[str]) -> datetime | Non
     return max(datetime.fromisoformat(s) for s in stamps)
 
 
+_ETAG_FIELDS = ("todo", "title", "scheduled", "deadline", "priority", "tags")
+
+
+def _etag(todo: dict[str, Any]) -> str:
+    """Revision of the fields a calendar edit can overwrite."""
+    fields = {k: todo.get(k) for k in _ETAG_FIELDS}
+    return hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def _status(state: str, done_states: set[str]) -> str:
     if state in done_states:
         return "cancelled" if state.upper().startswith("CANCEL") else "completed"
@@ -147,6 +156,7 @@ class OrgProvider:
         task: dict[str, Any] = {
             "uid": org_id,
             "remoteId": org_id,
+            "etag": _etag(todo),
             "summary": todo.get("title") or "",
             "status": _status(state, done_states),
         }
@@ -285,10 +295,8 @@ class OrgProvider:
 
     def update_task(self, params: dict[str, Any]) -> dict[str, Any]:
         task = params["task"]
-        org_id = task.get("remoteId") or task.get("uid")
-        current = self._find_todo(org_id) if org_id else None
-        if current is None:
-            raise ProviderError(f"org entry {org_id!r} not found")
+        current = self._current(task)
+        org_id = current["id"]
 
         done_states = self._done_states()
         want = task.get("status") or "needs_action"
@@ -350,10 +358,25 @@ class OrgProvider:
         return state
 
     def delete_task(self, params: dict[str, Any]) -> None:
-        task = params["task"]
-        org_id = task.get("remoteId") or task.get("uid")
-        self.client.request("POST", "/delete", body={"id": org_id})
+        current = self._current(params["task"])
+        self.client.request("POST", "/delete", body={"id": current["id"]})
         return None
+
+    def _current(self, task: dict[str, Any]) -> dict[str, Any]:
+        """The org entry a write targets, refusing writes based on a stale copy.
+
+        dcal sends back the etag from the last sync, so an entry edited in org
+        since then is not overwritten; the next sync shows its real state.
+        """
+        org_id = task.get("remoteId") or task.get("uid")
+        current = self._find_todo(org_id) if org_id else None
+        if current is None:
+            raise ProviderError(f"org entry {org_id!r} not found")
+        if task.get("etag") and task["etag"] != _etag(current):
+            raise ProviderError(
+                "this task changed in org since the last sync; sync and try again"
+            )
+        return current
 
     def handlers(self):
         return {

@@ -45,6 +45,10 @@ class FakeClient:
             if self.capture_returns_id and body.get("assign_id"):
                 return {"status": "created", "id": "captured-id"}
             return {"status": "created"}
+        if path == "/update" and "new_title" in body:
+            for t in self.todos:
+                if t["id"] == body["id"]:
+                    t["title"] = body["new_title"]
         if path == "/update" and "properties" in body:
             for t in self.todos:
                 if (t["file"], t["pos"]) == (body["file"], body["pos"]):
@@ -124,7 +128,8 @@ def test_sync_maps_dated_todos_and_filters():
     )
     tasks = synced(p)
     assert set(tasks) == {"id-1", "timed", "recent-done"}
-    assert tasks["id-1"] | {} == {
+    assert len(tasks["id-1"].pop("etag")) == 16
+    assert tasks["id-1"] == {
         "uid": "id-1",
         "remoteId": "id-1",
         "summary": "Water plants",
@@ -353,3 +358,24 @@ def test_serve_reports_errors_per_request():
     assert replies[0]["error"]["code"] == -32601
     assert "not found" in replies[1]["error"]["message"]
     assert replies[2]["result"]["protocolVersion"] == 1
+
+
+def test_writes_refuse_entries_changed_since_sync():
+    entry = todo()
+    p = provider([entry])
+    task = synced(p)["id-1"]
+    entry["title"] = "Water plants (edited in org)"
+    with pytest.raises(ProviderError, match="changed in org"):
+        p.update_task({"task": {**task, "status": "completed"}})
+    with pytest.raises(ProviderError, match="changed in org"):
+        p.delete_task({"task": task})
+    assert p.client.writes() == []
+
+
+def test_write_result_carries_fresh_etag():
+    p = provider([todo()])
+    task = synced(p)["id-1"]
+    updated = p.update_task({"task": {**task, "summary": "Water ferns"}})["task"]
+    assert updated["etag"] != task["etag"]
+    p.update_task({"task": {**updated, "status": "completed"}})
+    assert [path for path, _ in p.client.writes()] == ["/update", "/complete"]
